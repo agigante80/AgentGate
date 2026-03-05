@@ -29,6 +29,26 @@ docker compose up -d
 
 The bot sends a 🟢 Ready message to your chat when it's up.
 
+### Using the pre-built image
+
+A Docker image is published automatically to GitHub Container Registry on every push to `main` and on version tags:
+
+```bash
+# latest
+docker pull ghcr.io/<your-github-username>/cli-telegram:latest
+
+# specific version
+docker pull ghcr.io/<your-github-username>/cli-telegram:v1.2.3
+```
+
+In your `docker-compose.yml`, replace the `build:` section with:
+
+```yaml
+services:
+  bot:
+    image: ghcr.io/<your-github-username>/cli-telegram:latest
+```
+
 ---
 
 ## Bot Commands
