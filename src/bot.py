@@ -14,12 +14,10 @@ from telegram.ext import (
 )
 
 from src.ai.adapter import AICLIBackend
-from src.config import Settings
+from src.config import Settings, VERSION
 from src import executor, history, repo
 
 logger = logging.getLogger(__name__)
-
-_THROTTLE = 1.0  # seconds between Telegram message edits during streaming
 
 
 # ── Pure helper functions (imported by tests) ───────────────────────────────
@@ -47,6 +45,7 @@ async def _stream_to_telegram(
     backend: AICLIBackend,
     prompt: str,
     max_chars: int,
+    throttle_secs: float = 1.0,
 ) -> str:
     """Stream AI response into a Telegram message, editing it as chunks arrive."""
     msg = await update.effective_message.reply_text("🤖 Thinking…")
@@ -56,7 +55,7 @@ async def _stream_to_telegram(
     async for chunk in backend.stream(prompt):
         accumulated += chunk
         now = time.monotonic()
-        if now - last_edit >= _THROTTLE:
+        if now - last_edit >= throttle_secs:
             display = accumulated[-max_chars:] if len(accumulated) > max_chars else accumulated
             try:
                 await msg.edit_text(display + " ▌")
@@ -147,7 +146,7 @@ class _BotHandlers:
     async def cmd_help(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
         p = self._p
         text = (
-            f"🤖 *TeleAgent — Command Reference*\n\n"
+            f"🤖 *TeleAgent v{VERSION} — Command Reference*\n\n"
             f"*Utility commands:*\n"
             f"/{p}run `<cmd>` — run a shell command in the repo\n"
             f"/{p}sync — git pull (fetch latest changes)\n"
@@ -226,7 +225,9 @@ class _BotHandlers:
 
             if self._settings.bot.stream_responses:
                 response = await _stream_to_telegram(
-                    update, self._backend, prompt, self._settings.bot.max_output_chars
+                    update, self._backend, prompt,
+                    self._settings.bot.max_output_chars,
+                    self._settings.bot.stream_throttle_secs,
                 )
             else:
                 msg = await update.effective_message.reply_text("🤖 Thinking…")

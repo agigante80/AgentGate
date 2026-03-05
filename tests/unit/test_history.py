@@ -83,3 +83,25 @@ class TestHistoryDB:
         rows = await history_module.get_history("chat1")
         assert rows[0][0] == "first"
         assert rows[1][0] == "second"
+
+
+class TestErrorPaths:
+    async def test_add_exchange_db_failure_is_silent(self, monkeypatch, caplog):
+        from pathlib import Path
+        monkeypatch.setattr(history_module, "DB_PATH", Path("/nonexistent/path/history.db"))
+        # Must not raise
+        await history_module.add_exchange("chat1", "msg", "resp")
+        assert "Failed to save history" in caplog.text
+
+    async def test_get_history_db_failure_returns_empty(self, monkeypatch):
+        from pathlib import Path
+        monkeypatch.setattr(history_module, "DB_PATH", Path("/nonexistent/path/history.db"))
+        result = await history_module.get_history("chat1")
+        assert result == []
+
+    async def test_clear_history_db_failure_is_silent(self, monkeypatch, caplog):
+        from pathlib import Path
+        monkeypatch.setattr(history_module, "DB_PATH", Path("/nonexistent/path/history.db"))
+        # Must not raise
+        await history_module.clear_history("chat1")
+        assert "Failed to clear history" in caplog.text

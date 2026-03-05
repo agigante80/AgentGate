@@ -26,6 +26,7 @@ class BotConfig(BaseSettings):
     max_output_chars: int = 3000
     history_enabled: bool = True  # Set HISTORY_ENABLED=false to disable chat storage
     stream_responses: bool = True  # Set STREAM_RESPONSES=false to wait for full response
+    stream_throttle_secs: float = 1.0  # Seconds between Telegram message edits during streaming
 
 
 class AIConfig(BaseSettings):
@@ -63,3 +64,12 @@ class Settings(BaseSettings):
             bot=BotConfig(),
             ai=AIConfig(),
         )
+
+
+# Module-level path constants — import these instead of hardcoding "/repo" or "/data"
+from pathlib import Path  # noqa: E402
+REPO_DIR = Path("/repo")
+DB_PATH = Path("/data/history.db")
+
+_VERSION_FILE = Path(__file__).parent.parent / "VERSION"
+VERSION = _VERSION_FILE.read_text().strip() if _VERSION_FILE.exists() else "unknown"

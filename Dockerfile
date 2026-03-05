@@ -34,14 +34,16 @@ RUN npm install -g @openai/codex
 # Python dependencies
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
 
-# App source
-COPY src/ src/
-
-# Non-root user
+# Non-root user — created before pip install so pip runs as non-root
 RUN useradd -m botuser && mkdir -p /repo /data && chown botuser:botuser /repo /app /data
 USER botuser
+ENV PATH="/home/botuser/.local/bin:$PATH"
+
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+# App source
+COPY --chown=botuser:botuser src/ src/
 
 # Repo clone destination + persistent data
 VOLUME /repo

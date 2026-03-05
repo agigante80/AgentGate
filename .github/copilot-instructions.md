@@ -14,6 +14,9 @@ pytest tests/unit/test_bot.py -v
 
 # Run a single test
 pytest tests/unit/test_bot.py::TestPrefix::test_default_prefix -v
+
+# Run with coverage
+pytest tests/ --cov=src --cov-report=term-missing
 ```
 
 ## Architecture
@@ -35,7 +38,7 @@ TeleAgent is an async Python Telegram bot that acts as a gateway to pluggable AI
 
 **Bot handlers** (`src/bot.py`): all Telegram handlers live in `_BotHandlers`. Every handler method is guarded by `@_requires_auth` (checks `TG_CHAT_ID` and optional `ALLOWED_USERS`). Utility commands use the configurable prefix (default `ta`); everything else is forwarded to the AI.
 
-**Shell execution** (`src/executor.py`): `run_shell()` always runs in `/repo`. Destructive commands (push, merge, rm, force, etc.) require inline Telegram confirmation before executing. Long output is tail-truncated; full responses beyond `MAX_OUTPUT_CHARS` can be summarized via the AI backend.
+**CI/CD** (`.github/workflows/ci-cd.yml`): single unified pipeline. Jobs: `version` → `lint` + `test` (parallel) → `docker-publish` + `security-scan` → `release` → `summary`. On `develop`: publishes `:develop` Docker tag. On `main`: version-bump check, publishes `:latest`, creates a GitHub Release. Multi-platform builds (amd64 + arm64). `workflow_dispatch` supports `skip_tests` and `skip_docker_publish` inputs.
 
 **History** (`src/history.py`): async SQLite at `/data/history.db`. Stores up to 10 exchanges per `chat_id`. Only used by stateless backends; stateful backends track context themselves.
 

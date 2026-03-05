@@ -15,3 +15,6 @@ class AICLIBackend(ABC):
 
     def clear_history(self) -> None:
         """Clear conversation history (override in stateful backends)."""
+
+    def close(self) -> None:
+        """Release resources (e.g. PTY process). Override in backends that hold external state."""

@@ -2,6 +2,7 @@ import asyncio
 import logging
 
 from src.ai.adapter import AICLIBackend
+from src.config import REPO_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -24,14 +25,13 @@ def truncate_output(text: str, max_chars: int) -> str:
         kept.append(line)
         total += len(line) + 1
     kept.reverse()
-    skipped = len(lines) - len(kept)
     return f"⚠️ Output truncated — showing last {len(kept)} of {len(lines)} lines:\n" + "\n".join(kept)
 
 
 async def run_shell(cmd: str, max_chars: int) -> str:
     proc = await asyncio.create_subprocess_shell(
         cmd,
-        cwd="/repo",
+        cwd=str(REPO_DIR),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
     )

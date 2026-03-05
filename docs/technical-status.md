@@ -1,7 +1,6 @@
 # TeleAgent — Technical Status & Backlog
 
 > Last updated: 2026-03-05
-> Coverage: **46%** (98 tests passing)
 
 ---
 
@@ -91,7 +90,7 @@ src/
 
 | File | Trigger | Jobs |
 |---|---|---|
-| `.github/workflows/ci.yml` | push/PR to any branch | lint (ruff) + test (pytest) + docker build |
+| `.github/workflows/ci.yml` | push/PR to `main` | lint (ruff) + test (pytest) + docker build |
 | `.github/workflows/main-gate.yml` | push to `main` | version-check + tests + docker-build (3 independent jobs) |
 | `.github/workflows/docker-publish.yml` | `main-gate` succeeds OR tag `v*.*.*` | build & push to `ghcr.io` |
 
@@ -109,24 +108,6 @@ LATEST_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | h
 ---
 
 ## 4. Test Coverage
-
-**Overall: 46% (98 tests passing)**
-
-| File | Coverage | Test type | Notes |
-|---|---|---|---|
-| `src/runtime.py` | 100% | unit | fully mocked subprocess |
-| `src/ai/adapter.py` | 100% | contract | ABC interface |
-| `src/ai/factory.py` | 100% | integration | checks backend type instantiation |
-| `src/config.py` | 97% | unit | pydantic validation; 1 line missed in `Settings.load()` |
-| `src/ai/copilot.py` | 95% | contract | 1 line missed (model override branch) |
-| `src/executor.py` | 84% | unit | `run_shell()` subprocess not mocked |
-| `src/history.py` | 84% | unit + integration | error-handling paths (new try/except) not exercised |
-| `src/repo.py` | 66% | unit | `pull()` and `status()` not covered |
-| `src/ai/codex.py` | 38% | contract | subprocess execution paths not mocked |
-| `src/ai/direct.py` | 35% | contract | OpenAI/Anthropic client calls not mocked |
-| `src/bot.py` | 28% | unit | only `_prefix` / `_is_allowed` tested; all handlers untested |
-| `src/ai/session.py` | 25% | contract | PTY/pexpect untestable without live Copilot process |
-| `src/main.py` | 0% | — | startup entrypoint, never exercised |
 
 ---
 
@@ -285,24 +266,9 @@ async def test_startup_calls_all_phases(monkeypatch):
 
 ---
 
-### 5.2 SQL todos (from session tracking)
+### 5.2 Coverage target: add `pytest-cov` to CI
 
-These were planned tasks whose tracking in the session database was not fully completed:
-
-| Task | Status | Notes |
-|---|---|---|
-| `pty-session` (ai/session.py) | `in_progress` | Implemented and working; session DB not updated to `done` |
-| `bot-phase2` | `pending` | Implemented in bot.py (history pass-through, `/taclear`); session DB not updated |
-| `history-inject` | `pending` | Implemented in `forward_to_ai` — stateless backends get `build_context()`; implemented |
-| `infra-phase2` | `pending` | `/data` volume in Dockerfile + docker-compose + `init_db()` in main.py — all done |
-
-All four "pending/in_progress" items are **actually implemented**. The session SQL was not updated as work was completed.
-
----
-
-### 5.3 Coverage target: add `pytest-cov` to CI
-
-Currently `pytest-cov` is installed locally but not in `requirements-dev.txt` and not reported in CI.
+Currently `pytest-cov` is not listed in `requirements-dev.txt` and not run in CI.
 
 **Change needed in `requirements-dev.txt`:**
 ```
@@ -342,7 +308,7 @@ if child.match_index != 0:
 
 `REPO_DIR = Path("/repo")` is defined independently in `session.py`, `codex.py`, `repo.py`, and `executor.py` (`cwd="/repo"`).
 
-**Problem:** changing the repo mount point requires edits in 4 files.
+**Problem:** changing the repo mount point requires edits in 3 files (`session.py`, `codex.py`, `repo.py`); `executor.py` uses the inline string `cwd="/repo"` directly.
 
 **Proposed fix:** add `REPO_DIR` and `DB_PATH` to `config.py` as module-level constants (not pydantic fields, to avoid breaking test monkeypatching):
 
@@ -393,7 +359,7 @@ And in the AI backend, expose a `close()` method through the `AICLIBackend` ABC.
 ### Running locally
 
 ```bash
-cd /home/alien/docker/taVPNSentinel
+cd ~/docker/my-project
 docker compose up -d
 docker compose logs -f
 ```
@@ -402,7 +368,7 @@ docker compose logs -f
 
 Set in `.env`:
 ```env
-REPO_HOST_PATH=/home/alien/repos/VPNSentinel
+REPO_HOST_PATH=/path/to/local/repo
 ```
 
 The Docker volume mount becomes a bind mount to that host path.
@@ -410,11 +376,11 @@ The Docker volume mount becomes a bind mount to that host path.
 ### Adding a second project
 
 ```bash
-mkdir /home/alien/docker/taMyAPI
-cp /home/alien/docker/taVPNSentinel/.env /home/alien/docker/taMyAPI/.env
-cp /home/alien/docker/taVPNSentinel/docker-compose.yml /home/alien/docker/taMyAPI/docker-compose.yml
+mkdir ~/docker/another-project
+cp ~/docker/my-project/.env ~/docker/another-project/.env
+cp ~/docker/my-project/docker-compose.yml ~/docker/another-project/docker-compose.yml
 # Edit .env: new TG_BOT_TOKEN, new GITHUB_REPO
-cd /home/alien/docker/taMyAPI && docker compose up -d
+cd ~/docker/another-project && docker compose up -d
 ```
 
 Each stack is fully independent. Use separate Telegram bots (one per project via BotFather).
@@ -431,6 +397,6 @@ Each stack is fully independent. Use separate Telegram bots (one per project via
 | `pexpect` | `>=4.9` | PTY interaction with Copilot CLI |
 | `gitpython` | `>=3.1` | Repo clone/pull |
 | `openai` | `>=1.0` | Direct API + streaming |
-| `anthropic` | `>=0.25` | Anthropic direct API |
+| `anthropic` | `>=0.28` | Anthropic direct API |
 | Node.js | LTS (NodeSource) | Required by Copilot CLI (`@github/copilot`) |
 | `@github/copilot` (npm) | latest | Copilot CLI — **not** `@githubnext/github-copilot-cli` (deprecated) |

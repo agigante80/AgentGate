@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import signal
 import sys
 import time
 
@@ -34,6 +35,17 @@ async def startup(settings: Settings) -> None:
     logger.info("Initializing AI backend: %s", settings.ai.ai_cli)
     backend = create_backend(settings.ai)
 
+    # Graceful shutdown on SIGTERM
+    loop = asyncio.get_running_loop()
+    stop_event = asyncio.Event()
+
+    def _handle_sigterm(*_):
+        logger.info("Received SIGTERM, shutting down…")
+        backend.close()
+        loop.call_soon_threadsafe(stop_event.set)
+
+    signal.signal(signal.SIGTERM, _handle_sigterm)
+
     from src.bot import build_app, _prefix
     app = build_app(settings, backend, start_time)
 
@@ -54,7 +66,7 @@ async def startup(settings: Settings) -> None:
         await app.start()
         await app.updater.start_polling(drop_pending_updates=True)
         logger.info("Bot is running. Press Ctrl+C to stop.")
-        await asyncio.Event().wait()
+        await stop_event.wait()
 
 
 def main() -> None:
@@ -66,7 +78,7 @@ def main() -> None:
 
     try:
         asyncio.run(startup(settings))
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, SystemExit):
         logger.info("Shutting down.")
 
 
