@@ -1,8 +1,12 @@
-import aiosqlite
+import logging
 from pathlib import Path
+
+import aiosqlite
 
 DB_PATH = Path("/data/history.db")
 HISTORY_LIMIT = 10  # exchanges to inject as context
+
+logger = logging.getLogger(__name__)
 
 
 async def init_db() -> None:
@@ -21,28 +25,38 @@ async def init_db() -> None:
 
 
 async def add_exchange(chat_id: str, user_msg: str, ai_msg: str) -> None:
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "INSERT INTO history (chat_id, user_msg, ai_msg) VALUES (?, ?, ?)",
-            (chat_id, user_msg, ai_msg),
-        )
-        await db.commit()
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "INSERT INTO history (chat_id, user_msg, ai_msg) VALUES (?, ?, ?)",
+                (chat_id, user_msg, ai_msg),
+            )
+            await db.commit()
+    except Exception:
+        logger.exception("Failed to save history for chat %s", chat_id)
 
 
 async def get_history(chat_id: str) -> list[tuple[str, str]]:
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT user_msg, ai_msg FROM history WHERE chat_id=? ORDER BY id DESC LIMIT ?",
-            (chat_id, HISTORY_LIMIT),
-        ) as cur:
-            rows = await cur.fetchall()
-    return list(reversed(rows))  # oldest first
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(
+                "SELECT user_msg, ai_msg FROM history WHERE chat_id=? ORDER BY id DESC LIMIT ?",
+                (chat_id, HISTORY_LIMIT),
+            ) as cur:
+                rows = await cur.fetchall()
+        return list(reversed(rows))  # oldest first
+    except Exception:
+        logger.exception("Failed to load history for chat %s", chat_id)
+        return []
 
 
 async def clear_history(chat_id: str) -> None:
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute("DELETE FROM history WHERE chat_id=?", (chat_id,))
-        await db.commit()
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("DELETE FROM history WHERE chat_id=?", (chat_id,))
+            await db.commit()
+    except Exception:
+        logger.exception("Failed to clear history for chat %s", chat_id)
 
 
 def build_context(history: list[tuple[str, str]], current: str) -> str:

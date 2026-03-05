@@ -7,6 +7,7 @@ import logging
 import queue as _queue
 import re
 import threading
+import time
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
@@ -48,6 +49,8 @@ class CopilotSession:
             self._child = self._spawn()
         return self._child
 
+    # ── Blocking send (runs in thread via asyncio.to_thread) ─────────────
+
     async def send(self, prompt: str) -> str:
         return await asyncio.to_thread(self._sync_send, prompt)
 
@@ -69,14 +72,12 @@ class CopilotSession:
             logger.exception("PTY session error")
             return f"⚠️ Session error: {exc}"
 
+    # ── Streaming send (PTY → thread-safe queue → async generator) ───────
+
     async def stream(self, prompt: str) -> AsyncGenerator[str, None]:
         """Yield PTY output chunks as they arrive, bridged via a thread-safe queue."""
         q: _queue.SimpleQueue[str | None] = _queue.SimpleQueue()
-
-        def worker() -> None:
-            self._sync_stream_to_queue(prompt, q)
-
-        t = threading.Thread(target=worker, daemon=True)
+        t = threading.Thread(target=self._sync_stream_to_queue, args=(prompt, q), daemon=True)
         t.start()
 
         while True:
@@ -96,8 +97,6 @@ class CopilotSession:
             child = self._ensure()
             child.sendline(prompt)
             acc = ""
-            deadline = asyncio.get_event_loop().time() if False else None  # not used
-            import time
             start = time.monotonic()
             while True:
                 if time.monotonic() - start > TIMEOUT:
@@ -105,8 +104,7 @@ class CopilotSession:
                     q.put(None)
                     return
                 try:
-                    chunk = child.read_nonblocking(size=256, timeout=0.2)
-                    chunk = _strip_ansi(chunk)
+                    chunk = _strip_ansi(child.read_nonblocking(size=256, timeout=0.2))
                     acc += chunk
                     if PROMPT_RE.search(acc):
                         clean = PROMPT_RE.sub("", acc).strip()

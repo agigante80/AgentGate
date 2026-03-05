@@ -14,21 +14,24 @@ class CodexBackend(AICLIBackend):
         self._api_key = api_key
         self._model = model
 
-    def _make_proc_args(self, prompt: str) -> tuple[list[str], dict]:
+    def _make_cmd(self, prompt: str) -> tuple[list[str], dict]:
         import os
         env = {**os.environ, "OPENAI_API_KEY": self._api_key}
         cmd = ["codex", prompt, "--approval-mode", "auto", "--model", self._model]
         return cmd, env
 
-    async def send(self, prompt: str) -> str:
-        cmd, env = self._make_proc_args(prompt)
-        proc = await asyncio.create_subprocess_exec(
+    async def _create_subprocess(self, prompt: str) -> asyncio.subprocess.Process:
+        cmd, env = self._make_cmd(prompt)
+        return await asyncio.create_subprocess_exec(
             *cmd,
             cwd=str(REPO_DIR),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
         )
+
+    async def send(self, prompt: str) -> str:
+        proc = await self._create_subprocess(prompt)
         stdout, stderr = await proc.communicate()
         if proc.returncode != 0:
             err = stderr.decode().strip() or stdout.decode().strip()
@@ -37,14 +40,7 @@ class CodexBackend(AICLIBackend):
         return stdout.decode().strip()
 
     async def stream(self, prompt: str) -> AsyncGenerator[str, None]:
-        cmd, env = self._make_proc_args(prompt)
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=str(REPO_DIR),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=env,
-        )
+        proc = await self._create_subprocess(prompt)
         assert proc.stdout
         async for line in proc.stdout:
             yield line.decode()
@@ -53,4 +49,5 @@ class CodexBackend(AICLIBackend):
             assert proc.stderr
             err = (await proc.stderr.read()).decode().strip()
             if err:
+                logger.error("codex CLI stream error: %s", err)
                 yield f"\n⚠️ Codex error:\n{err}"

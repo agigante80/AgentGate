@@ -24,6 +24,8 @@ async def clone(github_token: str, github_repo: str, branch: str) -> None:
 
 
 async def pull() -> str:
+    if not (REPO_DIR / ".git").exists():
+        return "⚠️ No repository cloned yet — nothing to pull."
     repo = await asyncio.to_thread(git.Repo, REPO_DIR)
     result = await asyncio.to_thread(repo.remotes.origin.pull)
     return "\n".join(str(r) for r in result)

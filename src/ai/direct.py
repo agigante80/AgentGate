@@ -14,46 +14,70 @@ class DirectAPIBackend(AICLIBackend):
         self._api_key = api_key
         self._model = model
         self._base_url = base_url
-        # Native multi-turn history for chat APIs
         self._messages: list[dict] = []
+        # Cached clients — created lazily, reused across calls
+        self._openai_client = None
+        self._anthropic_client = None
+
+    # ── Public API ───────────────────────────────────────────────────────
 
     async def send(self, prompt: str) -> str:
         self._messages.append({"role": "user", "content": prompt})
-        if self._provider in ("openai", "openai-compat", "ollama"):
-            reply = await self._openai_send()
-        elif self._provider == "anthropic":
-            reply = await self._anthropic_send()
-        else:
-            raise ValueError(f"Unknown AI_PROVIDER: {self._provider!r}")
+        reply = await self._do_send()
         self._messages.append({"role": "assistant", "content": reply})
         return reply
 
     async def stream(self, prompt: str) -> AsyncGenerator[str, None]:
         self._messages.append({"role": "user", "content": prompt})
-        if self._provider in ("openai", "openai-compat", "ollama"):
-            full = ""
-            async for chunk in self._openai_stream():
-                full += chunk
-                yield chunk
-            self._messages.append({"role": "assistant", "content": full})
-        elif self._provider == "anthropic":
-            full = ""
-            async for chunk in self._anthropic_stream():
-                full += chunk
-                yield chunk
-            self._messages.append({"role": "assistant", "content": full})
-        else:
-            raise ValueError(f"Unknown AI_PROVIDER: {self._provider!r}")
+        full = ""
+        async for chunk in self._do_stream():
+            full += chunk
+            yield chunk
+        self._messages.append({"role": "assistant", "content": full})
 
     def clear_history(self) -> None:
         self._messages.clear()
 
+    # ── Provider dispatch (avoids duplicating routing in send + stream) ──
+
+    async def _do_send(self) -> str:
+        if self._provider in ("openai", "openai-compat", "ollama"):
+            return await self._openai_send()
+        if self._provider == "anthropic":
+            return await self._anthropic_send()
+        raise ValueError(f"Unknown AI_PROVIDER: {self._provider!r}")
+
+    async def _do_stream(self) -> AsyncGenerator[str, None]:
+        if self._provider in ("openai", "openai-compat", "ollama"):
+            async for chunk in self._openai_stream():
+                yield chunk
+        elif self._provider == "anthropic":
+            async for chunk in self._anthropic_stream():
+                yield chunk
+        else:
+            raise ValueError(f"Unknown AI_PROVIDER: {self._provider!r}")
+
+    # ── Client factories (lazy, cached) ──────────────────────────────────
+
+    def _get_openai_client(self):
+        if self._openai_client is None:
+            from openai import AsyncOpenAI
+            kwargs: dict = {"api_key": self._api_key or "ollama"}
+            if self._base_url:
+                kwargs["base_url"] = self._base_url
+            self._openai_client = AsyncOpenAI(**kwargs)
+        return self._openai_client
+
+    def _get_anthropic_client(self):
+        if self._anthropic_client is None:
+            from anthropic import AsyncAnthropic
+            self._anthropic_client = AsyncAnthropic(api_key=self._api_key)
+        return self._anthropic_client
+
+    # ── OpenAI / Ollama ──────────────────────────────────────────────────
+
     async def _openai_send(self) -> str:
-        from openai import AsyncOpenAI
-        kwargs: dict = {"api_key": self._api_key or "ollama"}
-        if self._base_url:
-            kwargs["base_url"] = self._base_url
-        client = AsyncOpenAI(**kwargs)
+        client = self._get_openai_client()
         response = await client.chat.completions.create(
             model=self._model,
             messages=self._messages,
@@ -61,11 +85,7 @@ class DirectAPIBackend(AICLIBackend):
         return response.choices[0].message.content or ""
 
     async def _openai_stream(self) -> AsyncGenerator[str, None]:
-        from openai import AsyncOpenAI
-        kwargs: dict = {"api_key": self._api_key or "ollama"}
-        if self._base_url:
-            kwargs["base_url"] = self._base_url
-        client = AsyncOpenAI(**kwargs)
+        client = self._get_openai_client()
         async with client.chat.completions.stream(
             model=self._model,
             messages=self._messages,
@@ -75,9 +95,10 @@ class DirectAPIBackend(AICLIBackend):
                 if chunk:
                     yield chunk
 
+    # ── Anthropic ────────────────────────────────────────────────────────
+
     async def _anthropic_send(self) -> str:
-        from anthropic import AsyncAnthropic
-        client = AsyncAnthropic(api_key=self._api_key)
+        client = self._get_anthropic_client()
         message = await client.messages.create(
             model=self._model,
             max_tokens=4096,
@@ -86,8 +107,7 @@ class DirectAPIBackend(AICLIBackend):
         return message.content[0].text if message.content else ""
 
     async def _anthropic_stream(self) -> AsyncGenerator[str, None]:
-        from anthropic import AsyncAnthropic
-        client = AsyncAnthropic(api_key=self._api_key)
+        client = self._get_anthropic_client()
         async with client.messages.stream(
             model=self._model,
             max_tokens=4096,

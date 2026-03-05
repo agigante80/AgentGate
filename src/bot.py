@@ -1,28 +1,28 @@
+import functools
 import logging
 import time
+from collections.abc import Callable
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
-    CommandHandler,
-    MessageHandler,
     CallbackQueryHandler,
+    CommandHandler,
     ContextTypes,
+    MessageHandler,
     filters,
 )
 
 from src.ai.adapter import AICLIBackend
 from src.config import Settings
-from src import executor, repo, history
+from src import executor, history, repo
 
 logger = logging.getLogger(__name__)
 
-# Keyed by (chat_id, message_id) → shell command waiting for confirmation
-_pending_cmds: dict[tuple, str] = {}
+_THROTTLE = 1.0  # seconds between Telegram message edits during streaming
 
-# Active AI requests: maps a description string → start timestamp
-_active_ai: dict[str, float] = {}
 
+# ── Pure helper functions (imported by tests) ───────────────────────────────
 
 def _is_allowed(update: Update, settings: Settings) -> bool:
     chat_id = str(update.effective_chat.id)
@@ -35,7 +35,6 @@ def _is_allowed(update: Update, settings: Settings) -> bool:
 
 
 def _prefix(settings: Settings) -> str:
-    # No separator: just lowercase prefix (e.g. "ta" → /tarun /tasync)
     return settings.bot.bot_cmd_prefix.lower().replace("-", "").replace("_", "")
 
 
@@ -45,52 +44,66 @@ async def _reply(update: Update, text: str) -> None:
 
 async def _stream_to_telegram(
     update: Update,
-    backend: "AICLIBackend",
+    backend: AICLIBackend,
     prompt: str,
     max_chars: int,
 ) -> str:
-    """Stream AI response chunks into a single Telegram message, editing it as chunks arrive.
-    Throttled to ~1 edit/second to respect Telegram rate limits.
-    Returns the final accumulated text.
-    """
+    """Stream AI response into a Telegram message, editing it as chunks arrive."""
     msg = await update.effective_message.reply_text("🤖 Thinking…")
     accumulated = ""
     last_edit = time.monotonic()
-    THROTTLE = 1.0  # seconds between edits
 
     async for chunk in backend.stream(prompt):
         accumulated += chunk
         now = time.monotonic()
-        if now - last_edit >= THROTTLE:
+        if now - last_edit >= _THROTTLE:
             display = accumulated[-max_chars:] if len(accumulated) > max_chars else accumulated
             try:
                 await msg.edit_text(display + " ▌")
             except Exception:
-                pass  # ignore flaky edits
+                logger.debug("Telegram edit skipped (rate-limited or unchanged)")
             last_edit = now
 
-    # Final edit — full text without cursor
-    if len(accumulated) > max_chars:
-        accumulated = accumulated[-max_chars:]
+    final = accumulated[-max_chars:] if len(accumulated) > max_chars else accumulated
     try:
-        await msg.edit_text(accumulated or "_(empty response)_")
+        await msg.edit_text(final or "_(empty response)_")
     except Exception:
-        pass
-    return accumulated
+        logger.debug("Telegram final edit skipped")
+    return final
 
 
-def build_app(settings: Settings, backend: AICLIBackend, start_time: float) -> Application:
-    app = Application.builder().token(settings.telegram.bot_token).build()
+# ── Auth decorator ───────────────────────────────────────────────────────────
 
-    p = _prefix(settings)
-    repo_name = settings.github.github_repo.split("/")[-1]
-
-    async def cmd_run(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-        if not _is_allowed(update, settings):
+def _requires_auth(method: Callable) -> Callable:
+    """Skip handler silently if the sender is not in the allowlist."""
+    @functools.wraps(method)
+    async def wrapper(self: "_BotHandlers", update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if not _is_allowed(update, self._settings):
             return
+        await method(self, update, ctx)
+    return wrapper
+
+
+# ── Handler class ────────────────────────────────────────────────────────────
+
+class _BotHandlers:
+    def __init__(self, settings: Settings, backend: AICLIBackend, start_time: float) -> None:
+        self._settings = settings
+        self._backend = backend
+        self._start_time = start_time
+        self._p = _prefix(settings)
+        # (chat_id, message_id) → shell command waiting for confirmation
+        self._pending_cmds: dict[tuple, str] = {}
+        # prompt[:60] → start timestamp for active AI requests
+        self._active_ai: dict[str, float] = {}
+
+    # ── Utility commands ──────────────────────────────────────────────────
+
+    @_requires_auth
+    async def cmd_run(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         cmd = " ".join(ctx.args) if ctx.args else ""
         if not cmd:
-            await _reply(update, f"Usage: /{p}run <shell command>")
+            await _reply(update, f"Usage: /{self._p}run <shell command>")
             return
         if executor.is_destructive(cmd):
             kb = InlineKeyboardMarkup([[
@@ -102,40 +115,37 @@ def build_app(settings: Settings, backend: AICLIBackend, start_time: float) -> A
                 reply_markup=kb,
                 parse_mode="Markdown",
             )
-            _pending_cmds[(update.effective_chat.id, msg.message_id)] = cmd
+            self._pending_cmds[(update.effective_chat.id, msg.message_id)] = cmd
         else:
             await update.effective_message.reply_text("⏳ Running…")
-            result = await executor.run_shell(cmd, settings.bot.max_output_chars)
+            result = await executor.run_shell(cmd, self._settings.bot.max_output_chars)
             await _reply(update, f"```\n{result}\n```")
 
-    async def cmd_sync(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
-        if not _is_allowed(update, settings):
-            return
+    @_requires_auth
+    async def cmd_sync(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
         await update.effective_message.reply_text("⏳ Pulling latest changes…")
         result = await repo.pull()
         await _reply(update, f"✅ Synced\n{result}")
 
-    async def cmd_git(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
-        if not _is_allowed(update, settings):
-            return
+    @_requires_auth
+    async def cmd_git(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
         result = await repo.status()
         await _reply(update, f"```\n{result}\n```")
 
-    async def cmd_status(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
-        if not _is_allowed(update, settings):
-            return
-        if _active_ai:
+    @_requires_auth
+    async def cmd_status(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        if self._active_ai:
             lines = ["🔄 AI is currently processing:\n"]
-            for prompt, ts in _active_ai.items():
+            for prompt, ts in self._active_ai.items():
                 elapsed = int(time.time() - ts)
                 lines.append(f"  • {prompt[:60]}… ({elapsed}s ago)")
             await _reply(update, "\n".join(lines))
         else:
             await _reply(update, "✅ AI is idle — ready for your next message.")
 
-    async def cmd_help(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
-        if not _is_allowed(update, settings):
-            return
+    @_requires_auth
+    async def cmd_help(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        p = self._p
         text = (
             f"🤖 *TeleAgent — Command Reference*\n\n"
             f"*Utility commands:*\n"
@@ -153,94 +163,105 @@ def build_app(settings: Settings, backend: AICLIBackend, start_time: float) -> A
         )
         await update.effective_message.reply_text(text, parse_mode="Markdown")
 
-    async def cmd_info(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
-        if not _is_allowed(update, settings):
-            return
-        uptime_s = int(time.time() - start_time)
+    @_requires_auth
+    async def cmd_info(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        uptime_s = int(time.time() - self._start_time)
         h, remainder = divmod(uptime_s, 3600)
         m, s = divmod(remainder, 60)
-        ai_label = settings.ai.ai_cli
-        if settings.ai.ai_cli == "copilot" and settings.ai.copilot_model:
-            ai_label += f" ({settings.ai.copilot_model})"
-        elif settings.ai.ai_cli == "codex":
-            ai_label += f" ({settings.ai.codex_model})"
-        elif settings.ai.ai_cli == "api" and settings.ai.ai_model:
-            ai_label += f" / {settings.ai.ai_provider} ({settings.ai.ai_model})"
+        ai_label = self._settings.ai.ai_cli
+        if self._settings.ai.ai_cli == "copilot" and self._settings.ai.copilot_model:
+            ai_label += f" ({self._settings.ai.copilot_model})"
+        elif self._settings.ai.ai_cli == "codex":
+            ai_label += f" ({self._settings.ai.codex_model})"
+        elif self._settings.ai.ai_cli == "api" and self._settings.ai.ai_model:
+            ai_label += f" / {self._settings.ai.ai_provider} ({self._settings.ai.ai_model})"
         text = (
             f"ℹ️ *TeleAgent Info*\n\n"
-            f"📁 Repo: `{settings.github.github_repo}`\n"
-            f"🌿 Branch: `{settings.github.branch}`\n"
+            f"📁 Repo: `{self._settings.github.github_repo}`\n"
+            f"🌿 Branch: `{self._settings.github.branch}`\n"
             f"🤖 AI backend: `{ai_label}`\n"
-            f"⌨️ Prefix: `/{p}`\n"
-            f"📏 Max output: `{settings.bot.max_output_chars}` chars\n"
+            f"⌨️ Prefix: `/{self._p}`\n"
+            f"📏 Max output: `{self._settings.bot.max_output_chars}` chars\n"
             f"⏱ Uptime: `{h}h {m}m {s}s`\n"
-            f"🔄 Active AI tasks: `{len(_active_ai)}`"
+            f"🔄 Active AI tasks: `{len(self._active_ai)}`"
         )
         await update.effective_message.reply_text(text, parse_mode="Markdown")
 
-    async def callback_handler(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    @_requires_auth
+    async def cmd_clear(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        chat_id = str(update.effective_chat.id)
+        if self._settings.bot.history_enabled:
+            await history.clear_history(chat_id)
+        self._backend.clear_history()
+        await _reply(update, "🗑 Conversation history cleared.")
+
+    # ── Callback & AI forwarding ──────────────────────────────────────────
+
+    async def callback_handler(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
         query = update.callback_query
         await query.answer()
         key = (update.effective_chat.id, query.message.message_id)
-        cmd = _pending_cmds.pop(key, None)
+        cmd = self._pending_cmds.pop(key, None)
         if query.data == "cancel_run" or cmd is None:
             await query.edit_message_text("❌ Cancelled.")
             return
         await query.edit_message_text(f"⏳ Running:\n`{cmd}`", parse_mode="Markdown")
-        result = await executor.run_shell(cmd, settings.bot.max_output_chars)
+        result = await executor.run_shell(cmd, self._settings.bot.max_output_chars)
         await query.message.reply_text(f"```\n{result}\n```", parse_mode="Markdown")
 
-    async def forward_to_ai(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
-        if not _is_allowed(update, settings):
-            return
+    @_requires_auth
+    async def forward_to_ai(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
         text = update.effective_message.text or ""
         if not text:
             return
         chat_id = str(update.effective_chat.id)
         key = text[:60]
-        _active_ai[key] = time.time()
+        self._active_ai[key] = time.time()
         try:
-            if backend.is_stateful:
+            if self._backend.is_stateful:
                 prompt = text
             else:
-                hist = await history.get_history(chat_id) if settings.bot.history_enabled else []
+                hist = await history.get_history(chat_id) if self._settings.bot.history_enabled else []
                 prompt = history.build_context(hist, text)
 
-            if settings.bot.stream_responses:
-                response = await _stream_to_telegram(update, backend, prompt, settings.bot.max_output_chars)
+            if self._settings.bot.stream_responses:
+                response = await _stream_to_telegram(
+                    update, self._backend, prompt, self._settings.bot.max_output_chars
+                )
             else:
                 msg = await update.effective_message.reply_text("🤖 Thinking…")
-                response = await backend.send(prompt)
-                response = await executor.summarize_if_long(response, settings.bot.max_output_chars, backend)
+                response = await self._backend.send(prompt)
+                response = await executor.summarize_if_long(
+                    response, self._settings.bot.max_output_chars, self._backend
+                )
                 await msg.edit_text(response or "_(empty response)_")
 
-            if settings.bot.history_enabled:
+            if self._settings.bot.history_enabled:
                 await history.add_exchange(chat_id, text, response)
         except Exception as exc:
             logger.exception("AI backend error")
             await _reply(update, f"⚠️ Error: {exc}")
         finally:
-            _active_ai.pop(key, None)
+            self._active_ai.pop(key, None)
 
-    async def cmd_clear(update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
-        if not _is_allowed(update, settings):
-            return
-        chat_id = str(update.effective_chat.id)
-        if settings.bot.history_enabled:
-            await history.clear_history(chat_id)
-        backend.clear_history()
-        await _reply(update, "🗑 Conversation history cleared.")
 
-    app.add_handler(CommandHandler(f"{p}run", cmd_run))
-    app.add_handler(CommandHandler(f"{p}sync", cmd_sync))
-    app.add_handler(CommandHandler(f"{p}git", cmd_git))
-    app.add_handler(CommandHandler(f"{p}status", cmd_status))
-    app.add_handler(CommandHandler(f"{p}clear", cmd_clear))
-    app.add_handler(CommandHandler(f"{p}help", cmd_help))
-    app.add_handler(CommandHandler(f"{p}info", cmd_info))
-    app.add_handler(CallbackQueryHandler(callback_handler))
-    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, forward_to_ai))
+# ── App factory ──────────────────────────────────────────────────────────────
+
+def build_app(settings: Settings, backend: AICLIBackend, start_time: float) -> Application:
+    app = Application.builder().token(settings.telegram.bot_token).build()
+    h = _BotHandlers(settings, backend, start_time)
+    p = _prefix(settings)
+
+    app.add_handler(CommandHandler(f"{p}run", h.cmd_run))
+    app.add_handler(CommandHandler(f"{p}sync", h.cmd_sync))
+    app.add_handler(CommandHandler(f"{p}git", h.cmd_git))
+    app.add_handler(CommandHandler(f"{p}status", h.cmd_status))
+    app.add_handler(CommandHandler(f"{p}clear", h.cmd_clear))
+    app.add_handler(CommandHandler(f"{p}help", h.cmd_help))
+    app.add_handler(CommandHandler(f"{p}info", h.cmd_info))
+    app.add_handler(CallbackQueryHandler(h.callback_handler))
+    app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, h.forward_to_ai))
     # Forward all other /commands to AI as plain text
-    app.add_handler(MessageHandler(filters.COMMAND, forward_to_ai))
+    app.add_handler(MessageHandler(filters.COMMAND, h.forward_to_ai))
 
     return app
