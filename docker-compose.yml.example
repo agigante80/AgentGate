@@ -1,0 +1,17 @@
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      # If REPO_HOST_PATH is set in .env, bind-mount that host directory.
+      # Otherwise a named Docker volume is used (repo persists but is container-internal).
+      # Example: REPO_HOST_PATH=/home/me/VPNSentinel
+      - ${REPO_HOST_PATH:-repo_data}:/repo
+      - data_volume:/data
+      # Optional: mount a custom Copilot skills directory
+      # - ./skills:/skills:ro
+
+volumes:
+  repo_data:
+  data_volume:
