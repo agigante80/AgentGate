@@ -41,3 +41,46 @@ class TestCloneUrlConstruction:
             await repo_module.clone("tok", repo_input, "main")
             url = mock_thread.call_args[0][1]
             assert expected_path in url
+
+
+class TestPull:
+    async def test_pull_no_repo(self, tmp_path, monkeypatch):
+        import src.repo as repo_module
+        monkeypatch.setattr(repo_module, "REPO_DIR", tmp_path)
+        result = await repo_module.pull()
+        assert "No repository" in result
+
+    async def test_pull_success(self, tmp_path, monkeypatch):
+        import src.repo as repo_module
+        monkeypatch.setattr(repo_module, "REPO_DIR", tmp_path)
+        (tmp_path / ".git").mkdir()
+        mock_repo = MagicMock()
+        mock_repo.remotes.origin.pull.return_value = ["fetch result"]
+
+        call_count = 0
+
+        async def fake_to_thread(fn, *args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return mock_repo  # git.Repo(REPO_DIR)
+            return fn(*args, **kwargs)  # repo.remotes.origin.pull()
+
+        with patch("asyncio.to_thread", side_effect=fake_to_thread):
+            result = await repo_module.pull()
+        assert "fetch result" in result
+
+
+class TestStatus:
+    async def test_status_returns_combined_output(self, tmp_path, monkeypatch):
+        import src.repo as repo_module
+        monkeypatch.setattr(repo_module, "REPO_DIR", tmp_path)
+
+        async def fake_exec(*args, **kwargs):
+            proc = AsyncMock()
+            proc.communicate = AsyncMock(return_value=(b"M  file.py\n", b""))
+            return proc
+
+        with patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
+            result = await repo_module.status()
+        assert "M  file.py" in result

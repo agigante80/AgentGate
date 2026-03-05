@@ -19,8 +19,6 @@ from src import executor, history, repo
 
 logger = logging.getLogger(__name__)
 
-_THROTTLE = 1.0  # seconds between Telegram message edits during streaming
-
 
 # ── Pure helper functions (imported by tests) ───────────────────────────────
 
@@ -47,6 +45,7 @@ async def _stream_to_telegram(
     backend: AICLIBackend,
     prompt: str,
     max_chars: int,
+    throttle_secs: float = 1.0,
 ) -> str:
     """Stream AI response into a Telegram message, editing it as chunks arrive."""
     msg = await update.effective_message.reply_text("🤖 Thinking…")
@@ -56,7 +55,7 @@ async def _stream_to_telegram(
     async for chunk in backend.stream(prompt):
         accumulated += chunk
         now = time.monotonic()
-        if now - last_edit >= _THROTTLE:
+        if now - last_edit >= throttle_secs:
             display = accumulated[-max_chars:] if len(accumulated) > max_chars else accumulated
             try:
                 await msg.edit_text(display + " ▌")
@@ -226,7 +225,9 @@ class _BotHandlers:
 
             if self._settings.bot.stream_responses:
                 response = await _stream_to_telegram(
-                    update, self._backend, prompt, self._settings.bot.max_output_chars
+                    update, self._backend, prompt,
+                    self._settings.bot.max_output_chars,
+                    self._settings.bot.stream_throttle_secs,
                 )
             else:
                 msg = await update.effective_message.reply_text("🤖 Thinking…")

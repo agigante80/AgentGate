@@ -1,7 +1,8 @@
 """Unit tests for executor.py — is_destructive, truncate_output, summarize_if_long."""
 import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.executor import is_destructive, truncate_output, summarize_if_long
+from src.executor import is_destructive, truncate_output, summarize_if_long, run_shell
 
 
 class TestIsDestructive:
@@ -79,3 +80,32 @@ class TestSummarizeIfLong:
         long_text = "x" * 200
         result = await summarize_if_long(long_text, 100, FakeBackend())
         assert len(result) <= 100
+
+
+class TestRunShell:
+    async def test_run_shell_success(self):
+        mock_proc = AsyncMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(b"hello\n", b""))
+        with patch("asyncio.create_subprocess_shell", return_value=mock_proc):
+            result = await run_shell("echo hello", 3000)
+        assert "hello" in result
+        assert "[exit 0]" in result
+
+    async def test_run_shell_nonzero_exit(self):
+        mock_proc = AsyncMock()
+        mock_proc.returncode = 1
+        mock_proc.communicate = AsyncMock(return_value=(b"error\n", b""))
+        with patch("asyncio.create_subprocess_shell", return_value=mock_proc):
+            result = await run_shell("false", 3000)
+        assert "[exit 1]" in result
+
+    async def test_run_shell_truncates_long_output(self):
+        long_output = ("line\n" * 1000).encode()
+        mock_proc = AsyncMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(long_output, b""))
+        with patch("asyncio.create_subprocess_shell", return_value=mock_proc):
+            result = await run_shell("cmd", 100)
+        assert "⚠️ Output truncated" in result
+        assert len(result) <= 300  # header + a few kept lines

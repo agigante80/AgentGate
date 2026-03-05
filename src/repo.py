@@ -1,10 +1,9 @@
 import asyncio
 import logging
-from pathlib import Path
 
 import git
 
-REPO_DIR = Path("/repo")
+from src.config import REPO_DIR
 logger = logging.getLogger(__name__)
 
 
