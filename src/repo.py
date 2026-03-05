@@ -15,7 +15,7 @@ async def clone(github_token: str, github_repo: str, branch: str) -> None:
     if not github_repo:
         logger.warning("No GITHUB_REPO set and no existing repo — nothing to clone.")
         return
-    url = f"https://x-token-auth:{github_token}@github.com/{github_repo.lstrip('https://github.com/')}"
+    url = f"https://x-token-auth:{github_token}@github.com/{github_repo.removeprefix('https://github.com/')}"
     logger.info("Cloning %s (branch: %s)…", github_repo, branch)
     await asyncio.to_thread(
         git.Repo.clone_from, url, REPO_DIR, branch=branch, depth=1

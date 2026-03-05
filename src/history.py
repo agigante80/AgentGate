@@ -32,7 +32,7 @@ async def add_exchange(chat_id: str, user_msg: str, ai_msg: str) -> None:
 async def get_history(chat_id: str) -> list[tuple[str, str]]:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            "SELECT user_msg, ai_msg FROM history WHERE chat_id=? ORDER BY ts DESC LIMIT ?",
+            "SELECT user_msg, ai_msg FROM history WHERE chat_id=? ORDER BY id DESC LIMIT ?",
             (chat_id, HISTORY_LIMIT),
         ) as cur:
             rows = await cur.fetchall()

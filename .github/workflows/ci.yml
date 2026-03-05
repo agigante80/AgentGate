@@ -18,6 +18,21 @@ jobs:
       - run: pip install ruff
       - run: ruff check src/
 
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+      - name: Run tests
+        run: pytest tests/ -v --tb=short
+
   docker-build:
     name: Docker build
     runs-on: ubuntu-latest
