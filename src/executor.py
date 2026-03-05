@@ -2,6 +2,7 @@ import asyncio
 import logging
 
 from src.ai.adapter import AICLIBackend
+from src.config import REPO_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ def truncate_output(text: str, max_chars: int) -> str:
 async def run_shell(cmd: str, max_chars: int) -> str:
     proc = await asyncio.create_subprocess_shell(
         cmd,
-        cwd="/repo",
+        cwd=str(REPO_DIR),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
     )

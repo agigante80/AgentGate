@@ -9,11 +9,10 @@ import re
 import threading
 import time
 from collections.abc import AsyncGenerator
-from pathlib import Path
 
 import pexpect
 
-REPO_DIR = str(Path("/repo"))
+from src.config import REPO_DIR
 PROMPT_RE = re.compile(r"\n?>\s*$")  # copilot CLI prompt is "> "
 TIMEOUT = 180
 
@@ -34,13 +33,20 @@ class CopilotSession:
         logger.info("Spawning copilot PTY session…")
         child = pexpect.spawn(
             cmd, args,
-            cwd=REPO_DIR,
+            cwd=str(REPO_DIR),
             env=self._env,
             encoding="utf-8",
             timeout=TIMEOUT,
             echo=False,
         )
-        child.expect(PROMPT_RE, timeout=30)
+        idx = child.expect(
+            [PROMPT_RE, re.compile(r"authenticate|login|auth", re.I), pexpect.TIMEOUT],
+            timeout=30,
+        )
+        if idx != 0:
+            raise RuntimeError(
+                "Copilot auth failed — check COPILOT_GITHUB_TOKEN has 'Copilot Requests' permission"
+            )
         logger.info("Copilot session ready.")
         return child
 

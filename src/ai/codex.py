@@ -1,11 +1,9 @@
 import asyncio
 import logging
 from collections.abc import AsyncGenerator
-from pathlib import Path
 
 from src.ai.adapter import AICLIBackend
-
-REPO_DIR = Path("/repo")
+from src.config import REPO_DIR
 logger = logging.getLogger(__name__)
 
 

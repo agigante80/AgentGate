@@ -1,9 +1,8 @@
 import logging
-from pathlib import Path
 
 import aiosqlite
 
-DB_PATH = Path("/data/history.db")
+from src.config import DB_PATH
 HISTORY_LIMIT = 10  # exchanges to inject as context
 
 logger = logging.getLogger(__name__)
