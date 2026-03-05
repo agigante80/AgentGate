@@ -1,0 +1,434 @@
+name: CI/CD Pipeline
+
+# ============================================================================
+# Trigger Configuration
+# ============================================================================
+on:
+  push:
+    branches: [main, develop]
+    tags: ['v*']
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: 'Skip tests (emergency deployments only)'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['true', 'false']
+      skip_docker_publish:
+        description: 'Skip Docker publishing'
+        required: false
+        default: 'false'
+        type: choice
+        options: ['true', 'false']
+
+# ============================================================================
+# Permissions
+# ============================================================================
+permissions:
+  contents: write
+  packages: write
+  security-events: write
+
+# ============================================================================
+# Environment Variables
+# ============================================================================
+env:
+  PYTHON_VERSION: '3.12'
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  DOCKER_PLATFORMS: 'linux/amd64,linux/arm64'
+
+# ============================================================================
+# Jobs
+# ============================================================================
+jobs:
+
+  # --------------------------------------------------------------------------
+  # Job 1: Version Generation
+  # --------------------------------------------------------------------------
+  version:
+    name: Version Generation
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      docker_version: ${{ steps.version.outputs.docker_version }}
+      is_release: ${{ steps.version.outputs.is_release }}
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history needed for tag comparison
+
+      - name: 📝 Extract and build version string
+        id: version
+        run: |
+          BASE_VERSION=$(cat VERSION | tr -d '[:space:]')
+          SHORT_SHA=$(git rev-parse --short HEAD)
+
+          if [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+            VERSION="${BASE_VERSION}-dev-${SHORT_SHA}"
+            echo "🔨 Development build"
+          elif [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            VERSION="${BASE_VERSION}"
+            echo "🚀 Stable release from main"
+          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            VERSION="${BASE_VERSION}"
+            echo "🏷️ Tagged release"
+          else
+            BRANCH_NAME=$(echo "${{ github.ref_name }}" | sed 's/[^a-zA-Z0-9]/-/g')
+            VERSION="${BASE_VERSION}-${BRANCH_NAME}-${SHORT_SHA}"
+            echo "🌿 Branch build"
+          fi
+
+          # Docker tags cannot contain '+', replace with '-'
+          DOCKER_VERSION="${VERSION//+/-}"
+
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "docker_version=${DOCKER_VERSION}" >> $GITHUB_OUTPUT
+          echo "📦 Version: ${VERSION}"
+          echo "🐳 Docker version: ${DOCKER_VERSION}"
+
+          if [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "is_release=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_release=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 🔍 Verify VERSION bumped (main only)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+          LATEST_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+
+          if [ -z "$LATEST_TAG" ]; then
+            echo "✅ No release tags yet — first release, version $VERSION is fine."
+            exit 0
+          fi
+
+          TAG_VERSION="${LATEST_TAG#v}"
+          echo "VERSION file : $VERSION"
+          echo "Latest tag   : $LATEST_TAG ($TAG_VERSION)"
+
+          if [ "$VERSION" = "$TAG_VERSION" ]; then
+            echo "❌ VERSION ($VERSION) matches the latest release tag ($LATEST_TAG)."
+            echo "   Bump the version in the VERSION file before merging to main."
+            exit 1
+          fi
+
+          echo "✅ Version $VERSION is new (latest released: $TAG_VERSION)"
+
+      - name: 📊 Version summary
+        run: |
+          echo "### 📦 Version Information" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Version** | \`${{ steps.version.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Docker** | \`${{ steps.version.outputs.docker_version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Release** | ${{ steps.version.outputs.is_release }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Branch** | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Commit** | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+
+  # --------------------------------------------------------------------------
+  # Job 2: Lint
+  # --------------------------------------------------------------------------
+  lint:
+    name: Lint Code
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: version
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 📦 Install ruff
+        run: pip install ruff
+
+      - name: 🔍 Run ruff
+        run: ruff check src/
+
+      - name: 📋 Lint summary
+        if: always()
+        run: |
+          echo "### 🔍 Lint Results" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: \`${{ needs.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+
+  # --------------------------------------------------------------------------
+  # Job 3: Tests
+  # --------------------------------------------------------------------------
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: version
+    if: ${{ github.event.inputs.skip_tests != 'true' }}
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: 📦 Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: 🧪 Run tests with coverage
+        run: pytest tests/ -v --tb=short --cov=src --cov-report=xml --cov-fail-under=60
+
+      - name: 📤 Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+          retention-days: 7
+
+      - name: 📋 Test summary
+        if: always()
+        run: |
+          echo "### 🧪 Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: \`${{ needs.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+
+  # --------------------------------------------------------------------------
+  # Job 4: Build & Publish Docker Image
+  # --------------------------------------------------------------------------
+  docker-publish:
+    name: Build & Publish Docker Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [version, lint, test]
+    if: |
+      always() &&
+      needs.version.result == 'success' &&
+      needs.lint.result == 'success' &&
+      (needs.test.result == 'success' || needs.test.result == 'skipped') &&
+      github.event.inputs.skip_docker_publish != 'true' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop' || startsWith(github.ref, 'refs/tags/'))
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐳 Set up QEMU (multi-platform support)
+        uses: docker/setup-qemu-action@v3
+
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔐 Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏷️ Generate Docker tags
+        id: tags
+        run: |
+          DOCKER_VERSION="${{ needs.version.outputs.docker_version }}"
+          IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+
+          # Always include the versioned tag
+          TAGS="${IMAGE}:${DOCKER_VERSION}"
+
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            TAGS="${TAGS},${IMAGE}:latest,${IMAGE}:main"
+          elif [[ "${{ github.ref }}" == "refs/heads/develop" ]]; then
+            TAGS="${TAGS},${IMAGE}:develop"
+          elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            TAGS="${TAGS},${IMAGE}:latest"
+          fi
+
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+          echo "📦 Docker tags: ${TAGS}"
+
+      - name: 🏗️ Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: ${{ env.DOCKER_PLATFORMS }}
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          build-args: |
+            VERSION=${{ needs.version.outputs.version }}
+          cache-from: |
+            type=gha,scope=${{ github.ref_name }}
+            type=gha,scope=develop
+            type=gha,scope=main
+          cache-to: type=gha,mode=max,scope=${{ github.ref_name }}
+          labels: |
+            org.opencontainers.image.version=${{ needs.version.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.source=${{ github.repositoryUrl }}
+
+      - name: 📋 Docker publish summary
+        run: |
+          echo "### 🐳 Docker Image Published" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Version** | \`${{ needs.version.outputs.version }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Platforms** | \`${{ env.DOCKER_PLATFORMS }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Tags** | \`${{ steps.tags.outputs.tags }}\` |" >> $GITHUB_STEP_SUMMARY
+
+  # --------------------------------------------------------------------------
+  # Job 5: Security Scan (Trivy)
+  # --------------------------------------------------------------------------
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [version, lint, test]
+    if: |
+      always() &&
+      needs.version.result == 'success' &&
+      needs.lint.result == 'success' &&
+      (needs.test.result == 'success' || needs.test.result == 'skipped')
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐳 Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🏗️ Build image for scanning (local, no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          tags: teleagent:scan
+          cache-from: type=gha,scope=${{ github.ref_name }}
+
+      - name: 🔒 Run Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: teleagent:scan
+          format: sarif
+          output: trivy-results.sarif
+          severity: CRITICAL,HIGH
+          exit-code: '0'  # don't fail the build, just report
+
+      - name: 📤 Upload Trivy results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-results.sarif
+
+      - name: 📋 Security scan summary
+        if: always()
+        run: |
+          echo "### 🔒 Security Scan" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tool**: Trivy (CRITICAL + HIGH)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Results**: visible in the Security tab" >> $GITHUB_STEP_SUMMARY
+
+  # --------------------------------------------------------------------------
+  # Job 6: Create GitHub Release (main only, after Docker publish)
+  # --------------------------------------------------------------------------
+  release:
+    name: GitHub Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [version, docker-publish]
+    if: |
+      needs.version.result == 'success' &&
+      needs.docker-publish.result == 'success' &&
+      needs.version.outputs.is_release == 'true' &&
+      github.ref == 'refs/heads/main'
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 📝 Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            CHANGELOG=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+          else
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" --no-merges -n 20)
+          fi
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: 🎉 Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ needs.version.outputs.version }}
+          name: Release v${{ needs.version.outputs.version }}
+          body: |
+            ## 🎉 Release v${{ needs.version.outputs.version }}
+
+            ### 🐳 Docker Image
+
+            ```bash
+            docker pull ghcr.io/${{ github.repository }}:${{ needs.version.outputs.docker_version }}
+            # or
+            docker pull ghcr.io/${{ github.repository }}:latest
+            ```
+
+            ### 📝 Changelog
+
+            ${{ steps.changelog.outputs.changelog }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📋 Release summary
+        run: |
+          echo "### 🎉 GitHub Release Created" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: \`${{ needs.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag**: \`v${{ needs.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+
+  # --------------------------------------------------------------------------
+  # Final: Pipeline Summary
+  # --------------------------------------------------------------------------
+  summary:
+    name: Pipeline Summary
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [version, lint, test, docker-publish, security-scan, release]
+    if: always()
+    steps:
+      - name: 📊 Generate pipeline summary
+        run: |
+          echo "## 🚀 CI/CD Pipeline Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Version Generation | ${{ needs.version.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Lint | ${{ needs.lint.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tests | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Docker Publish | ${{ needs.docker-publish.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Security Scan | ${{ needs.security-scan.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Release | ${{ needs.release.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version**: \`${{ needs.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Branch**: \`${{ github.ref_name }}\`" >> $GITHUB_STEP_SUMMARY
+
+# ============================================================================
+# Required Secrets:
+# - GITHUB_TOKEN: automatically provided by GitHub Actions (packages + security-events)
+# No additional secrets needed — images are pushed to GHCR only.
+# ============================================================================
