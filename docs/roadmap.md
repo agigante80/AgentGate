@@ -2,169 +2,216 @@
 
 > Last updated: 2026-03-06
 
-This document tracks pending technical work, known gaps, and future feature ideas.
-Items are grouped by type — technical debt first, then features.
+This document tracks pending technical debt, known gaps, and future feature ideas, ordered by priority within each section.
 
 ---
 
-## 1. Technical Debt & Gaps
+## 1. Technical Debt & Fixes
 
-### 1.1 Test coverage
-
-CI enforces `--cov-fail-under=70`; current total is **86%** (160 tests). Remaining gaps:
-
-#### `bot.py` — 73%, `main.py` — 74%
-
-- `bot.py:52-72` — `build_app()` handler registration block
-- `bot.py:169-189` — `cmd_info` uptime formatting branches
-- `bot.py:265-282` — streaming error/edge paths
-- `main.py:43-45` — clone failure path
-- `main.py:73-82` — SIGTERM handler teardown
-- `main.py:86` — `asyncio.run` exception branch
-
-#### `ai/session.py` — 90%
-
-- Lines 45–46 — `TimeoutError` path (proc.terminate branch)
-- Line 81 — stdout drain inside stats-marker branch
-- Lines 88–91 — `_strip_stats` on remaining buffer after loop
-
-#### `ai/direct.py` — 80%
-
-- Lines 54–58, 64–68, 73–74 — provider-specific streaming branches
-- Lines 110–117 — exception handling in stream generator
+Items ordered: immediate bug → quick wins → medium effort → long-term architecture.
 
 ---
 
-### 1.2 npm globals not covered by Dependabot
+### 1.1 Bug — double `@_requires_auth` on `handle_voice`
+
+`bot.py` lines 299–300: the decorator is applied twice to `handle_voice`. Harmless at runtime (PTB's `MessageHandler` bypasses the outer auth check anyway), but incorrect and confusing.
+
+**Fix**: remove the duplicate decorator line. One-line change.
+
+---
+
+### 1.2 Duplication — AI pipeline block copy-pasted in two methods
+
+`bot.py`: the identical 30-line block (history lookup → prompt build → stream/send → history save → error handle → active-task tracking) appears in both `forward_to_ai` and `handle_voice`. Any change must be made twice.
+
+**Fix**: extract `async def _run_ai_pipeline(self, update, text, chat_id)` private method; both handlers delegate to it.
+
+---
+
+### 1.3 Cohesion — `REPO_DIR` defined twice
+
+`runtime.py` line 6 defines `REPO_DIR = Path("/repo")` independently of the same constant already exported from `config.py`. Two sources of truth.
+
+**Fix**: `runtime.py` imports `REPO_DIR` from `src.config` instead of redefining it. Two-line change.
+
+---
+
+### 1.4 Complexity — transcriber init logic inline in `__init__`
+
+`bot.py` lines 104–112: try/except + isinstance check for transcriber setup is buried inside `__init__`, making it hard to unit-test independently.
+
+**Fix**: extract `_init_transcriber(settings) -> Transcriber | None` as a private method.
+
+---
+
+### 1.5 Duplication — provider dispatch repeated in `DirectAPIBackend`
+
+`ai/direct.py`: the `if self._provider in ("openai", ...)` routing appears independently in `send()` and `stream()`. Adding or renaming a provider requires two edits.
+
+**Fix**: extract `_get_provider_callables()` returning `(send_fn, stream_fn)` for the active provider; call once from both public methods.
+
+---
+
+### 1.6 Abstraction — subprocess command building not shared
+
+`ai/session.py` (`_build_cmd`) and `ai/codex.py` (`_make_cmd`) each independently build subprocess command lists and environment dicts with no shared base. Code is similar but diverges silently.
+
+**Fix**: introduce a `SubprocessMixin` in `ai/adapter.py` with a shared `_build_subprocess_env()` utility and consistent interface.
+
+---
+
+### 1.7 Test coverage gaps
+
+CI enforces `--cov-fail-under=70`; current total is **86%** (184 tests). Remaining gaps:
+
+- `bot.py` — `build_app()` handler registration block; streaming error paths; `cmd_info` uptime branches
+- `main.py` — clone failure path; SIGTERM teardown; `asyncio.run` exception branch
+- `ai/session.py` — `TimeoutError` branch; stdout drain inside stats-marker; `_strip_stats` tail buffer
+- `ai/direct.py` — provider-specific streaming branches; stream generator exception handling
+
+---
+
+### 1.8 npm globals not covered by Dependabot
 
 `@github/copilot` and `@openai/codex` are pinned in the Dockerfile but Dependabot does not update npm globals installed via `RUN npm install -g`. Manual update required when new versions ship.
 
 ---
 
-## 2. Feature Ideas
+### 1.9 Architecture — history storage is not pluggable *(long-term)*
 
-### 2.1 Scheduled commands (`/taschedule`)
+`history.py` is hardcoded to SQLite/aiosqlite. No abstraction exists for alternate storage (Postgres, Redis, file). All callers in `bot.py` would need changing if storage backend changes.
 
-Allow users to schedule recurring shell commands or AI prompts:
+**Fix**: introduce `ConversationStorage` ABC (`add_exchange`, `get_history`, `clear`) with `SQLiteStorage` as the default. Inject via factory.
+
+---
+
+### 1.10 Architecture — `AIConfig` mixes three separate concerns *(long-term)*
+
+`config.py` `AIConfig` contains fields for Copilot, Codex, and Direct API in a flat struct. Adding a new backend adds noise to every other backend's namespace.
+
+**Fix**: split into `CopilotConfig`, `CodexConfig`, `DirectAPIConfig` nested under `AIConfig` with an `ai_cli` discriminator field.
+
+---
+
+## 2. Features
+
+Items ordered by practical value to the typical user.
+
+---
+
+### 2.1 `/ta diff` — show recent git changes
 
 ```
-/taschedule "git pull && pytest" every 6h
-/taschedule "check if any service is down" every 30m
+/ta diff           → git diff HEAD~1 HEAD (last commit)
+/ta diff 3         → git diff HEAD~3 HEAD
+/ta diff <sha>     → git diff <sha> HEAD
+```
+
+Output truncated and sent as a code block. Pairs well with `/ta sync` after a pull.
+
+---
+
+### 2.2 `/ta log` — tail container logs
+
+```
+/ta log            → last 20 lines of the bot's own stdout/stderr
+/ta log 50         → last 50 lines
+```
+
+Reads from the container's log output. Allows debugging the bot from Telegram without needing SSH access.
+
+---
+
+### 2.3 `/ta schedule` — scheduled commands
+
+Allow recurring shell commands or AI prompts:
+
+```
+/ta schedule "git pull && pytest" every 6h
+/ta schedule "check if any service is down" every 30m
 ```
 
 Backed by the existing APScheduler instance already wired in `bot.py`. Schedules stored in `/data/schedules.db` and survive restarts.
 
 ---
 
-### 2.2 File upload & download
-
-- **Download**: `/tafile <path>` — send any file from `/repo` as a Telegram document
-- **Upload**: accept Telegram document uploads and write them into `/repo/<filename>`
-
-Useful for config file edits, log retrieval, or patching files without a full git workflow.
-
----
-
-### 2.3 Multi-turn conversation context window control
-
-Currently the full SQLite history is injected for stateless backends. Add:
-
-- `HISTORY_TURNS` env var (default: `10`) to cap how many past exchanges are sent
-- `/tacontext <n>` command to change it live without restart
-- Visible in `/tainfo` output
-
----
-
-### 2.4 Proactive alerts
-
-Let the bot notify the chat when something happens in the repo or system without being asked:
-
-- Watch `/repo` for file changes (via `watchfiles` or `inotify`) and notify on changes to key files (e.g. `docker-compose.yml`, `.env.example`)
-- Monitor a log file or stdout of a process and alert on keywords (e.g. `ERROR`, `CRITICAL`)
-- Example env vars: `WATCH_FILES=docker-compose.yml,requirements.txt`, `ALERT_KEYWORDS=ERROR,FATAL`
-
----
-
-### 2.5 `/tadiff` — show recent git changes
+### 2.4 `/ta switch` — hot-swap AI backend
 
 ```
-/tadiff           → git diff HEAD~1 HEAD (last commit)
-/tadiff 3         → git diff HEAD~3 HEAD
-/tadiff <sha>     → git diff <sha> HEAD
-```
-
-Output truncated and sent as a code block. Pairs well with `/tasync` after a pull.
-
----
-
-### 2.6 Inline button confirmations
-
-Replace the current text-based destructive-command confirmation (`/tarun rm -rf ... — confirm? Reply YES`) with Telegram inline buttons (✅ Yes / ❌ No). Cleaner UX, no free-text parsing needed.
-
-Uses `python-telegram-bot`'s `InlineKeyboardMarkup` + `CallbackQueryHandler`.
-
----
-
-### 2.7 Multi-backend routing
-
-Add a `/taswitch <backend>` command to hot-swap the AI backend:
-
-```
-/taswitch copilot
-/taswitch codex
-/taswitch api
+/ta switch copilot
+/ta switch codex
+/ta switch api
 ```
 
 `cmd_restart` already re-creates the backend object — this extends it to accept a target backend name. Useful for comparing responses or falling back when one service is down.
 
 ---
 
-### 2.8 `/talog` — tail container logs
+### 2.5 File upload & download
 
-```
-/talog            → last 20 lines of the bot's own stdout/stderr
-/talog 50         → last 50 lines
-```
+- **Download**: `/ta file <path>` — send any file from `/repo` as a Telegram document
+- **Upload**: accept Telegram document uploads and write them into `/repo/<filename>`
 
-Reads from `/proc/1/fd/1` or a log file, so users can debug the bot from within Telegram without SSH access.
+Useful for config edits, log retrieval, or patching files without a full git workflow.
 
 ---
 
-### 2.9 Web dashboard (optional)
+### 2.6 Context window control (`HISTORY_TURNS`)
 
-A lightweight read-only HTTP endpoint (FastAPI or Flask, single file) served inside the container:
+Currently the full SQLite history is injected for stateless backends. Add:
 
-- Shows uptime, current backend, last 10 exchanges, coverage badge
-- Protected by a simple token from env (`DASHBOARD_TOKEN`)
-- Exposes `/health` for external monitoring tools
-
----
-
-### 2.10 Copilot conversation persistence across restarts
-
-Currently `copilot -p` is stateless per call; history is injected from SQLite by the bot. A future improvement could pre-warm a conversation with a system prompt that provides repo context, reducing repeated setup overhead for long sessions.
+- `HISTORY_TURNS` env var (default: `10`) to cap how many past exchanges are sent
+- `/ta context <n>` command to adjust live without restart
+- Visible in `/ta info` output
 
 ---
 
-### 2.11 Voice transcription — local Whisper (offline)
+### 2.7 Proactive alerts
 
-Extend `WHISPER_PROVIDER=local` to use the `openai-whisper` Python package running on the local machine:
+Let the bot notify the chat proactively when something happens:
 
-- Model files are **downloaded on first use** (not bundled in the Docker image) and cached at `WHISPER_MODEL_DIR=/data/whisper-models`
-- Model size configurable via `WHISPER_MODEL=tiny|base|small|medium|large` (default: `base`)
-- No API key required; runs fully offline
-- Trade-off: first transcription is slow while the model downloads; subsequent calls are fast
+- Watch `/repo` for changes to key files (`WATCH_FILES=docker-compose.yml,requirements.txt`)
+- Monitor a log file and alert on keywords (`ALERT_KEYWORDS=ERROR,FATAL`)
+
+Uses the existing APScheduler or `watchfiles` library.
+
+---
+
+### 2.8 Voice transcription — local Whisper (offline)
+
+Extend `WHISPER_PROVIDER=local` using the `openai-whisper` Python package:
+
+- Model files **downloaded on first use** (not bundled in Docker image), cached at `WHISPER_MODEL_DIR=/data/whisper-models`
+- Model size: `WHISPER_MODEL=tiny|base|small|medium|large` (default: `base`)
+- Fully offline, no API key required
+- Trade-off: first call slow while model downloads; subsequent calls fast
 
 Implementation: `LocalWhisperTranscriber` in `src/transcriber.py` using `whisper.load_model()`.
 
 ---
 
-### 2.12 Voice transcription — Google Speech-to-Text
+### 2.9 Voice transcription — Google Speech-to-Text
 
-Extend `WHISPER_PROVIDER=google` to use the Google Cloud Speech-to-Text API:
+Extend `WHISPER_PROVIDER=google` using the Google Cloud Speech-to-Text API:
 
-- Requires `google-cloud-speech` package and `GOOGLE_APPLICATION_CREDENTIALS` env var pointing to a service account JSON
-- Supports a wider range of audio formats natively
+- Requires `google-cloud-speech` package and `GOOGLE_APPLICATION_CREDENTIALS` env var
+- Supports wider range of audio formats natively
 - Per-minute billing via Google Cloud
 
-Implementation: `GoogleTranscriber` in `src/transcriber.py` using `google.cloud.speech.SpeechAsyncClient`.
+Implementation: `GoogleTranscriber` in `src/transcriber.py`.
+
+---
+
+### 2.10 Web dashboard *(optional)*
+
+A lightweight read-only HTTP endpoint (single-file FastAPI) served inside the container:
+
+- Shows uptime, active backend, last 10 exchanges, coverage badge
+- Protected by `DASHBOARD_TOKEN` env var
+- Exposes `/health` for external monitoring
+
+---
+
+### 2.11 Copilot conversation pre-warming *(low priority)*
+
+Currently `copilot -p` is stateless per call; history is injected from SQLite. A future improvement could pre-warm with a repo-context system prompt to reduce repeated setup overhead for long sessions.
