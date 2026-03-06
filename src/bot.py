@@ -186,6 +186,39 @@ class _BotHandlers:
         await _reply(update, f"```\n{result}\n```")
 
     @_requires_auth
+    async def cmd_diff(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """Show git diff. /ta diff [n|sha] — defaults to last commit."""
+        arg = ctx.args[0] if ctx.args else ""
+        if not arg:
+            ref = "HEAD~1 HEAD"
+        elif arg.isdigit():
+            ref = f"HEAD~{arg} HEAD"
+        else:
+            ref = f"{arg} HEAD"
+        result = await executor.run_shell(
+            f"git diff {ref} --stat && echo '---' && git diff {ref}",
+            self._settings.bot.max_output_chars,
+        )
+        if not result.strip():
+            result = "(no changes)"
+        await update.effective_message.reply_text(f"```\n{result}\n```", parse_mode="Markdown")
+
+    @_requires_auth
+    async def cmd_log(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """Tail bot container logs. /ta log [n] — default 20 lines."""
+        try:
+            n = int(ctx.args[0]) if ctx.args else 20
+            n = max(1, min(n, 200))
+        except ValueError:
+            await _reply(update, "Usage: /ta log [lines] — e.g. `/ta log 50`")
+            return
+        result = await executor.run_shell(
+            f"tail -n {n} /proc/1/fd/1 2>/dev/null || journalctl -n {n} --no-pager 2>/dev/null || echo '(log not accessible)'",
+            self._settings.bot.max_output_chars,
+        )
+        await update.effective_message.reply_text(f"```\n{result}\n```", parse_mode="Markdown")
+
+    @_requires_auth
     async def cmd_status(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if self._active_ai:
             lines = ["🔄 AI is currently processing:\n"]
@@ -223,6 +256,8 @@ class _BotHandlers:
             "run":     self.cmd_run,
             "sync":    self.cmd_sync,
             "git":     self.cmd_git,
+            "diff":    self.cmd_diff,
+            "log":     self.cmd_log,
             "status":  self.cmd_status,
             "clear":   self.cmd_clear,
             "restart": self.cmd_restart,
@@ -254,6 +289,8 @@ class _BotHandlers:
             f"`/ta run` `<cmd>` — run a shell command in the repo\n"
             f"`/ta sync` — git pull (fetch latest changes)\n"
             f"`/ta git` — git status + recent commits\n"
+            f"`/ta diff` `[n|sha]` — show git diff (default: last commit)\n"
+            f"`/ta log` `[n]` — tail last n container log lines (default 20)\n"
             f"`/ta status` — check if AI is busy\n"
             f"`/ta clear` — clear conversation history\n"
             f"`/ta restart` — restart AI backend session\n"
@@ -262,7 +299,7 @@ class _BotHandlers:
             f"`/ta help` — this message\n\n"
             f"*AI commands (forwarded to AI CLI):*\n"
             f"Any other text or /command is sent directly to the AI.\n"
-            f"Examples: `/init`, `/plan`, `/review`, `/diff`, `/model`\n\n"
+            f"Examples: `/init`, `/plan`, `/review`, `/model`\n\n"
             f"*Voice messages:*\n"
             f"Send a voice or audio message to transcribe and forward to the AI.\n"
             f"Requires `WHISPER_PROVIDER=openai` (see `/ta info` for current status).\n\n"
@@ -374,6 +411,8 @@ def build_app(settings: Settings, backend: AICLIBackend, start_time: float) -> A
     app.add_handler(CommandHandler(f"{p}run", h.cmd_run))
     app.add_handler(CommandHandler(f"{p}sync", h.cmd_sync))
     app.add_handler(CommandHandler(f"{p}git", h.cmd_git))
+    app.add_handler(CommandHandler(f"{p}diff", h.cmd_diff))
+    app.add_handler(CommandHandler(f"{p}log", h.cmd_log))
     app.add_handler(CommandHandler(f"{p}status", h.cmd_status))
     app.add_handler(CommandHandler(f"{p}clear", h.cmd_clear))
     app.add_handler(CommandHandler(f"{p}restart", h.cmd_restart))
