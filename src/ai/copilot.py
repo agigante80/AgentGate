@@ -7,7 +7,7 @@ logger = logging.getLogger(__name__)
 
 
 class CopilotBackend(AICLIBackend):
-    is_stateful = True  # PTY session maintains its own multi-turn state
+    is_stateful = False  # subprocess -p mode; bot provides history via context
     def __init__(self, model: str = "") -> None:
         self._model = model
         self._env = {**os.environ}

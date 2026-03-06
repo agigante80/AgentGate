@@ -60,7 +60,7 @@ class TestAdapterContract:
         assert isinstance(backend.is_stateful, bool)
 
     def test_copilot_is_stateful(self):
-        assert make_copilot().is_stateful is True
+        assert make_copilot().is_stateful is False  # subprocess -p mode; stateless per call
 
     def test_direct_is_stateful(self):
         assert make_direct().is_stateful is True

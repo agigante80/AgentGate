@@ -1,148 +1,106 @@
 """
-Persistent pexpect PTY session for the Copilot CLI interactive mode.
-Keeps one long-running `copilot` process alive per backend instance.
+Copilot CLI session using non-interactive subprocess mode (-p flag).
+Each query spawns `copilot -p <prompt> --allow-all` as a subprocess.
+This avoids PTY/TUI complexity and the interactive folder-trust dialog.
 """
 import asyncio
 import logging
-import queue as _queue
 import re
-import threading
-import time
 from collections.abc import AsyncGenerator
 
-import pexpect
-
 from src.config import REPO_DIR
-PROMPT_RE = re.compile(r"\n?>\s*$")  # copilot CLI prompt is "> "
+
 TIMEOUT = 180
 
 logger = logging.getLogger(__name__)
+
+# Strip usage stats footer appended by copilot -p to every response
+_STATS_RE = re.compile(r"\n\nTotal usage est:.*", re.DOTALL)
 
 
 class CopilotSession:
     def __init__(self, model: str = "", env: dict | None = None) -> None:
         self._model = model
         self._env = env
-        self._child: pexpect.spawn | None = None
 
-    def _spawn(self) -> pexpect.spawn:
-        cmd = "copilot"
-        args = ["--allow-all"]
+    def _build_cmd(self, prompt: str) -> list[str]:
+        args = ["copilot", "-p", prompt, "--allow-all"]
         if self._model:
             args += ["--model", self._model]
-        logger.info("Spawning copilot PTY session…")
-        child = pexpect.spawn(
-            cmd, args,
-            cwd=str(REPO_DIR),
-            env=self._env,
-            encoding="utf-8",
-            timeout=TIMEOUT,
-            echo=False,
-        )
-        idx = child.expect(
-            [PROMPT_RE, re.compile(r"authenticate|login|auth", re.I), pexpect.TIMEOUT],
-            timeout=30,
-        )
-        if idx != 0:
-            raise RuntimeError(
-                "Copilot auth failed — check COPILOT_GITHUB_TOKEN has 'Copilot Requests' permission"
-            )
-        logger.info("Copilot session ready.")
-        return child
-
-    def _ensure(self) -> pexpect.spawn:
-        if self._child is None or not self._child.isalive():
-            self._child = self._spawn()
-        return self._child
-
-    # ── Blocking send (runs in thread via asyncio.to_thread) ─────────────
+        return args
 
     async def send(self, prompt: str) -> str:
-        return await asyncio.to_thread(self._sync_send, prompt)
-
-    def _sync_send(self, prompt: str) -> str:
         try:
-            child = self._ensure()
-            child.sendline(prompt)
-            child.expect(PROMPT_RE, timeout=TIMEOUT)
-            output = child.before or ""
-            return _strip_ansi(output.strip())
-        except pexpect.TIMEOUT:
-            self._child = None
-            return f"⚠️ Copilot session timed out after {TIMEOUT}s."
-        except pexpect.EOF:
-            self._child = None
-            return "⚠️ Copilot session ended unexpectedly."
+            proc = await asyncio.create_subprocess_exec(
+                *self._build_cmd(prompt),
+                cwd=str(REPO_DIR),
+                env=self._env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=TIMEOUT)
+        except asyncio.TimeoutError:
+            try:
+                proc.kill()  # type: ignore[possibly-undefined]
+            except Exception:
+                pass
+            return f"⚠️ Copilot timed out after {TIMEOUT}s."
         except Exception as exc:
-            self._child = None
-            logger.exception("PTY session error")
+            logger.exception("Copilot subprocess error")
             return f"⚠️ Session error: {exc}"
-
-    # ── Streaming send (PTY → thread-safe queue → async generator) ───────
+        return _strip_stats(stdout.decode())
 
     async def stream(self, prompt: str) -> AsyncGenerator[str, None]:
-        """Yield PTY output chunks as they arrive, bridged via a thread-safe queue."""
-        q: _queue.SimpleQueue[str | None] = _queue.SimpleQueue()
-        t = threading.Thread(target=self._sync_stream_to_queue, args=(prompt, q), daemon=True)
-        t.start()
-
-        while True:
-            try:
-                item = q.get_nowait()
-            except _queue.Empty:
-                await asyncio.sleep(0.05)
-                continue
-            if item is None:
-                break
-            yield item
-
-        t.join(timeout=1)
-
-    def _sync_stream_to_queue(self, prompt: str, q: "_queue.SimpleQueue[str | None]") -> None:
+        """Yield stdout chunks as they arrive, stripping the stats footer."""
+        _MARKER = "\n\nTotal usage est:"
+        _KEEP = len(_MARKER)
         try:
-            child = self._ensure()
-            child.sendline(prompt)
-            acc = ""
-            start = time.monotonic()
-            while True:
-                if time.monotonic() - start > TIMEOUT:
-                    q.put(f"⚠️ Copilot session timed out after {TIMEOUT}s.")
-                    q.put(None)
-                    return
-                try:
-                    chunk = _strip_ansi(child.read_nonblocking(size=256, timeout=0.2))
-                    acc += chunk
-                    if PROMPT_RE.search(acc):
-                        clean = PROMPT_RE.sub("", acc).strip()
-                        if clean:
-                            q.put(clean)
-                        q.put(None)
-                        return
-                    if chunk:
-                        q.put(chunk)
-                except pexpect.TIMEOUT:
-                    continue
-                except pexpect.EOF:
-                    clean = _strip_ansi(acc).strip()
-                    if clean:
-                        q.put(clean)
-                    q.put(None)
-                    self._child = None
-                    return
+            proc = await asyncio.create_subprocess_exec(
+                *self._build_cmd(prompt),
+                cwd=str(REPO_DIR),
+                env=self._env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
         except Exception as exc:
-            logger.exception("PTY stream error")
-            q.put(f"⚠️ Session error: {exc}")
-            q.put(None)
+            logger.exception("Copilot stream error")
+            yield f"⚠️ Session error: {exc}"
+            return
+        buf = ""
+        try:
+            async for raw in proc.stdout:
+                chunk = raw.decode()
+                buf += chunk
+                if _MARKER in buf:
+                    # Yield content before the stats footer, then stop
+                    clean = buf[: buf.index(_MARKER)]
+                    if clean:
+                        yield clean
+                    # Drain remaining stdout (ignore stats)
+                    async for _ in proc.stdout:
+                        pass
+                    break
+                # Keep last _KEEP chars buffered so marker isn't split across yields
+                if len(buf) > _KEEP:
+                    safe, buf = buf[:-_KEEP], buf[-_KEEP:]
+                    if safe:
+                        yield safe
+        except Exception as exc:
+            logger.exception("Copilot stream error")
+            yield f"⚠️ Session error: {exc}"
+            return
+        finally:
+            await proc.wait()
+        # Yield whatever remains (won't contain the stats footer)
+        if buf:
+            clean = _strip_stats(buf)
+            if clean:
+                yield clean
 
     def close(self) -> None:
-        if self._child and self._child.isalive():
-            self._child.sendline("/exit")
-            self._child.close()
-        self._child = None
+        pass  # No persistent process to clean up
 
 
-_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[mGKHF]")
-
-
-def _strip_ansi(text: str) -> str:
-    return _ANSI_RE.sub("", text)
+def _strip_stats(text: str) -> str:
+    """Remove the 'Total usage est:' footer that copilot -p appends."""
+    return _STATS_RE.sub("", text).strip()

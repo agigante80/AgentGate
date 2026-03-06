@@ -1,206 +1,142 @@
 """
-Tests for CopilotSession (src/ai/session.py).
-All pexpect I/O is fully mocked — no real process is spawned.
+Tests for CopilotSession (src/ai/session.py) — subprocess -p mode.
+No real process is spawned; asyncio.create_subprocess_exec is fully mocked.
 """
 from __future__ import annotations
 
-import queue
-import re
-from unittest.mock import MagicMock, patch, PropertyMock
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
 
-import pexpect
 import pytest
 
-from src.ai.session import CopilotSession, PROMPT_RE, _strip_ansi
+from src.ai.session import CopilotSession, _strip_stats
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-def _make_child(before_text: str = "response text", expect_idx: int = 0) -> MagicMock:
-    """Return a mock pexpect.spawn child that looks alive."""
-    child = MagicMock(spec=pexpect.spawn)
-    child.isalive.return_value = True
-    child.before = before_text
-    child.expect.return_value = expect_idx
-    return child
+class _FakeProcess:
+    """Minimal mock for asyncio subprocess."""
+
+    def __init__(self, stdout_lines: list, returncode: int = 0):
+        self.returncode = returncode
+        self._lines = iter(stdout_lines)
+        self.stdout = self
+        self.stderr = AsyncMock()
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        try:
+            return next(self._lines)
+        except StopIteration:
+            raise StopAsyncIteration
+
+    async def communicate(self):
+        data = b"".join(list(self._lines))
+        return data, b""
+
+    async def wait(self):
+        return self.returncode
+
+    def terminate(self):
+        pass
 
 
-# ── _strip_ansi ───────────────────────────────────────────────────────────────
+# ── _strip_stats ──────────────────────────────────────────────────────────────
 
-def test_strip_ansi_removes_escape_sequences():
-    assert _strip_ansi("\x1b[32mhello\x1b[0m") == "hello"
-
-
-def test_strip_ansi_passthrough_plain_text():
-    assert _strip_ansi("plain text") == "plain text"
+def test_strip_stats_removes_footer():
+    text = "Hello world\n\nTotal usage est:        1 Premium request\nAPI time spent: 1s"
+    assert _strip_stats(text) == "Hello world"
 
 
-# ── _spawn ────────────────────────────────────────────────────────────────────
+def test_strip_stats_passthrough_no_footer():
+    assert _strip_stats("plain response") == "plain response"
 
-class TestSpawn:
-    def test_spawn_success_returns_child(self, tmp_path, monkeypatch):
+
+def test_strip_stats_strips_whitespace():
+    assert _strip_stats("  hi  ") == "hi"
+
+
+# ── _build_cmd ────────────────────────────────────────────────────────────────
+
+def test_build_cmd_no_model():
+    s = CopilotSession()
+    assert s._build_cmd("hello") == ["copilot", "-p", "hello", "--allow-all"]
+
+
+def test_build_cmd_with_model():
+    s = CopilotSession(model="gpt-4o")
+    assert s._build_cmd("q") == ["copilot", "-p", "q", "--allow-all", "--model", "gpt-4o"]
+
+
+# ── send ──────────────────────────────────────────────────────────────────────
+
+class TestSend:
+    @pytest.mark.asyncio
+    async def test_send_returns_stripped_response(self, tmp_path, monkeypatch):
         monkeypatch.setattr("src.ai.session.REPO_DIR", tmp_path)
-        child = _make_child(expect_idx=0)
-        with patch("pexpect.spawn", return_value=child):
-            session = CopilotSession()
-            result = session._spawn()
-        assert result is child
+        raw = b"Hello!\n\nTotal usage est:        1 Premium request\nAPI time: 1s"
+        proc = MagicMock()
+        proc.communicate = AsyncMock(return_value=(raw, b""))
+        with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc)):
+            result = await CopilotSession().send("hi")
+        assert result == "Hello!"
 
-    def test_spawn_auth_failure_raises(self, tmp_path, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_send_timeout_returns_error(self, tmp_path, monkeypatch):
         monkeypatch.setattr("src.ai.session.REPO_DIR", tmp_path)
-        child = _make_child(expect_idx=1)
-        with patch("pexpect.spawn", return_value=child):
-            session = CopilotSession()
-            with pytest.raises(RuntimeError, match="auth failed"):
-                session._spawn()
-
-    def test_spawn_timeout_raises(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("src.ai.session.REPO_DIR", tmp_path)
-        child = _make_child(expect_idx=2)
-        with patch("pexpect.spawn", return_value=child):
-            session = CopilotSession()
-            with pytest.raises(RuntimeError, match="auth failed"):
-                session._spawn()
-
-    def test_spawn_passes_model_arg(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("src.ai.session.REPO_DIR", tmp_path)
-        child = _make_child(expect_idx=0)
-        with patch("pexpect.spawn", return_value=child) as mock_spawn:
-            CopilotSession(model="gpt-4o")._spawn()
-        args = mock_spawn.call_args
-        assert "--model" in args[0][1]
-        assert "gpt-4o" in args[0][1]
-
-
-# ── _ensure ───────────────────────────────────────────────────────────────────
-
-class TestEnsure:
-    def test_spawns_when_no_child(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("src.ai.session.REPO_DIR", tmp_path)
-        child = _make_child(expect_idx=0)
-        session = CopilotSession()
-        with patch.object(session, "_spawn", return_value=child) as mock_spawn:
-            result = session._ensure()
-        assert result is child
-        mock_spawn.assert_called_once()
-
-    def test_reuses_alive_child(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("src.ai.session.REPO_DIR", tmp_path)
-        child = _make_child(expect_idx=0)
-        session = CopilotSession()
-        session._child = child
-        with patch.object(session, "_spawn") as mock_spawn:
-            result = session._ensure()
-        assert result is child
-        mock_spawn.assert_not_called()
-
-    def test_respawns_dead_child(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("src.ai.session.REPO_DIR", tmp_path)
-        dead_child = _make_child()
-        dead_child.isalive.return_value = False
-        new_child = _make_child()
-        session = CopilotSession()
-        session._child = dead_child
-        with patch.object(session, "_spawn", return_value=new_child):
-            result = session._ensure()
-        assert result is new_child
-
-
-# ── _sync_send ────────────────────────────────────────────────────────────────
-
-class TestSyncSend:
-    def test_sends_and_returns_response(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("src.ai.session.REPO_DIR", tmp_path)
-        child = _make_child(before_text="  the answer  ")
-        session = CopilotSession()
-        with patch.object(session, "_ensure", return_value=child):
-            result = session._sync_send("What is 2+2?")
-        assert result == "the answer"
-        child.sendline.assert_called_once_with("What is 2+2?")
-
-    def test_timeout_resets_child_and_returns_warning(self, tmp_path, monkeypatch):
-        monkeypatch.setattr("src.ai.session.REPO_DIR", tmp_path)
-        child = MagicMock()
-        child.expect.side_effect = pexpect.TIMEOUT(30)
-        session = CopilotSession()
-        with patch.object(session, "_ensure", return_value=child):
-            result = session._sync_send("prompt")
+        proc = MagicMock()
+        proc.terminate = MagicMock()
+        proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
+        with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc)):
+            result = await CopilotSession().send("hi")
         assert "timed out" in result
-        assert session._child is None
 
-    def test_eof_resets_child_and_returns_warning(self, tmp_path, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_send_exception_returns_error(self, tmp_path, monkeypatch):
         monkeypatch.setattr("src.ai.session.REPO_DIR", tmp_path)
-        child = MagicMock()
-        child.expect.side_effect = pexpect.EOF("eof")
-        session = CopilotSession()
-        with patch.object(session, "_ensure", return_value=child):
-            result = session._sync_send("prompt")
-        assert "ended" in result
-        assert session._child is None
+        with patch("asyncio.create_subprocess_exec", AsyncMock(side_effect=OSError("boom"))):
+            result = await CopilotSession().send("hi")
+        assert "Session error" in result
 
-    def test_exception_resets_child_and_returns_warning(self, tmp_path, monkeypatch):
+
+# ── stream ────────────────────────────────────────────────────────────────────
+
+class TestStream:
+    @pytest.mark.asyncio
+    async def test_stream_yields_chunks(self, tmp_path, monkeypatch):
         monkeypatch.setattr("src.ai.session.REPO_DIR", tmp_path)
-        child = MagicMock()
-        child.expect.side_effect = RuntimeError("boom")
-        session = CopilotSession()
-        with patch.object(session, "_ensure", return_value=child):
-            result = session._sync_send("prompt")
-        assert "error" in result.lower()
-        assert session._child is None
+        lines = [b"A" * 50, b"B" * 50]
+        proc = _FakeProcess(lines)
+        proc.wait = AsyncMock(return_value=0)
+        with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc)):
+            chunks = []
+            async for c in CopilotSession().stream("q"):
+                chunks.append(c)
+        assert "".join(chunks).strip() != ""
 
-
-# ── _sync_stream_to_queue ─────────────────────────────────────────────────────
-
-class TestSyncStreamToQueue:
-    def test_streams_chunks_and_sends_sentinel(self, tmp_path, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_stream_strips_stats_footer(self, tmp_path, monkeypatch):
         monkeypatch.setattr("src.ai.session.REPO_DIR", tmp_path)
-        child = MagicMock()
-        # Simulate two chunks then a prompt terminator
-        child.read_nonblocking.side_effect = [
-            "hello ",
-            "world\n> ",
-            pexpect.TIMEOUT("t"),
-        ]
-        session = CopilotSession()
-        q: queue.SimpleQueue = queue.SimpleQueue()
-        with patch.object(session, "_ensure", return_value=child):
-            session._sync_stream_to_queue("prompt", q)
+        lines = [b"Hi!\n\nTotal usage est:        1 Premium request\n"]
+        proc = _FakeProcess(lines)
+        proc.wait = AsyncMock(return_value=0)
+        with patch("asyncio.create_subprocess_exec", AsyncMock(return_value=proc)):
+            result = "".join([c async for c in CopilotSession().stream("q")])
+        assert "Total usage est" not in result
+        assert "Hi!" in result
 
-        items = []
-        while not q.empty():
-            items.append(q.get_nowait())
-        assert None in items  # sentinel present
-        combined = "".join(i for i in items if i is not None)
-        assert "hello" in combined or "world" in combined
-
-    def test_eof_sends_sentinel(self, tmp_path, monkeypatch):
+    @pytest.mark.asyncio
+    async def test_stream_exception_yields_error(self, tmp_path, monkeypatch):
         monkeypatch.setattr("src.ai.session.REPO_DIR", tmp_path)
-        child = MagicMock()
-        child.read_nonblocking.side_effect = pexpect.EOF("eof")
-        session = CopilotSession()
-        q: queue.SimpleQueue = queue.SimpleQueue()
-        with patch.object(session, "_ensure", return_value=child):
-            session._sync_stream_to_queue("prompt", q)
-        items = []
-        while not q.empty():
-            items.append(q.get_nowait())
-        assert None in items
+        with patch("asyncio.create_subprocess_exec", AsyncMock(side_effect=OSError("fail"))):
+            chunks = [c async for c in CopilotSession().stream("q")]
+        assert any("Session error" in c for c in chunks)
 
 
 # ── close ─────────────────────────────────────────────────────────────────────
 
-class TestClose:
-    def test_close_kills_alive_child(self):
-        child = MagicMock()
-        child.isalive.return_value = True
-        session = CopilotSession()
-        session._child = child
-        session.close()
-        child.sendline.assert_called_once_with("/exit")
-        child.close.assert_called_once()
-        assert session._child is None
+def test_close_is_noop():
+    CopilotSession().close()  # must not raise
 
-    def test_close_noop_when_no_child(self):
-        session = CopilotSession()
-        session.close()  # must not raise
-        assert session._child is None
