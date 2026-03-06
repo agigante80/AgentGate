@@ -532,3 +532,84 @@ class TestCmdTa:
         await h.cmd_ta(update, ctx)
         text = update.effective_message.reply_text.call_args[0][0]
         assert "TeleAgent" in text
+
+
+# ── cmd_diff ──────────────────────────────────────────────────────────────────
+
+class TestCmdDiff:
+    async def test_diff_no_args_uses_head(self):
+        h = _make_handlers()
+        update = _make_update()
+        ctx = MagicMock()
+        ctx.args = []
+        with patch("src.bot.executor.run_shell", new=AsyncMock(return_value="diff output")) as mock_run:
+            await h.cmd_diff(update, ctx)
+        assert "HEAD~1 HEAD" in mock_run.call_args[0][0]
+
+    async def test_diff_numeric_arg(self):
+        h = _make_handlers()
+        update = _make_update()
+        ctx = MagicMock()
+        ctx.args = ["3"]
+        with patch("src.bot.executor.run_shell", new=AsyncMock(return_value="diff")) as mock_run:
+            await h.cmd_diff(update, ctx)
+        assert "HEAD~3 HEAD" in mock_run.call_args[0][0]
+
+    async def test_diff_sha_arg(self):
+        h = _make_handlers()
+        update = _make_update()
+        ctx = MagicMock()
+        ctx.args = ["abc1234"]
+        with patch("src.bot.executor.run_shell", new=AsyncMock(return_value="diff")) as mock_run:
+            await h.cmd_diff(update, ctx)
+        assert "abc1234 HEAD" in mock_run.call_args[0][0]
+
+    async def test_diff_empty_result_shows_no_changes(self):
+        h = _make_handlers()
+        update = _make_update()
+        ctx = MagicMock()
+        ctx.args = []
+        with patch("src.bot.executor.run_shell", new=AsyncMock(return_value="   ")):
+            await h.cmd_diff(update, ctx)
+        text = update.effective_message.reply_text.call_args[0][0]
+        assert "no changes" in text
+
+
+# ── cmd_log ───────────────────────────────────────────────────────────────────
+
+class TestCmdLog:
+    async def test_log_default_lines(self):
+        h = _make_handlers()
+        update = _make_update()
+        ctx = MagicMock()
+        ctx.args = []
+        with patch("src.bot.executor.run_shell", new=AsyncMock(return_value="log lines")) as mock_run:
+            await h.cmd_log(update, ctx)
+        assert "tail -n 20" in mock_run.call_args[0][0]
+
+    async def test_log_custom_lines(self):
+        h = _make_handlers()
+        update = _make_update()
+        ctx = MagicMock()
+        ctx.args = ["50"]
+        with patch("src.bot.executor.run_shell", new=AsyncMock(return_value="log")) as mock_run:
+            await h.cmd_log(update, ctx)
+        assert "tail -n 50" in mock_run.call_args[0][0]
+
+    async def test_log_clamps_to_max(self):
+        h = _make_handlers()
+        update = _make_update()
+        ctx = MagicMock()
+        ctx.args = ["9999"]
+        with patch("src.bot.executor.run_shell", new=AsyncMock(return_value="log")) as mock_run:
+            await h.cmd_log(update, ctx)
+        assert "tail -n 200" in mock_run.call_args[0][0]
+
+    async def test_log_invalid_arg_shows_usage(self):
+        h = _make_handlers()
+        update = _make_update()
+        ctx = MagicMock()
+        ctx.args = ["abc"]
+        await h.cmd_log(update, ctx)
+        text = update.effective_message.reply_text.call_args[0][0]
+        assert "Usage" in text
