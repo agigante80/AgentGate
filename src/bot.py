@@ -99,16 +99,51 @@ class _BotHandlers:
         self._active_ai: dict[str, float] = {}
         # Session-level confirmation flag; starts from env var, toggled by /taconfirm
         self._confirm_destructive: bool = settings.bot.confirm_destructive
-        # Voice transcription (None when WHISPER_PROVIDER=none)
+        self._transcriber: transcriber_mod.Transcriber | None = self._init_transcriber(settings)
+
+    def _init_transcriber(self, settings: Settings) -> "transcriber_mod.Transcriber | None":
+        """Create the transcriber from config, or return None when disabled."""
         try:
-            self._transcriber: transcriber_mod.Transcriber | None = transcriber_mod.create_transcriber(
+            tx = transcriber_mod.create_transcriber(
                 settings.voice, fallback_api_key=settings.ai.ai_api_key
             )
-            if isinstance(self._transcriber, transcriber_mod.NullTranscriber):
-                self._transcriber = None
+            return None if isinstance(tx, transcriber_mod.NullTranscriber) else tx
         except NotImplementedError as exc:
             logger.warning("Voice transcription unavailable: %s", exc)
-            self._transcriber = None
+            return None
+
+    async def _run_ai_pipeline(self, update: Update, text: str, chat_id: str) -> None:
+        """Shared AI pipeline: build prompt → stream/send → save history."""
+        key = text[:60]
+        self._active_ai[key] = time.time()
+        try:
+            if self._backend.is_stateful:
+                prompt = text
+            else:
+                hist = await history.get_history(chat_id) if self._settings.bot.history_enabled else []
+                prompt = history.build_context(hist, text)
+
+            if self._settings.bot.stream_responses:
+                response = await _stream_to_telegram(
+                    update, self._backend, prompt,
+                    self._settings.bot.max_output_chars,
+                    self._settings.bot.stream_throttle_secs,
+                )
+            else:
+                msg = await update.effective_message.reply_text("🤖 Thinking…")
+                response = await self._backend.send(prompt)
+                response = await executor.summarize_if_long(
+                    response, self._settings.bot.max_output_chars, self._backend
+                )
+                await msg.edit_text(response or "_(empty response)_")
+
+            if self._settings.bot.history_enabled:
+                await history.add_exchange(chat_id, text, response)
+        except Exception as exc:
+            logger.exception("AI backend error")
+            await _reply(update, f"⚠️ Error: {exc}")
+        finally:
+            self._active_ai.pop(key, None)
 
     # ── Utility commands ──────────────────────────────────────────────────
 
@@ -297,7 +332,6 @@ class _BotHandlers:
         await query.message.reply_text(f"```\n{result}\n```", parse_mode="Markdown")
 
     @_requires_auth
-    @_requires_auth
     async def handle_voice(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
         """Transcribe a voice/audio message and forward the text to the AI."""
         if self._transcriber is None:
@@ -320,75 +354,13 @@ class _BotHandlers:
             return
 
         await status_msg.edit_text(f"🎙️ I heard: _{text}_", parse_mode="Markdown")
-
-        # Inject the transcribed text into the AI pipeline
-        chat_id = str(update.effective_chat.id)
-        key = text[:60]
-        self._active_ai[key] = time.time()
-        try:
-            if self._backend.is_stateful:
-                prompt = text
-            else:
-                hist = await history.get_history(chat_id) if self._settings.bot.history_enabled else []
-                prompt = history.build_context(hist, text)
-
-            if self._settings.bot.stream_responses:
-                response = await _stream_to_telegram(
-                    update, self._backend, prompt,
-                    self._settings.bot.max_output_chars,
-                    self._settings.bot.stream_throttle_secs,
-                )
-            else:
-                ai_msg = await update.effective_message.reply_text("🤖 Thinking…")
-                response = await self._backend.send(prompt)
-                response = await executor.summarize_if_long(
-                    response, self._settings.bot.max_output_chars, self._backend
-                )
-                await ai_msg.edit_text(response or "_(empty response)_")
-
-            if self._settings.bot.history_enabled:
-                await history.add_exchange(chat_id, text, response)
-        except Exception as exc:
-            logger.exception("AI backend error after transcription")
-            await _reply(update, f"⚠️ Error: {exc}")
-        finally:
-            self._active_ai.pop(key, None)
+        await self._run_ai_pipeline(update, text, str(update.effective_chat.id))
 
     async def forward_to_ai(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
         text = update.effective_message.text or ""
         if not text:
             return
-        chat_id = str(update.effective_chat.id)
-        key = text[:60]
-        self._active_ai[key] = time.time()
-        try:
-            if self._backend.is_stateful:
-                prompt = text
-            else:
-                hist = await history.get_history(chat_id) if self._settings.bot.history_enabled else []
-                prompt = history.build_context(hist, text)
-
-            if self._settings.bot.stream_responses:
-                response = await _stream_to_telegram(
-                    update, self._backend, prompt,
-                    self._settings.bot.max_output_chars,
-                    self._settings.bot.stream_throttle_secs,
-                )
-            else:
-                msg = await update.effective_message.reply_text("🤖 Thinking…")
-                response = await self._backend.send(prompt)
-                response = await executor.summarize_if_long(
-                    response, self._settings.bot.max_output_chars, self._backend
-                )
-                await msg.edit_text(response or "_(empty response)_")
-
-            if self._settings.bot.history_enabled:
-                await history.add_exchange(chat_id, text, response)
-        except Exception as exc:
-            logger.exception("AI backend error")
-            await _reply(update, f"⚠️ Error: {exc}")
-        finally:
-            self._active_ai.pop(key, None)
+        await self._run_ai_pipeline(update, text, str(update.effective_chat.id))
 
 
 # ── App factory ──────────────────────────────────────────────────────────────

@@ -3,7 +3,8 @@ import hashlib
 import logging
 from pathlib import Path
 
-REPO_DIR = Path("/repo")
+from src.config import REPO_DIR
+
 logger = logging.getLogger(__name__)
 
 _DETECTORS: list[tuple[str, list[str]]] = [
