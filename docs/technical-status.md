@@ -1,6 +1,6 @@
 # TeleAgent — Technical Status & Backlog
 
-> Last updated: 2026-03-05
+> Last updated: 2026-03-06
 
 ---
 
@@ -41,8 +41,8 @@ src/
 └── ai/
     ├── adapter.py   # AICLIBackend ABC (send, stream, clear_history, close, is_stateful)
     ├── factory.py   # create_backend(AIConfig) → concrete backend
-    ├── copilot.py   # CopilotBackend — wraps CopilotSession PTY
-    ├── session.py   # CopilotSession — pexpect PTY + thread/queue bridge to async
+    ├── copilot.py   # CopilotBackend — wraps CopilotSession subprocess
+    ├── session.py   # CopilotSession — asyncio subprocess using `copilot -p` (non-interactive)
     ├── codex.py     # CodexBackend — asyncio subprocess, streaming via stdout
     └── direct.py    # DirectAPIBackend — OpenAI / Anthropic / Ollama native API
 ```
@@ -52,9 +52,8 @@ src/
 | Decision | Rationale |
 |---|---|
 | One container per project | Isolation, independent config, easy to kill/restart per project |
-| pexpect PTY for Copilot | Copilot CLI is interactive-only; no programmatic API |
-| Thread + SimpleQueue bridge | pexpect is sync; asyncio bridge via daemon thread + `queue.SimpleQueue` polled with `await asyncio.sleep(0.05)` |
-| `is_stateful` flag on backends | Copilot (PTY) and DirectAPI manage their own history; Codex is stateless so `history.py` injects past exchanges as context |
+| `copilot -p` subprocess per query | Non-interactive mode avoids TUI/PTY complexity and folder-trust dialogs |
+| `is_stateful` flag on backends | DirectAPI manages its own history; Copilot and Codex are stateless so `history.py` injects past exchanges as context |
 | aiosqlite at `/data/history.db` | Persists across restarts via Docker named volume; per `chat_id` isolation |
 | `_requires_auth` decorator | Single point of access control; wraps every handler method in `_BotHandlers` |
 | `REPO_DIR` / `DB_PATH` in `config.py` | Single source of truth for mount paths; all modules import from here |
@@ -82,6 +81,7 @@ src/
 | `/taclear` | `cmd_clear` | Clear SQLite history + backend in-memory history |
 | `/tainfo` | `cmd_info` | Repo, branch, AI backend, uptime, active tasks |
 | `/tahelp` | `cmd_help` | Full command reference including app version |
+| `/tarestart` | `cmd_restart` | Hot-swap AI backend without restarting the container |
 | _any other text_ | `forward_to_ai` | Sent to AI backend; history injected if `!is_stateful` |
 
 ---
@@ -123,24 +123,24 @@ Single file; all jobs wired with `needs:` + `if:` conditions.
 
 ## 4. Test Coverage
 
-As of v0.2.1 (165 tests, `pytest-cov>=5.0`):
+As of v0.2.1 (160 tests, `pytest-cov>=5.0`):
 
 | Module | Coverage |
 |---|---|
 | `src/executor.py` | 100% |
 | `src/history.py` | 100% |
 | `src/repo.py` | 100% |
-| `src/runtime.py` | 88% |
 | `src/ai/adapter.py` | 100% |
 | `src/ai/codex.py` | 100% |
 | `src/ai/factory.py` | 100% |
 | `src/config.py` | 98% |
-| `src/ai/session.py` | 79% |
+| `src/runtime.py` | 88% |
+| `src/ai/session.py` | 90% |
 | `src/ai/copilot.py` | 90% |
 | `src/ai/direct.py` | 80% |
 | `src/main.py` | 74% |
 | `src/bot.py` | 73% |
-| **TOTAL** | **84%** |
+| **TOTAL** | **86%** |
 
 CI enforces `--cov-fail-under=70`.
 
@@ -148,52 +148,36 @@ CI enforces `--cov-fail-under=70`.
 
 ## 5. Known Gaps & Technical Backlog
 
----
+### 5.1 Test coverage gaps
 
-### 5.1 Remaining test coverage gaps
-
-#### 5.1.1 `bot.py` — 73%, `main.py` — 74%
+#### `bot.py` — 73%, `main.py` — 74%
 
 Remaining uncovered lines:
-- `bot.py:52-72` — `build_app()` function body (handler registration)
-- `bot.py:169-189` — `cmd_info` (uptime formatting branches)
-- `main.py:73-82` — clone failure path + SIGTERM handler teardown
+- `bot.py:52-72` — `build_app()` handler registration block
+- `bot.py:169-189` — `cmd_info` uptime formatting branches
+- `bot.py:265-282` — streaming error/edge paths
+- `main.py:43-45` — clone failure path
+- `main.py:73-82` — SIGTERM handler teardown
+- `main.py:86` — `asyncio.run` exception branch
 
-#### 5.1.2 `ai/session.py` — 79%
+#### `ai/session.py` — 90%
 
-PTY streaming edge cases not yet reached:
-- Lines 85–99 — timeout path inside `_sync_stream_to_queue` main loop
-- Lines 109–111 — `PROMPT_RE` match with empty clean output
-- Lines 132–135 — generic exception in `_sync_stream_to_queue`
+Uncovered lines in subprocess mode:
+- Lines 45–46 — `TimeoutError` path (proc.terminate branch)
+- Line 81 — stdout drain inside stats-marker branch
+- Lines 88–91 — `_strip_stats` on remaining buffer after loop
 
----
+#### `ai/direct.py` — 80%
 
-### 5.2 npm packages not version-pinned (⚠️ Resolved — partially)
-
-`@github/copilot@0.0.421` and `@openai/codex@0.111.0` are now pinned in the Dockerfile.
-Dependabot monitors Docker but not npm globals; update manually when new versions ship.
-
----
-
-### 5.3 No `/tarestart` command ✅ Implemented
-
-`/tarestart` — calls `backend.close()` then re-initialises via `factory.create_backend()`.
+Uncovered streaming edge cases:
+- Lines 54–58, 64–68, 73–74 — provider-specific streaming branches
+- Lines 110–117 — exception handling in stream generator
 
 ---
 
-### 5.4 `runtime.py` reinstalls on every restart ✅ Implemented
+### 5.2 npm globals not covered by Dependabot
 
-Sentinel file per manifest (SHA-256 hash of file content) written under `/data/.install_sentinels/`.
-Install is skipped on subsequent starts if the manifest hasn't changed.
-
----
-
-### 5.5 Docker `HEALTHCHECK` ✅ Added
-
-```dockerfile
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD python -c "import src.config; import sys; sys.exit(0)"
-```
+`@github/copilot` and `@openai/codex` are pinned in the Dockerfile but Dependabot does not update npm globals installed via `RUN npm install -g`. Manual update required when new versions ship.
 
 ---
 
@@ -239,13 +223,12 @@ Each stack is fully independent. Create separate Telegram bots via BotFather (on
 | `python-telegram-bot` | `>=21` | Async-native; `Application` builder pattern |
 | `pydantic-settings` | `>=2` | `BaseSettings` with alias support |
 | `aiosqlite` | `>=0.20` | Async SQLite for history |
-| `pexpect` | `>=4.9` | PTY interaction with Copilot CLI |
 | `gitpython` | `>=3.1` | Repo clone/pull |
 | `openai` | `>=1.0` | Direct API + streaming |
 | `anthropic` | `>=0.28` | Anthropic direct API |
 | `ollama` | `>=0.1` | Ollama local API |
 | `pytest-cov` | `>=5.0` | Coverage reporting in CI |
 | Node.js | LTS (NodeSource) | Required by Copilot CLI and Codex CLI |
-| `@github/copilot` (npm) | latest | Copilot CLI — **not** `@githubnext/github-copilot-cli` (deprecated) |
-| `@openai/codex` (npm) | latest | OpenAI Codex CLI |
+| `@github/copilot` (npm) | pinned | Copilot CLI — **not** `@githubnext/github-copilot-cli` (deprecated) |
+| `@openai/codex` (npm) | pinned | OpenAI Codex CLI |
 | Go | 1.22.4 | Runtime auto-detection for Go projects |
