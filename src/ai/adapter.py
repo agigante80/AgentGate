@@ -1,5 +1,23 @@
+import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import AsyncGenerator
+
+from src.config import REPO_DIR
+
+
+class SubprocessMixin:
+    """Mixin for backends that execute commands as child processes in the repo directory."""
+
+    async def _spawn(
+        self, cmd: list[str], env: dict | None = None
+    ) -> asyncio.subprocess.Process:
+        return await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=str(REPO_DIR),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
+        )
 
 
 class AICLIBackend(ABC):

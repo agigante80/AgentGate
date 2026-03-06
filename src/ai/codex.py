@@ -2,12 +2,12 @@ import asyncio
 import logging
 from collections.abc import AsyncGenerator
 
-from src.ai.adapter import AICLIBackend
+from src.ai.adapter import AICLIBackend, SubprocessMixin
 from src.config import REPO_DIR
 logger = logging.getLogger(__name__)
 
 
-class CodexBackend(AICLIBackend):
+class CodexBackend(SubprocessMixin, AICLIBackend):
     def __init__(self, api_key: str, model: str = "o3") -> None:
         self._api_key = api_key
         self._model = model
@@ -20,13 +20,7 @@ class CodexBackend(AICLIBackend):
 
     async def _create_subprocess(self, prompt: str) -> asyncio.subprocess.Process:
         cmd, env = self._make_cmd(prompt)
-        return await asyncio.create_subprocess_exec(
-            *cmd,
-            cwd=str(REPO_DIR),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=env,
-        )
+        return await self._spawn(cmd, env)
 
     async def send(self, prompt: str) -> str:
         proc = await self._create_subprocess(prompt)

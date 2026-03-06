@@ -8,6 +8,7 @@ import logging
 import re
 from collections.abc import AsyncGenerator
 
+from src.ai.adapter import SubprocessMixin
 from src.config import REPO_DIR
 
 TIMEOUT = 180
@@ -18,7 +19,7 @@ logger = logging.getLogger(__name__)
 _STATS_RE = re.compile(r"\n\nTotal usage est:.*", re.DOTALL)
 
 
-class CopilotSession:
+class CopilotSession(SubprocessMixin):
     def __init__(self, model: str = "", env: dict | None = None) -> None:
         self._model = model
         self._env = env
@@ -31,13 +32,7 @@ class CopilotSession:
 
     async def send(self, prompt: str) -> str:
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *self._build_cmd(prompt),
-                cwd=str(REPO_DIR),
-                env=self._env,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
+            proc = await self._spawn(self._build_cmd(prompt), self._env)
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=TIMEOUT)
         except asyncio.TimeoutError:
             try:
@@ -55,13 +50,7 @@ class CopilotSession:
         _MARKER = "\n\nTotal usage est:"
         _KEEP = len(_MARKER)
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *self._build_cmd(prompt),
-                cwd=str(REPO_DIR),
-                env=self._env,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
+            proc = await self._spawn(self._build_cmd(prompt), self._env)
         except Exception as exc:
             logger.exception("Copilot stream error")
             yield f"⚠️ Session error: {exc}"

@@ -38,24 +38,24 @@ class DirectAPIBackend(AICLIBackend):
     def clear_history(self) -> None:
         self._messages.clear()
 
-    # ── Provider dispatch (avoids duplicating routing in send + stream) ──
+    # ── Provider dispatch ─────────────────────────────────────────────────
 
-    async def _do_send(self) -> str:
+    def _get_provider_callables(self):
+        """Return (send_fn, stream_fn) for the configured provider. Single routing point."""
         if self._provider in ("openai", "openai-compat", "ollama"):
-            return await self._openai_send()
+            return self._openai_send, self._openai_stream
         if self._provider == "anthropic":
-            return await self._anthropic_send()
+            return self._anthropic_send, self._anthropic_stream
         raise ValueError(f"Unknown AI_PROVIDER: {self._provider!r}")
 
+    async def _do_send(self) -> str:
+        send_fn, _ = self._get_provider_callables()
+        return await send_fn()
+
     async def _do_stream(self) -> AsyncGenerator[str, None]:
-        if self._provider in ("openai", "openai-compat", "ollama"):
-            async for chunk in self._openai_stream():
-                yield chunk
-        elif self._provider == "anthropic":
-            async for chunk in self._anthropic_stream():
-                yield chunk
-        else:
-            raise ValueError(f"Unknown AI_PROVIDER: {self._provider!r}")
+        _, stream_fn = self._get_provider_callables()
+        async for chunk in stream_fn():
+            yield chunk
 
     # ── Client factories (lazy, cached) ──────────────────────────────────
 
