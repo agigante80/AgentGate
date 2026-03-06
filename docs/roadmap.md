@@ -14,7 +14,7 @@ Items ordered: quick wins → medium effort → long-term architecture.
 
 ### 1.1 Test coverage gaps
 
-CI enforces `--cov-fail-under=70`; current total is **86%** (192 tests). Remaining gaps:
+CI enforces `--cov-fail-under=70`; current total is **86%** (194 tests). Remaining gaps:
 
 - `bot.py` — `build_app()` handler registration block; streaming error paths; `cmd_info` uptime branches
 - `main.py` — clone failure path; SIGTERM teardown; `asyncio.run` exception branch
@@ -60,7 +60,7 @@ Allow recurring shell commands or AI prompts:
 /ta schedule "check if any service is down" every 30m
 ```
 
-Backed by the existing APScheduler instance already wired in `bot.py`. Schedules stored in `/data/schedules.db` and survive restarts.
+Requires adding `APScheduler` as a dependency. Schedules stored in `/data/schedules.db` and survive restarts.
 
 ---
 
