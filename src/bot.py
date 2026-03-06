@@ -96,6 +96,8 @@ class _BotHandlers:
         self._pending_cmds: dict[tuple, str] = {}
         # prompt[:60] → start timestamp for active AI requests
         self._active_ai: dict[str, float] = {}
+        # Session-level confirmation flag; starts from env var, toggled by /taconfirm
+        self._confirm_destructive: bool = settings.bot.confirm_destructive
 
     # ── Utility commands ──────────────────────────────────────────────────
 
@@ -105,7 +107,12 @@ class _BotHandlers:
         if not cmd:
             await _reply(update, f"Usage: /{self._p}run <shell command>")
             return
-        if executor.is_destructive(cmd):
+        needs_confirm = (
+            self._confirm_destructive
+            and executor.is_destructive(cmd)
+            and not executor.is_exempt(cmd, self._settings.bot.skip_confirm_keywords)
+        )
+        if needs_confirm:
             kb = InlineKeyboardMarkup([[
                 InlineKeyboardButton("✅ Run", callback_data="confirm_run"),
                 InlineKeyboardButton("❌ Cancel", callback_data="cancel_run"),
@@ -144,8 +151,28 @@ class _BotHandlers:
             await _reply(update, "✅ AI is idle — ready for your next message.")
 
     @_requires_auth
+    async def cmd_confirm(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """Toggle or query the session-level destructive-command confirmation."""
+        arg = (ctx.args[0].lower() if ctx.args else "").strip()
+        if arg == "off":
+            self._confirm_destructive = False
+            await _reply(update, "⚡ Confirmation prompts *disabled* for this session.\nDestructive commands will run immediately.")
+        elif arg == "on":
+            self._confirm_destructive = True
+            await _reply(update, "🛡 Confirmation prompts *enabled* for this session.")
+        else:
+            state = "enabled 🛡" if self._confirm_destructive else "disabled ⚡"
+            source = "default" if self._confirm_destructive == self._settings.bot.confirm_destructive else "session override"
+            skipped = f"\nSkip-list: `{', '.join(self._settings.bot.skip_confirm_keywords)}`" if self._settings.bot.skip_confirm_keywords else ""
+            await _reply(update, f"Confirmation prompts: *{state}* ({source}){skipped}")
+
+    @_requires_auth
     async def cmd_help(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
         p = self._p
+        confirm_note = (
+            f"*Destructive shell commands* (push, merge, rm, force) require confirmation.\n"
+            f"Use `/{p}confirm off` to disable for this session, `/{p}confirm on` to re-enable."
+        )
         text = (
             f"🤖 *TeleAgent v{VERSION} — Command Reference*\n\n"
             f"*Utility commands:*\n"
@@ -155,12 +182,13 @@ class _BotHandlers:
             f"/{p}status — check if AI is busy\n"
             f"/{p}clear — clear conversation history\n"
             f"/{p}restart — restart AI backend session\n"
+            f"/{p}confirm `[on|off]` — toggle/query confirmation prompts\n"
             f"/{p}info — project & bot info\n"
             f"/{p}help — this message\n\n"
             f"*AI commands (forwarded to AI CLI):*\n"
             f"Any other text or /command is sent directly to the AI.\n"
             f"Examples: `/init`, `/plan`, `/review`, `/diff`, `/model`\n\n"
-            f"*Destructive shell commands* (push, merge, rm, force) require confirmation."
+            f"{confirm_note}"
         )
         await update.effective_message.reply_text(text, parse_mode="Markdown")
 
@@ -176,6 +204,7 @@ class _BotHandlers:
             ai_label += f" ({self._settings.ai.codex_model})"
         elif self._settings.ai.ai_cli == "api" and self._settings.ai.ai_model:
             ai_label += f" / {self._settings.ai.ai_provider} ({self._settings.ai.ai_model})"
+        confirm_state = "enabled 🛡" if self._confirm_destructive else "disabled ⚡"
         text = (
             f"ℹ️ *TeleAgent Info*\n\n"
             f"📁 Repo: `{self._settings.github.github_repo}`\n"
@@ -184,7 +213,8 @@ class _BotHandlers:
             f"⌨️ Prefix: `/{self._p}`\n"
             f"📏 Max output: `{self._settings.bot.max_output_chars}` chars\n"
             f"⏱ Uptime: `{h}h {m}m {s}s`\n"
-            f"🔄 Active AI tasks: `{len(self._active_ai)}`"
+            f"🔄 Active AI tasks: `{len(self._active_ai)}`\n"
+            f"🛡 Confirmations: `{confirm_state}`"
         )
         await update.effective_message.reply_text(text, parse_mode="Markdown")
 
@@ -272,6 +302,7 @@ def build_app(settings: Settings, backend: AICLIBackend, start_time: float) -> A
     app.add_handler(CommandHandler(f"{p}status", h.cmd_status))
     app.add_handler(CommandHandler(f"{p}clear", h.cmd_clear))
     app.add_handler(CommandHandler(f"{p}restart", h.cmd_restart))
+    app.add_handler(CommandHandler(f"{p}confirm", h.cmd_confirm))
     app.add_handler(CommandHandler(f"{p}help", h.cmd_help))
     app.add_handler(CommandHandler(f"{p}info", h.cmd_info))
     app.add_handler(CallbackQueryHandler(h.callback_handler))

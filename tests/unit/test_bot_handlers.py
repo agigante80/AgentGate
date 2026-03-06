@@ -17,6 +17,8 @@ def _make_settings(
     history_enabled=True,
     max_output=3000,
     stream_throttle=1.0,
+    confirm_destructive=True,
+    skip_confirm_keywords=None,
 ):
     tg = MagicMock(spec=TelegramConfig)
     tg.chat_id = chat_id
@@ -27,6 +29,8 @@ def _make_settings(
     bot.stream_responses = stream
     bot.history_enabled = history_enabled
     bot.stream_throttle_secs = stream_throttle
+    bot.confirm_destructive = confirm_destructive
+    bot.skip_confirm_keywords = skip_confirm_keywords or []
     gh = MagicMock(spec=GitHubConfig)
     gh.github_repo = "owner/repo"
     gh.branch = "main"
@@ -330,3 +334,68 @@ class TestCmdHelp:
         await h.cmd_help(update, MagicMock())
         text = update.effective_message.reply_text.call_args[0][0]
         assert "restart" in text
+
+    async def test_help_lists_confirm_command(self):
+        h = _make_handlers()
+        update = _make_update()
+        await h.cmd_help(update, MagicMock())
+        text = update.effective_message.reply_text.call_args[0][0]
+        assert "confirm" in text
+
+
+# ── cmd_confirm ───────────────────────────────────────────────────────────────
+
+class TestCmdConfirm:
+    async def test_confirm_off_disables(self):
+        h = _make_handlers(_make_settings(confirm_destructive=True))
+        update = _make_update(text="/taconfirm off")
+        update.effective_message.text = "/taconfirm off"
+        ctx = MagicMock()
+        ctx.args = ["off"]
+        await h.cmd_confirm(update, ctx)
+        assert h._confirm_destructive is False
+        update.effective_message.reply_text.assert_awaited()
+
+    async def test_confirm_on_enables(self):
+        h = _make_handlers(_make_settings(confirm_destructive=False))
+        update = _make_update(text="/taconfirm on")
+        ctx = MagicMock()
+        ctx.args = ["on"]
+        await h.cmd_confirm(update, ctx)
+        assert h._confirm_destructive is True
+
+    async def test_confirm_no_arg_reports_state(self):
+        h = _make_handlers(_make_settings(confirm_destructive=True))
+        update = _make_update()
+        ctx = MagicMock()
+        ctx.args = []
+        await h.cmd_confirm(update, ctx)
+        text = update.effective_message.reply_text.call_args[0][0]
+        assert "on" in text.lower() or "enabled" in text.lower()
+
+
+# ── cmd_run confirmation bypass ───────────────────────────────────────────────
+
+class TestCmdRunConfirmation:
+    async def test_destructive_skipped_when_confirm_disabled(self):
+        settings = _make_settings(confirm_destructive=False)
+        h = _make_handlers(settings)
+        update = _make_update(text="/trun rm -rf /tmp/foo")
+        ctx = MagicMock()
+        ctx.args = ["rm", "-rf", "/tmp/foo"]
+        with patch("src.bot.executor.run_shell", new=AsyncMock(return_value="done")):
+            await h.cmd_run(update, ctx)
+        # reply_text called with result, not inline keyboard
+        call_kwargs = update.effective_message.reply_text.call_args
+        assert call_kwargs is not None
+
+    async def test_destructive_skipped_for_exempt_keyword(self):
+        settings = _make_settings(confirm_destructive=True, skip_confirm_keywords=["rm"])
+        h = _make_handlers(settings)
+        update = _make_update(text="/trun rm -rf /tmp/foo")
+        ctx = MagicMock()
+        ctx.args = ["rm", "-rf", "/tmp/foo"]
+        with patch("src.bot.executor.run_shell", new=AsyncMock(return_value="done")):
+            await h.cmd_run(update, ctx)
+        call_kwargs = update.effective_message.reply_text.call_args
+        assert call_kwargs is not None
