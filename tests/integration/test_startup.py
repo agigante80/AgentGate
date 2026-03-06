@@ -52,6 +52,7 @@ class TestStartup:
             _ = mock_backend
 
         with patch("src.repo.clone", mock_clone), \
+             patch("src.repo.configure_git_auth", AsyncMock()), \
              patch("src.runtime.install_deps", mock_install), \
              patch("src.history.init_db", mock_init_db), \
              patch("src.ai.factory.create_backend", return_value=mock_backend):
