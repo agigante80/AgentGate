@@ -145,3 +145,26 @@ A lightweight read-only HTTP endpoint (FastAPI or Flask, single file) served ins
 Currently `copilot -p` is stateless per call; history is injected from SQLite by the bot. A future improvement could pre-warm a conversation with a system prompt that provides repo context, reducing repeated setup overhead for long sessions.
 
 ---
+
+### 2.11 Voice transcription — local Whisper (offline)
+
+Extend `WHISPER_PROVIDER=local` to use the `openai-whisper` Python package running on the local machine:
+
+- Model files are **downloaded on first use** (not bundled in the Docker image) and cached at `WHISPER_MODEL_DIR=/data/whisper-models`
+- Model size configurable via `WHISPER_MODEL=tiny|base|small|medium|large` (default: `base`)
+- No API key required; runs fully offline
+- Trade-off: first transcription is slow while the model downloads; subsequent calls are fast
+
+Implementation: `LocalWhisperTranscriber` in `src/transcriber.py` using `whisper.load_model()`.
+
+---
+
+### 2.12 Voice transcription — Google Speech-to-Text
+
+Extend `WHISPER_PROVIDER=google` to use the Google Cloud Speech-to-Text API:
+
+- Requires `google-cloud-speech` package and `GOOGLE_APPLICATION_CREDENTIALS` env var pointing to a service account JSON
+- Supports a wider range of audio formats natively
+- Per-minute billing via Google Cloud
+
+Implementation: `GoogleTranscriber` in `src/transcriber.py` using `google.cloud.speech.SpeechAsyncClient`.

@@ -3,7 +3,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.bot import _BotHandlers, build_app, _stream_to_telegram
-from src.config import Settings, TelegramConfig, BotConfig, AIConfig, GitHubConfig
+from src.config import Settings, TelegramConfig, BotConfig, AIConfig, GitHubConfig, VoiceConfig
 from src.ai.adapter import AICLIBackend
 
 
@@ -40,11 +40,17 @@ def _make_settings(
     ai.codex_model = "o3"
     ai.ai_provider = "openai"
     ai.ai_model = "gpt-4o"
+    ai.ai_api_key = ""
+    voice = MagicMock(spec=VoiceConfig)
+    voice.whisper_provider = "none"
+    voice.whisper_api_key = ""
+    voice.whisper_model = "whisper-1"
     s = MagicMock(spec=Settings)
     s.telegram = tg
     s.bot = bot
     s.github = gh
     s.ai = ai
+    s.voice = voice
     return s
 
 
@@ -399,3 +405,78 @@ class TestCmdRunConfirmation:
             await h.cmd_run(update, ctx)
         call_kwargs = update.effective_message.reply_text.call_args
         assert call_kwargs is not None
+
+
+# ── handle_voice ──────────────────────────────────────────────────────────────
+
+class TestHandleVoice:
+    async def test_voice_disabled_sends_message(self):
+        """When WHISPER_PROVIDER=none, bot replies with disabled notice."""
+        h = _make_handlers()  # voice.whisper_provider = "none" by default
+        update = _make_update()
+        voice_obj = MagicMock()
+        update.effective_message.voice = voice_obj
+        update.effective_message.audio = None
+        await h.handle_voice(update, MagicMock())
+        reply_text = update.effective_message.reply_text.call_args[0][0]
+        assert "disabled" in reply_text.lower()
+
+    async def test_voice_transcribes_and_calls_ai(self):
+        """With a mock transcriber, transcription is shown and AI is called."""
+        from src import transcriber as t_mod
+
+        mock_transcriber = MagicMock(spec=t_mod.Transcriber)
+        mock_transcriber.transcribe = AsyncMock(return_value="run the tests")
+
+        backend = _make_backend(stateful=True, response="Tests passed")
+        h = _make_handlers(backend=backend)
+        h._transcriber = mock_transcriber  # inject directly (bypasses factory)
+
+        voice_obj = AsyncMock()
+        tg_file = AsyncMock()
+        tg_file.download_as_bytearray = AsyncMock(return_value=bytearray(b"audio"))
+        voice_obj.get_file = AsyncMock(return_value=tg_file)
+
+        update = _make_update()
+        update.effective_message.voice = voice_obj
+        update.effective_message.audio = None
+        status_msg = AsyncMock()
+        update.effective_message.reply_text = AsyncMock(return_value=status_msg)
+
+        with patch("src.bot.history.add_exchange", new=AsyncMock()), \
+             patch("src.bot.history.get_history", new=AsyncMock(return_value=[])):
+            await h.handle_voice(update, MagicMock())
+
+        # Transcription shown
+        status_msg.edit_text.assert_awaited()
+        transcription_call = status_msg.edit_text.call_args_list[0][0][0]
+        assert "run the tests" in transcription_call
+
+        # AI was called with transcription
+        backend.send.assert_awaited_once_with("run the tests")
+
+    async def test_voice_transcription_error_shown(self):
+        """If transcription fails, error is shown."""
+        from src import transcriber as t_mod
+
+        mock_transcriber = MagicMock(spec=t_mod.Transcriber)
+        mock_transcriber.transcribe = AsyncMock(side_effect=RuntimeError("API down"))
+
+        h = _make_handlers()
+        h._transcriber = mock_transcriber
+
+        voice_obj = AsyncMock()
+        tg_file = AsyncMock()
+        tg_file.download_as_bytearray = AsyncMock(return_value=bytearray(b"audio"))
+        voice_obj.get_file = AsyncMock(return_value=tg_file)
+
+        update = _make_update()
+        update.effective_message.voice = voice_obj
+        update.effective_message.audio = None
+        status_msg = AsyncMock()
+        update.effective_message.reply_text = AsyncMock(return_value=status_msg)
+
+        await h.handle_voice(update, MagicMock())
+
+        error_text = status_msg.edit_text.call_args[0][0]
+        assert "API down" in error_text

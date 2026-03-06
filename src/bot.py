@@ -17,6 +17,7 @@ from src.ai.adapter import AICLIBackend
 from src.config import Settings, VERSION
 from src import executor, history, repo
 from src.ai import factory as ai_factory
+from src import transcriber as transcriber_mod
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,16 @@ class _BotHandlers:
         self._active_ai: dict[str, float] = {}
         # Session-level confirmation flag; starts from env var, toggled by /taconfirm
         self._confirm_destructive: bool = settings.bot.confirm_destructive
+        # Voice transcription (None when WHISPER_PROVIDER=none)
+        try:
+            self._transcriber: transcriber_mod.Transcriber | None = transcriber_mod.create_transcriber(
+                settings.voice, fallback_api_key=settings.ai.ai_api_key
+            )
+            if isinstance(self._transcriber, transcriber_mod.NullTranscriber):
+                self._transcriber = None
+        except NotImplementedError as exc:
+            logger.warning("Voice transcription unavailable: %s", exc)
+            self._transcriber = None
 
     # ── Utility commands ──────────────────────────────────────────────────
 
@@ -188,6 +199,9 @@ class _BotHandlers:
             f"*AI commands (forwarded to AI CLI):*\n"
             f"Any other text or /command is sent directly to the AI.\n"
             f"Examples: `/init`, `/plan`, `/review`, `/diff`, `/model`\n\n"
+            f"*Voice messages:*\n"
+            f"Send a voice or audio message to transcribe and forward to the AI.\n"
+            f"Requires `WHISPER_PROVIDER=openai` (see /{p}info for current status).\n\n"
             f"{confirm_note}"
         )
         await update.effective_message.reply_text(text, parse_mode="Markdown")
@@ -205,6 +219,7 @@ class _BotHandlers:
         elif self._settings.ai.ai_cli == "api" and self._settings.ai.ai_model:
             ai_label += f" / {self._settings.ai.ai_provider} ({self._settings.ai.ai_model})"
         confirm_state = "enabled 🛡" if self._confirm_destructive else "disabled ⚡"
+        voice_state = f"enabled ({self._settings.voice.whisper_provider})" if self._transcriber else "disabled"
         text = (
             f"ℹ️ *TeleAgent Info*\n\n"
             f"📁 Repo: `{self._settings.github.github_repo}`\n"
@@ -214,7 +229,8 @@ class _BotHandlers:
             f"📏 Max output: `{self._settings.bot.max_output_chars}` chars\n"
             f"⏱ Uptime: `{h}h {m}m {s}s`\n"
             f"🔄 Active AI tasks: `{len(self._active_ai)}`\n"
-            f"🛡 Confirmations: `{confirm_state}`"
+            f"🛡 Confirmations: `{confirm_state}`\n"
+            f"🎙️ Voice: `{voice_state}`"
         )
         await update.effective_message.reply_text(text, parse_mode="Markdown")
 
@@ -252,6 +268,63 @@ class _BotHandlers:
         await query.message.reply_text(f"```\n{result}\n```", parse_mode="Markdown")
 
     @_requires_auth
+    @_requires_auth
+    async def handle_voice(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """Transcribe a voice/audio message and forward the text to the AI."""
+        if self._transcriber is None:
+            await _reply(update, "🎙️ Voice messages are disabled. Set WHISPER_PROVIDER=openai to enable.")
+            return
+
+        voice = update.effective_message.voice or update.effective_message.audio
+        if voice is None:
+            return
+
+        status_msg = await update.effective_message.reply_text("🎙️ Transcribing…")
+        try:
+            tg_file = await voice.get_file()
+            audio_bytes = await tg_file.download_as_bytearray()
+            filename = f"voice.{'ogg' if update.effective_message.voice else 'mp3'}"
+            text = await self._transcriber.transcribe(bytes(audio_bytes), filename)
+        except Exception as exc:
+            logger.exception("Transcription error")
+            await status_msg.edit_text(f"⚠️ Transcription failed: {exc}")
+            return
+
+        await status_msg.edit_text(f"🎙️ I heard: _{text}_", parse_mode="Markdown")
+
+        # Inject the transcribed text into the AI pipeline
+        chat_id = str(update.effective_chat.id)
+        key = text[:60]
+        self._active_ai[key] = time.time()
+        try:
+            if self._backend.is_stateful:
+                prompt = text
+            else:
+                hist = await history.get_history(chat_id) if self._settings.bot.history_enabled else []
+                prompt = history.build_context(hist, text)
+
+            if self._settings.bot.stream_responses:
+                response = await _stream_to_telegram(
+                    update, self._backend, prompt,
+                    self._settings.bot.max_output_chars,
+                    self._settings.bot.stream_throttle_secs,
+                )
+            else:
+                ai_msg = await update.effective_message.reply_text("🤖 Thinking…")
+                response = await self._backend.send(prompt)
+                response = await executor.summarize_if_long(
+                    response, self._settings.bot.max_output_chars, self._backend
+                )
+                await ai_msg.edit_text(response or "_(empty response)_")
+
+            if self._settings.bot.history_enabled:
+                await history.add_exchange(chat_id, text, response)
+        except Exception as exc:
+            logger.exception("AI backend error after transcription")
+            await _reply(update, f"⚠️ Error: {exc}")
+        finally:
+            self._active_ai.pop(key, None)
+
     async def forward_to_ai(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
         text = update.effective_message.text or ""
         if not text:
@@ -306,6 +379,7 @@ def build_app(settings: Settings, backend: AICLIBackend, start_time: float) -> A
     app.add_handler(CommandHandler(f"{p}help", h.cmd_help))
     app.add_handler(CommandHandler(f"{p}info", h.cmd_info))
     app.add_handler(CallbackQueryHandler(h.callback_handler))
+    app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, h.handle_voice))
     app.add_handler(MessageHandler(filters.ALL & ~filters.COMMAND, h.forward_to_ai))
     # Forward all other /commands to AI as plain text
     app.add_handler(MessageHandler(filters.COMMAND, h.forward_to_ai))

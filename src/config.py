@@ -27,6 +27,8 @@ class BotConfig(BaseSettings):
     history_enabled: bool = True  # Set HISTORY_ENABLED=false to disable chat storage
     stream_responses: bool = True  # Set STREAM_RESPONSES=false to wait for full response
     stream_throttle_secs: float = 1.0  # Seconds between Telegram message edits during streaming
+    confirm_destructive: bool = True  # Set CONFIRM_DESTRUCTIVE=false to skip confirmation prompts
+    skip_confirm_keywords: list[str] = []  # e.g. SKIP_CONFIRM_KEYWORDS=push,rm — always bypassed
 
 
 class AIConfig(BaseSettings):
@@ -48,6 +50,14 @@ class AIConfig(BaseSettings):
     ai_base_url: str = ""
 
 
+class VoiceConfig(BaseSettings):
+    model_config = SettingsConfigDict(extra="ignore")
+
+    whisper_provider: Literal["none", "openai", "local", "google"] = "none"
+    whisper_api_key: str = ""  # Falls back to AIConfig.ai_api_key when provider=openai
+    whisper_model: str = "whisper-1"  # For local Whisper: tiny|base|small|medium|large
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
@@ -55,6 +65,7 @@ class Settings(BaseSettings):
     github: GitHubConfig = Field(default_factory=GitHubConfig)
     bot: BotConfig = Field(default_factory=BotConfig)
     ai: AIConfig = Field(default_factory=AIConfig)
+    voice: VoiceConfig = Field(default_factory=VoiceConfig)
 
     @classmethod
     def load(cls) -> "Settings":
@@ -63,6 +74,7 @@ class Settings(BaseSettings):
             github=GitHubConfig(),
             bot=BotConfig(),
             ai=AIConfig(),
+            voice=VoiceConfig(),
         )
 
 
