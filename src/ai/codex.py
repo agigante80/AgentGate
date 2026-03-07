@@ -3,7 +3,7 @@ import logging
 from collections.abc import AsyncGenerator
 
 from src.ai.adapter import AICLIBackend, SubprocessMixin
-from src.config import REPO_DIR
+from src.config import REPO_DIR  # noqa: F401 — test seam for monkeypatching
 logger = logging.getLogger(__name__)
 
 

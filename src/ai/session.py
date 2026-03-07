@@ -9,7 +9,7 @@ import re
 from collections.abc import AsyncGenerator
 
 from src.ai.adapter import SubprocessMixin
-from src.config import REPO_DIR
+from src.config import REPO_DIR  # noqa: F401 — test seam for monkeypatching
 
 TIMEOUT = 180
 
