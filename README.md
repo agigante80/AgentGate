@@ -186,6 +186,8 @@ Quick summary:
 
 > ⚠️ After any scope or event change, **reinstall the app** (step 5) to get a fresh token.
 
+> ⚠️ **Do not use `/` prefix in Slack** — Slack intercepts `/cmd` as a native slash command. Use `ta cmd` instead (`ta help`, `ta sync`, etc.).
+
 ---
 
 ## One Bot per Project

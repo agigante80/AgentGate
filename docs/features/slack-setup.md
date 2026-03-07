@@ -132,6 +132,11 @@ The bot sends a 🟢 Ready message to `SLACK_CHANNEL_ID` on startup (if set).
 
 ## Commands
 
+> ⚠️ **Slack intercepts any message starting with `/` as a native slash command.**  
+> TeleAgent does NOT use slash commands. Always use the plain-text `ta` prefix instead.  
+> `ta help` ✅ — `/help` ❌ (Slack will reject it as an unknown slash command)  
+> If you accidentally type `/cmd`, precede it with a space (` /cmd`) to send it as text — but it's better to just use `ta`.
+
 Commands use the configurable prefix (`BOT_CMD_PREFIX`, default `ta`) as plain-text messages — no slash command registration required:
 
 | Message | Action |
@@ -154,6 +159,7 @@ Commands use the configurable prefix (`BOT_CMD_PREFIX`, default `ta`) as plain-t
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| "*`/cmd` is not a valid command*" error from Slack | Slack intercepts messages starting with `/` as slash commands | Use the `ta` prefix instead: `ta help`, `ta sync`. If you must type `/`, precede with a space: ` /cmd` |
 | Bot visible in Apps but can't DM it | Messages Tab disabled | **App Home** → **Messages Tab** → enable "Allow users to send Slash commands and messages from the messages tab" |
 | Can't invite bot to channel | Missing scope or not installed | Reinstall app (step 5) after adding scopes |
 | `/invite @BotName` doesn't work | Use the channel's **Integrations** tab instead | Channel settings → **Integrations** → **Add apps** |
