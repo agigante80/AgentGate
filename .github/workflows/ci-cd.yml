@@ -341,7 +341,87 @@ jobs:
           echo "- **Results**: visible in the Security tab" >> $GITHUB_STEP_SUMMARY
 
   # --------------------------------------------------------------------------
-  # Job 6: Create GitHub Release (main only, after Docker publish)
+  # Job 6a: Pre-Release (develop/development — rolling develop-latest tag)
+  # --------------------------------------------------------------------------
+  pre-release:
+    name: GitHub Pre-Release (develop)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [version, docker-publish]
+    if: |
+      needs.version.result == 'success' &&
+      needs.docker-publish.result == 'success' &&
+      (github.ref == 'refs/heads/develop' || github.ref == 'refs/heads/development')
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 📝 Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD 2>/dev/null | grep -v develop-latest || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            CHANGELOG=$(git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges | head -20)
+          else
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" --no-merges -n 20)
+          fi
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: 🔖 Create or update rolling develop-latest tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Delete remote tag if it exists, then re-create at current SHA
+          git push origin :refs/tags/develop-latest 2>/dev/null || true
+          git tag -f develop-latest ${{ github.sha }}
+          git push origin refs/tags/develop-latest
+
+      - name: 🚀 Create GitHub Pre-Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: develop-latest
+          name: "develop-latest — v${{ needs.version.outputs.version }}"
+          prerelease: true
+          body: |
+            ## 🔨 Development Build — v${{ needs.version.outputs.version }}
+
+            > ⚠️ This is a rolling pre-release. It is overwritten on every push to `develop`.
+
+            ### 🐳 Docker Image
+
+            ```bash
+            docker pull ghcr.io/${{ github.repository_owner }}/teleagent:develop
+            # or
+            docker pull ghcr.io/${{ github.repository_owner }}/teleagent:development
+            # or (pinned)
+            docker pull ghcr.io/${{ github.repository_owner }}/teleagent:${{ needs.version.outputs.docker_version }}
+            ```
+
+            ### 📝 Recent Changes
+
+            ${{ steps.changelog.outputs.changelog }}
+
+            ---
+            **Commit**: `${{ github.sha }}`  |  **Branch**: `${{ github.ref_name }}`
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 📋 Pre-release summary
+        run: |
+          echo "### 🚀 Pre-Release Published" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tag**: \`develop-latest\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: \`${{ needs.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Docker**: \`ghcr.io/${{ github.repository_owner }}/teleagent:develop\`" >> $GITHUB_STEP_SUMMARY
+
+  # --------------------------------------------------------------------------
+  # Job 6b: Create GitHub Release (main only, after Docker publish)
   # --------------------------------------------------------------------------
   release:
     name: GitHub Release
@@ -412,7 +492,7 @@ jobs:
     name: Pipeline Summary
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [version, lint, test, docker-publish, security-scan, release]
+    needs: [version, lint, test, docker-publish, security-scan, pre-release, release]
     if: always()
     steps:
       - name: 📊 Generate pipeline summary
@@ -426,6 +506,7 @@ jobs:
           echo "| Tests | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Docker Publish | ${{ needs.docker-publish.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Security Scan | ${{ needs.security-scan.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Pre-Release | ${{ needs.pre-release.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Release | ${{ needs.release.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Version**: \`${{ needs.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
