@@ -12,7 +12,7 @@ Send messages to your Telegram bot and the AI responds in the context of your Gi
 - 📁 **Repo-aware** — clones your project on startup; AI runs in that directory
 - 💬 **Conversation history** — per-chat SQLite store, injected as context
 - ⚡ **Streaming responses** — message updates as the AI types (configurable)
-- 🔀 **Multi-turn sessions** — Copilot PTY session and direct API maintain state natively
+- 🔀 **Multi-turn sessions** — SQLite history injected for stateless backends; Direct API maintains native state
 - 🐳 **One container per project** — fully isolated, all config via env vars
 - 🔒 **Secure** — non-root container, allowlist by chat/user ID, confirmation for destructive shell commands
 
@@ -35,7 +35,7 @@ A Docker image is published automatically to GitHub Container Registry on every 
 
 | Branch/event | Image tag |
 |---|---|
-| Push to `develop` | `ghcr.io/agigante80/teleagent:develop` |
+| Push to `develop` or `development` | `ghcr.io/agigante80/teleagent:develop` + `ghcr.io/agigante80/teleagent:development` |
 | Push to `main` | `ghcr.io/agigante80/teleagent:latest` + `ghcr.io/agigante80/teleagent:main` |
 | Version release | `ghcr.io/agigante80/teleagent:X.Y.Z` |
 
@@ -127,6 +127,16 @@ Copy `.env.example` — it documents every variable with examples.
 | `HISTORY_ENABLED` | `true` | Set `false` to disable conversation history storage |
 | `STREAM_RESPONSES` | `true` | Set `false` to wait for full response before sending |
 | `STREAM_THROTTLE_SECS` | `1.0` | Seconds between streaming message edits |
+| `CONFIRM_DESTRUCTIVE` | `true` | Set `false` to skip confirmation for destructive shell commands |
+| `SKIP_CONFIRM_KEYWORDS` | — | Comma-separated keywords that bypass destructive confirmation (e.g. `push,rm`) |
+
+### Voice Transcription
+
+| Variable | Default | Description |
+|---|---|---|
+| `WHISPER_PROVIDER` | `none` | `none` \| `openai` — enables Telegram voice message transcription |
+| `WHISPER_API_KEY` | — | API key for Whisper (falls back to `AI_API_KEY` when provider is `openai`) |
+| `WHISPER_MODEL` | `whisper-1` | Whisper model name |
 
 ### Optional
 
