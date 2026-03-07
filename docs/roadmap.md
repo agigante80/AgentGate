@@ -1,6 +1,6 @@
 # TeleAgent — Roadmap
 
-> Last updated: 2026-03-06
+> Last updated: 2026-03-07
 
 This document tracks pending technical debt, known gaps, and future feature ideas, ordered by priority within each section.
 
@@ -48,6 +48,20 @@ CI enforces `--cov-fail-under=70`; current total is **86%** (194 tests). Remaini
 ## 2. Features
 
 Items ordered by practical value to the typical user.
+
+---
+
+### 2.0 Multi-platform messaging — Slack + Telegram *(medium)*
+
+Add Slack as an optional front-end alongside Telegram, chosen via `PLATFORM=telegram|slack`.
+
+**Design**: `MessagingAdapter` ABC in `src/platform/adapter.py`; `TelegramAdapter` (extracted from `bot.py`) and `SlackAdapter` (`slack-bolt[async]`, Socket Mode) both implement it. All AI, history, executor, and repo logic is already platform-agnostic and needs zero changes.
+
+**Key decisions documented in**: `docs/features/multi-platform-messaging.md`
+
+Notable challenges: Slack slash command registration (manual, one-time), Socket Mode requiring two tokens (`SLACK_BOT_TOKEN` + `SLACK_APP_TOKEN`), and `mrkdwn` vs Telegram Markdown formatting.
+
+**Also consider renaming the project** since it will no longer be Telegram-only. Candidates in the feature doc: AgentGate, BotBridge, DevRelay, MeshAgent, CliMesh.
 
 ---
 
