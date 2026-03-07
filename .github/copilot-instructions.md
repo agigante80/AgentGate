@@ -25,12 +25,12 @@ TeleAgent is an async Python Telegram bot that acts as a gateway to pluggable AI
 
 **Startup flow** (`src/main.py`): validate config → clone GitHub repo → auto-install deps → init SQLite history DB → create AI backend → start Telegram bot → send 🟢 Ready.
 
-**Config** (`src/config.py`): Pydantic `BaseSettings` split into four sub-configs (`TelegramConfig`, `GitHubConfig`, `BotConfig`, `AIConfig`). All settings come from env vars. `Settings.load()` constructs them and is the only entry point.
+**Config** (`src/config.py`): Pydantic `BaseSettings` split into five sub-configs (`TelegramConfig`, `GitHubConfig`, `BotConfig`, `AIConfig`, `VoiceConfig`). All settings come from env vars. `Settings.load()` constructs them and is the only entry point. Module-level `REPO_DIR` and `DB_PATH` constants are defined here — always import these instead of hardcoding `/repo` or `/data`.
 
 **AI backend abstraction** (`src/ai/`):
-- `adapter.py` defines the `AICLIBackend` ABC: `send()`, `stream()`, `clear_history()`, and the `is_stateful` class-level flag.
+- `adapter.py` defines the `AICLIBackend` ABC: `send()`, `stream()`, `clear_history()`, and the `is_stateful` class-level flag. Also defines `SubprocessMixin` for backends that spawn child processes in `REPO_DIR`.
 - `factory.py` selects the concrete backend based on the `AI_CLI` env var (`copilot` | `codex` | `api`).
-- `copilot.py` — stateful PTY session via `pexpect`; manages its own conversation state.
+- `copilot.py` + `session.py` — **stateless** `CopilotBackend` (`is_stateful = False`). `CopilotSession` spawns `copilot -p <prompt> --allow-all` as a subprocess; the bot provides history via context injection.
 - `codex.py` — stateful Codex CLI backend.
 - `direct.py` — stateless `DirectAPIBackend` for OpenAI / Anthropic / Ollama.
 
@@ -42,12 +42,18 @@ TeleAgent is an async Python Telegram bot that acts as a gateway to pluggable AI
 
 **History** (`src/history.py`): async SQLite at `/data/history.db`. Stores up to 10 exchanges per `chat_id`. Only used by stateless backends; stateful backends track context themselves.
 
+**Shell execution** (`src/executor.py`): `run_shell()` runs commands in `REPO_DIR`, appends `[exit N]`, and truncates long output (keeping the last N lines). `is_destructive()` keyword-checks commands; `is_exempt()` checks against `BotConfig.skip_confirm_keywords`. `summarize_if_long()` calls the AI backend when output exceeds `max_output_chars`.
+
+**Dependency auto-install** (`src/runtime.py`): detects `package.json`, `pyproject.toml`, `requirements.txt`, `go.mod` and runs the appropriate install command. Uses content-hash sentinel files at `/data/.install_sentinels/` to skip reinstalls when manifests haven't changed.
+
+**Voice transcription** (`src/transcriber.py`): `Transcriber` ABC with `NullTranscriber` (default, disabled) and `OpenAITranscriber`. `create_transcriber()` factory reads `VoiceConfig`. `WHISPER_API_KEY` falls back to `AI_API_KEY` when `WHISPER_PROVIDER=openai`.
+
 ## Key Conventions
 
-- **Adding a new AI backend**: subclass `AICLIBackend`, set `is_stateful`, implement `send()`, add a branch in `factory.py`.
+- **Adding a new AI backend**: subclass `AICLIBackend`, set `is_stateful`, implement `send()`, add a branch in `factory.py`. Use `SubprocessMixin` if your backend spawns child processes.
 - **Tests strip real credentials**: `conftest.py` has an `autouse` fixture that deletes real credential env vars so tests never accidentally hit live services.
 - **Test helpers**: use `MagicMock(spec=SettingsSubclass)` and set attributes directly — see `tests/unit/test_bot.py` for the `_make_settings` / `_make_update` pattern.
 - **Test layout**: `tests/unit/` — pure logic; `tests/contract/` — verifies all backends satisfy `AICLIBackend`; `tests/integration/` — heavier tests (history DB, factory).
 - **`pytest.ini`**: `asyncio_mode = auto`, so all `async def test_*` functions run without `@pytest.mark.asyncio`.
-- **Streaming throttle**: Telegram edits during streaming are capped at 1 edit/second (`_THROTTLE = 1.0` in `bot.py`) to avoid rate-limit errors.
-- **Docker paths**: repo is always at `/repo`; history DB at `/data/history.db`. These are hardcoded, not configurable.
+- **Streaming throttle**: Telegram edits during streaming are capped by `BotConfig.stream_throttle_secs` (default `1.0`s), configurable via `STREAM_THROTTLE_SECS` env var.
+- **Docker paths**: always use `REPO_DIR` and `DB_PATH` from `src/config.py`; hardcoded to `/repo` and `/data/history.db` in production.
