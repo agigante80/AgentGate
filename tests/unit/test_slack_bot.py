@@ -51,8 +51,6 @@ def _make_settings(
     ai_cfg = MagicMock(spec=AIConfig)
     ai_cfg.ai_cli = "api"
     ai_cfg.ai_api_key = "sk-test"
-    ai_cfg.copilot_model = ""
-    ai_cfg.codex_model = "o3"
     ai_cfg.ai_model = ""
     ai_cfg.ai_provider = ""
     voice = MagicMock(spec=VoiceConfig)

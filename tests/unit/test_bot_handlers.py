@@ -36,8 +36,6 @@ def _make_settings(
     gh.branch = "main"
     ai = MagicMock(spec=AIConfig)
     ai.ai_cli = "api"
-    ai.copilot_model = ""
-    ai.codex_model = "o3"
     ai.ai_provider = "openai"
     ai.ai_model = "gpt-4o"
     ai.ai_api_key = ""

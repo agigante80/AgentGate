@@ -94,7 +94,6 @@ class TestAIConfig:
     def test_default_backend(self):
         cfg = AIConfig()
         assert cfg.ai_cli == "copilot"
-        assert cfg.codex_model == "o3"
 
     def test_codex_backend(self, monkeypatch):
         monkeypatch.setenv("AI_CLI", "codex")

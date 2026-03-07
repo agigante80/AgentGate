@@ -51,17 +51,17 @@ class TestBackendFactory:
 
     def test_copilot_model_passed_through(self, monkeypatch):
         monkeypatch.setenv("AI_CLI", "copilot")
-        monkeypatch.setenv("COPILOT_MODEL", "gpt-4o")
+        monkeypatch.setenv("AI_MODEL", "gpt-4o")
         cfg = AIConfig()
         # Patch where CopilotSession is used, not where it's defined
         with patch("src.ai.copilot.CopilotSession") as MockSession:
             backend = create_backend(cfg)
         MockSession.assert_called_once_with(model="gpt-4o", env=MockSession.call_args[1]["env"], opts="")
-        assert cfg.copilot_model == "gpt-4o"
+        assert cfg.ai_model == "gpt-4o"
 
     def test_codex_model_passed_through(self, monkeypatch):
         monkeypatch.setenv("AI_CLI", "codex")
-        monkeypatch.setenv("CODEX_MODEL", "o4")
+        monkeypatch.setenv("AI_MODEL", "o4")
         cfg = AIConfig()
         backend = create_backend(cfg)
         assert backend._model == "o4"

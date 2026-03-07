@@ -46,11 +46,7 @@ class AIConfig(BaseSettings):
     ai_cli: Literal["copilot", "codex", "api"] = "copilot"
 
     # Copilot
-    copilot_model: str = ""
     copilot_skills_dirs: str = ""
-
-    # Codex
-    codex_model: str = "o3"
 
     # CLI options passthrough — passed verbatim to the backend CLI subprocess.
     # Empty (default) = each backend applies its own full-auto defaults:

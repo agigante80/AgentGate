@@ -132,12 +132,10 @@ Copy `.env.example` — it documents every variable with examples.
 |---|---|---|
 | `AI_CLI` | `copilot` | `copilot` \| `codex` \| `api` |
 | `COPILOT_GITHUB_TOKEN` | — | Fine-grained PAT with **Copilot Requests** permission (required for `copilot` backend) |
-| `COPILOT_MODEL` | — | Model override (e.g. `gpt-4o`) |
+| `AI_MODEL` | — | Model for any backend (e.g. `gpt-4o` for Copilot, `o3` for Codex, `claude-3-5-sonnet-20241022` for API). Codex defaults to `o3` when unset. |
 | `AI_PROVIDER` | — | For `api`: `openai` \| `anthropic` \| `ollama` \| `openai-compat` |
 | `AI_API_KEY` | — | API key for `codex` or `api` backends |
-| `AI_MODEL` | — | Model for `api` backend |
 | `AI_BASE_URL` | — | Base URL for Ollama or compatible endpoints |
-| `CODEX_MODEL` | `o3` | Model for `codex` backend |
 | `AI_CLI_OPTS` | — | Raw options passed verbatim to the CLI subprocess. **Empty (default) = full-auto per backend** (Copilot: `--allow-all`; Codex: `--approval-mode full-auto`). **When set, replaces the defaults entirely** — must include full-auto flags if still needed (e.g. `--allow-all --allow-url github.com`). Ignored (with a warning) when `AI_CLI=api`. |
 
 ### Bot Behaviour
@@ -238,7 +236,7 @@ COPILOT_GITHUB_TOKEN=github_pat_...
 ```env
 AI_CLI=codex
 AI_API_KEY=sk-...
-CODEX_MODEL=o3
+AI_MODEL=o3
 ```
 
 ### Direct API — OpenAI / Anthropic / Ollama
