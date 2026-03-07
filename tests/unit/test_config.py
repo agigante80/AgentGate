@@ -2,7 +2,7 @@
 import pytest
 from pydantic import ValidationError
 
-from src.config import AIConfig, BotConfig, GitHubConfig, TelegramConfig
+from src.config import AIConfig, BotConfig, GitHubConfig, SlackConfig, TelegramConfig
 
 
 class TestTelegramConfig:
@@ -12,6 +12,13 @@ class TestTelegramConfig:
         cfg = TelegramConfig()
         assert cfg.bot_token == "tok:ABC"
         assert cfg.chat_id == "12345"
+
+    def test_fields_optional_default_empty(self):
+        # TelegramConfig fields are now optional so PLATFORM=slack deployments
+        # don't need to set TG_* vars.
+        cfg = TelegramConfig()
+        assert cfg.bot_token == ""
+        assert cfg.chat_id == ""
 
     def test_allowed_users_default_empty(self, monkeypatch):
         monkeypatch.setenv("TG_BOT_TOKEN", "x")
@@ -25,6 +32,29 @@ class TestTelegramConfig:
         monkeypatch.setenv("ALLOWED_USERS", "[111,222,333]")
         cfg = TelegramConfig()
         assert cfg.allowed_users == [111, 222, 333]
+
+
+class TestSlackConfig:
+    def test_defaults(self):
+        cfg = SlackConfig()
+        assert cfg.slack_bot_token == ""
+        assert cfg.slack_app_token == ""
+        assert cfg.slack_channel_id == ""
+        assert cfg.allowed_users == []
+
+    def test_tokens_from_env(self, monkeypatch):
+        monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
+        monkeypatch.setenv("SLACK_APP_TOKEN", "xapp-test")
+        cfg = SlackConfig()
+        assert cfg.slack_bot_token == "xoxb-test"
+        assert cfg.slack_app_token == "xapp-test"
+
+    def test_channel_and_users_from_env(self, monkeypatch):
+        monkeypatch.setenv("SLACK_CHANNEL_ID", "C0123456")
+        monkeypatch.setenv("SLACK_ALLOWED_USERS", '["U111","U222"]')
+        cfg = SlackConfig()
+        assert cfg.slack_channel_id == "C0123456"
+        assert cfg.allowed_users == ["U111", "U222"]
 
 
 class TestGitHubConfig:

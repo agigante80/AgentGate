@@ -1,6 +1,6 @@
 # Feature: Multi-Platform Messaging (Slack + Telegram)
 
-> Status: **Planned**
+> Status: **Implemented** (v0.2.9)
 > Branch: `develop`
 
 ---

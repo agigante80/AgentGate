@@ -1,14 +1,15 @@
 # TeleAgent
 
-> **One Docker container per project.** Telegram is the interface to a pluggable AI CLI — GitHub Copilot, OpenAI Codex, or any OpenAI-compatible / Anthropic API.
+> **One Docker container per project.** Telegram or Slack is the interface to a pluggable AI CLI — GitHub Copilot, OpenAI Codex, or any OpenAI-compatible / Anthropic API.
 
-Send messages to your Telegram bot and the AI responds in the context of your GitHub repository. No context switching, no browser — just chat.
+Send messages to your bot and the AI responds in the context of your GitHub repository. No context switching, no browser — just chat.
 
 ---
 
 ## Features
 
 - 🤖 **Pluggable AI backends** — Copilot CLI, Codex CLI, OpenAI, Anthropic, Ollama
+- 💬 **Multi-platform** — Telegram or Slack (Socket Mode); choose via `PLATFORM=telegram|slack`
 - 📁 **Repo-aware** — clones your project on startup; AI runs in that directory
 - 💬 **Conversation history** — per-chat SQLite store, injected as context
 - ⚡ **Streaming responses** — message updates as the AI types (configurable)
@@ -96,12 +97,30 @@ Destructive shell commands (`push`, `merge`, `rm`, `force`) require inline confi
 
 Copy `.env.example` — it documents every variable with examples.
 
-### Required
+### Platform
+
+| Variable | Default | Description |
+|---|---|---|
+| `PLATFORM` | `telegram` | `telegram` \| `slack` — selects the messaging platform |
+
+### Required — Telegram (`PLATFORM=telegram`)
 
 | Variable | Description |
 |---|---|
 | `TG_BOT_TOKEN` | Bot token from [@BotFather](https://t.me/BotFather) |
 | `TG_CHAT_ID` | Your Telegram chat/group ID — bot ignores all others |
+
+### Required — Slack (`PLATFORM=slack`)
+
+| Variable | Description |
+|---|---|
+| `SLACK_BOT_TOKEN` | Bot OAuth token (`xoxb-…`) from your Slack App |
+| `SLACK_APP_TOKEN` | App-level token (`xapp-…`) for Socket Mode |
+
+### Shared / Always Required
+
+| Variable | Description |
+|---|---|
 | `GITHUB_REPO_TOKEN` | PAT with `repo` scope — used for git clone/push |
 | `GITHUB_REPO` | `owner/repo` format |
 
@@ -143,9 +162,25 @@ Copy `.env.example` — it documents every variable with examples.
 
 | Variable | Description |
 |---|---|
-| `ALLOWED_USERS` | Comma-separated Telegram user IDs (extra allowlist) |
+| `ALLOWED_USERS` | Comma-separated Telegram user IDs (extra allowlist, Telegram only) |
+| `SLACK_CHANNEL_ID` | Restrict Slack bot to a single channel (e.g. `C0123456789`) |
+| `SLACK_ALLOWED_USERS` | JSON array of Slack user IDs allowed to use the bot (e.g. `["U111","U222"]`) |
 | `BRANCH` | Git branch to clone (default: `main`) |
 | `REPO_HOST_PATH` | Host directory to bind-mount as `/repo` — persists across rebuilds |
+
+---
+
+## Slack Setup
+
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From scratch**
+2. Under **OAuth & Permissions**, add Bot Token Scopes: `chat:write`, `channels:history`, `groups:history`, `im:history`, `mpim:history`, `files:read`
+3. Install the app to your workspace — copy the **Bot OAuth Token** (`xoxb-…`) → `SLACK_BOT_TOKEN`
+4. Under **Socket Mode**, enable it — copy the **App-Level Token** (`xapp-…`) → `SLACK_APP_TOKEN`
+5. Under **Event Subscriptions** → **Subscribe to bot events**: `message.channels`, `message.groups`, `message.im`, `message.mpim`
+6. Invite the bot to a channel: `/invite @YourBotName` — copy the channel ID → `SLACK_CHANNEL_ID` (optional but recommended)
+7. Set `PLATFORM=slack` in your `.env` (remove or leave `TG_*` vars — they're not needed)
+
+Commands work as plain-text prefix messages (e.g. `ta sync`, `ta run ls -la`). No slash command registration required.
 
 ---
 

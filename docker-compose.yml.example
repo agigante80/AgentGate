@@ -12,6 +12,21 @@ services:
       # Optional: mount a custom Copilot skills directory
       # - ./skills:/skills:ro
 
+    # ── Platform selection ─────────────────────────────────────────────────────
+    # Uncomment one platform block in your .env file (not both).
+    #
+    # Telegram (default):
+    #   PLATFORM=telegram
+    #   TG_BOT_TOKEN=1234567890:ABC...
+    #   TG_CHAT_ID=-1001234567890
+    #
+    # Slack (Socket Mode):
+    #   PLATFORM=slack
+    #   SLACK_BOT_TOKEN=xoxb-...
+    #   SLACK_APP_TOKEN=xapp-...
+    #   SLACK_CHANNEL_ID=C0123456789      # optional: restrict to one channel
+    #   SLACK_ALLOWED_USERS=["U111","U222"] # optional: restrict by user ID
+
 volumes:
   repo_data:
   data_volume:

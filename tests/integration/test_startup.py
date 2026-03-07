@@ -21,6 +21,7 @@ class TestStartup:
         ai = MagicMock(spec=AIConfig)
         ai.ai_cli = "api"
         settings = MagicMock(spec=Settings)
+        settings.platform = "telegram"
         settings.telegram = tg
         settings.github = gh
         settings.bot = bot
