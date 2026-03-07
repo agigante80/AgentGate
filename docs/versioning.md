@@ -1,6 +1,6 @@
 # Versioning Guide
 
-TeleAgent uses **Semantic Versioning** ([semver.org](https://semver.org)): `MAJOR.MINOR.PATCH`
+AgentGate uses **Semantic Versioning** ([semver.org](https://semver.org)): `MAJOR.MINOR.PATCH`
 
 ---
 

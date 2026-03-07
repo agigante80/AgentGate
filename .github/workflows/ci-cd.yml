@@ -38,7 +38,7 @@ permissions:
 env:
   PYTHON_VERSION: '3.12'
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository_owner }}/teleagent
+  IMAGE_NAME: ${{ github.repository_owner }}/agentgate
   DOCKER_PLATFORMS: 'linux/amd64,linux/arm64'
 
 # ============================================================================
@@ -314,13 +314,13 @@ jobs:
           context: .
           push: false
           load: true
-          tags: teleagent:scan
+          tags: agentgate:scan
           cache-from: type=gha,scope=${{ github.ref_name }}
 
       - name: 🔒 Run Trivy vulnerability scan
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: teleagent:scan
+          image-ref: agentgate:scan
           format: sarif
           output: trivy-results.sarif
           severity: CRITICAL,HIGH
@@ -396,11 +396,11 @@ jobs:
             ### 🐳 Docker Image
 
             ```bash
-            docker pull ghcr.io/${{ github.repository_owner }}/teleagent:develop
+            docker pull ghcr.io/${{ github.repository_owner }}/agentgate:develop
             # or
-            docker pull ghcr.io/${{ github.repository_owner }}/teleagent:development
+            docker pull ghcr.io/${{ github.repository_owner }}/agentgate:development
             # or (pinned)
-            docker pull ghcr.io/${{ github.repository_owner }}/teleagent:${{ needs.version.outputs.docker_version }}
+            docker pull ghcr.io/${{ github.repository_owner }}/agentgate:${{ needs.version.outputs.docker_version }}
             ```
 
             ### 📝 Recent Changes
@@ -418,7 +418,7 @@ jobs:
           echo "### 🚀 Pre-Release Published" >> $GITHUB_STEP_SUMMARY
           echo "- **Tag**: \`develop-latest\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Version**: \`${{ needs.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- **Docker**: \`ghcr.io/${{ github.repository_owner }}/teleagent:develop\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Docker**: \`ghcr.io/${{ github.repository_owner }}/agentgate:develop\`" >> $GITHUB_STEP_SUMMARY
 
   # --------------------------------------------------------------------------
   # Job 6b: Create GitHub Release (main only, after Docker publish)
@@ -465,9 +465,9 @@ jobs:
             ### 🐳 Docker Image
 
             ```bash
-            docker pull ghcr.io/${{ github.repository_owner }}/teleagent:${{ needs.version.outputs.docker_version }}
+            docker pull ghcr.io/${{ github.repository_owner }}/agentgate:${{ needs.version.outputs.docker_version }}
             # or
-            docker pull ghcr.io/${{ github.repository_owner }}/teleagent:latest
+            docker pull ghcr.io/${{ github.repository_owner }}/agentgate:latest
             ```
 
             ### 📝 Changelog

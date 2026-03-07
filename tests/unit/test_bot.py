@@ -6,7 +6,7 @@ from src.bot import _is_allowed, _prefix
 from src.config import Settings, TelegramConfig, GitHubConfig, BotConfig, AIConfig
 
 
-def _make_settings(chat_id="99999", prefix="ta", allowed_users=None):
+def _make_settings(chat_id="99999", prefix="gate", allowed_users=None):
     tg = MagicMock(spec=TelegramConfig)
     tg.chat_id = chat_id
     tg.allowed_users = allowed_users or []
@@ -30,12 +30,12 @@ def _make_update(chat_id="99999", user_id=None):
 
 class TestPrefix:
     def test_default_prefix(self):
-        s = _make_settings(prefix="ta")
-        assert _prefix(s) == "ta"
+        s = _make_settings(prefix="gate")
+        assert _prefix(s) == "gate"
 
     def test_uppercase_normalized(self):
-        s = _make_settings(prefix="TA")
-        assert _prefix(s) == "ta"
+        s = _make_settings(prefix="GATE")
+        assert _prefix(s) == "gate"
 
     def test_hyphens_stripped(self):
         s = _make_settings(prefix="my-bot")

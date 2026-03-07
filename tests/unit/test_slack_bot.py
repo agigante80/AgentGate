@@ -30,7 +30,7 @@ def _make_settings(
     stream_throttle=1.0,
     slack_bot_token="xoxb-test",
     slack_app_token="xapp-test",
-    prefix="ta",
+    prefix="gate",
 ):
     bot = MagicMock(spec=BotConfig)
     bot.bot_cmd_prefix = prefix
@@ -143,7 +143,7 @@ class TestCommandRouting:
         say = _make_say()
         client = _make_client()
         with patch("src.repo.pull", AsyncMock(return_value="up to date")):
-            event = _make_event(text="ta sync")
+            event = _make_event(text="gate sync")
             await bot._on_message(event, say, client)
         assert say.call_count >= 1
 
@@ -152,14 +152,14 @@ class TestCommandRouting:
         say = _make_say()
         client = _make_client()
         with patch("src.repo.status", AsyncMock(return_value="On branch main")):
-            await bot._on_message(_make_event(text="ta git"), say, client)
+            await bot._on_message(_make_event(text="gate git"), say, client)
         assert say.call_count >= 1
 
     async def test_unknown_subcommand_shows_help(self):
         bot = _make_bot()
         say = _make_say()
         client = _make_client()
-        await bot._on_message(_make_event(text="ta unknowncmd"), say, client)
+        await bot._on_message(_make_event(text="gate unknowncmd"), say, client)
         # Should send error + help
         assert say.call_count >= 1
         all_text = " ".join(str(c) for c in say.call_args_list)
@@ -180,7 +180,7 @@ class TestCommandRouting:
         bot = _make_bot()
         say = _make_say()
         client = _make_client()
-        event = _make_event(text="ta sync")
+        event = _make_event(text="gate sync")
         event["bot_id"] = "BBOT123"
         await bot._on_message(event, say, client)
         say.assert_not_awaited()

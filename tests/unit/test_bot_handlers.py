@@ -11,7 +11,7 @@ from src.ai.adapter import AICLIBackend
 
 def _make_settings(
     chat_id="99999",
-    prefix="ta",
+    prefix="gate",
     allowed_users=None,
     stream=False,
     history_enabled=True,
@@ -332,7 +332,7 @@ class TestCmdHelp:
             # reload re-imports VERSION; just check string directly
             await h.cmd_help(update, MagicMock())
         text = update.effective_message.reply_text.call_args[0][0]
-        assert "TeleAgent" in text
+        assert "AgentGate" in text
 
     async def test_help_lists_restart_command(self):
         h = _make_handlers()
@@ -492,7 +492,7 @@ class TestCmdTa:
         ctx.args = ["help"]
         await h.cmd_ta(update, ctx)
         text = update.effective_message.reply_text.call_args[0][0]
-        assert "TeleAgent" in text
+        assert "AgentGate" in text
 
     async def test_dispatches_info(self):
         h = _make_handlers()
@@ -522,7 +522,7 @@ class TestCmdTa:
         await h.cmd_ta(update, ctx)
         calls = [c[0][0] for c in update.effective_message.reply_text.call_args_list]
         assert any("Unknown" in t or "unknown" in t for t in calls)
-        assert any("TeleAgent" in t for t in calls)
+        assert any("AgentGate" in t for t in calls)
 
     async def test_no_args_shows_help(self):
         h = _make_handlers()
@@ -531,7 +531,7 @@ class TestCmdTa:
         ctx.args = []
         await h.cmd_ta(update, ctx)
         text = update.effective_message.reply_text.call_args[0][0]
-        assert "TeleAgent" in text
+        assert "AgentGate" in text
 
 
 # ── cmd_diff ──────────────────────────────────────────────────────────────────

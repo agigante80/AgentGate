@@ -1,8 +1,10 @@
-# TeleAgent
+# AgentGate
 
-> **One Docker container per project.** Telegram or Slack is the interface to a pluggable AI CLI — GitHub Copilot, OpenAI Codex, or any OpenAI-compatible / Anthropic API.
+**Your AI CLI, anywhere.**
 
-Send messages to your bot and the AI responds in the context of your GitHub repository. No context switching, no browser — just chat.
+Chat with your AI coding assistant (GitHub Copilot, Codex, OpenAI, Anthropic) via Telegram or Slack — one Docker container per project, zero context switching.
+
+> ✅ Works with **Telegram** | ✅ Works with **Slack** | ✅ Tested on **Synology NAS** | ✅ Tested with **GitHub Copilot**
 
 ---
 
@@ -36,19 +38,19 @@ A Docker image is published automatically to GitHub Container Registry on every 
 
 | Branch/event | Image tag |
 |---|---|
-| Push to `develop` or `development` | `ghcr.io/agigante80/teleagent:develop` + `ghcr.io/agigante80/teleagent:development` |
-| Push to `main` | `ghcr.io/agigante80/teleagent:latest` + `ghcr.io/agigante80/teleagent:main` |
-| Version release | `ghcr.io/agigante80/teleagent:X.Y.Z` |
+| Push to `develop` or `development` | `ghcr.io/agigante80/agentgate:develop` + `ghcr.io/agigante80/agentgate:development` |
+| Push to `main` | `ghcr.io/agigante80/agentgate:latest` + `ghcr.io/agigante80/agentgate:main` |
+| Version release | `ghcr.io/agigante80/agentgate:X.Y.Z` |
 
 ```bash
 # Latest stable
-docker pull ghcr.io/agigante80/teleagent:latest
+docker pull ghcr.io/agigante80/agentgate:latest
 
 # Latest development build
-docker pull ghcr.io/agigante80/teleagent:develop
+docker pull ghcr.io/agigante80/agentgate:develop
 
 # Specific version
-docker pull ghcr.io/agigante80/teleagent:0.2.1
+docker pull ghcr.io/agigante80/agentgate:0.4.0
 ```
 
 In your `docker-compose.yml`, replace the `build:` section with:
@@ -56,25 +58,25 @@ In your `docker-compose.yml`, replace the `build:` section with:
 ```yaml
 services:
   bot:
-    image: ghcr.io/agigante80/teleagent:latest
+    image: ghcr.io/agigante80/agentgate:latest
 ```
 
 ---
 
 ## Bot Commands
 
-Commands use a configurable prefix (`BOT_CMD_PREFIX`, default `ta`):
+Commands use a configurable prefix (`BOT_CMD_PREFIX`, default `gate`):
 
 | Command | Description |
 |---|---|
-| `/tarun <cmd>` | Run a shell command in the repo |
-| `/tasync` | `git pull` |
-| `/tagit` | `git status` + last 3 commits |
-| `/tastatus` | Show active AI requests |
-| `/taclear` | Clear conversation history |
-| `/tarestart` | Restart the AI backend session |
-| `/tainfo` | Repo, branch, AI backend, uptime |
-| `/tahelp` | Full command reference + version |
+| `/gate run <cmd>` | Run a shell command in the repo |
+| `/gate sync` | `git pull` |
+| `/gate git` | `git status` + last 3 commits |
+| `/gate status` | Show active AI requests |
+| `/gate clear` | Clear conversation history |
+| `/gate restart` | Restart the AI backend session |
+| `/gate info` | Repo, branch, AI backend, uptime |
+| `/gate help` | Full command reference + version |
 
 **Everything else** (free text or any other `/command`) is forwarded to the AI.
 
@@ -142,7 +144,7 @@ Copy `.env.example` — it documents every variable with examples.
 
 | Variable | Default | Description |
 |---|---|---|
-| `BOT_CMD_PREFIX` | `ta` | Prefix for utility commands |
+| `BOT_CMD_PREFIX` | `gate` | Prefix for utility commands |
 | `MAX_OUTPUT_CHARS` | `3000` | Truncate/summarize output beyond this length |
 | `HISTORY_ENABLED` | `true` | Set `false` to disable conversation history storage |
 | `STREAM_RESPONSES` | `true` | Set `false` to wait for full response before sending |
@@ -186,7 +188,7 @@ Quick summary:
 
 > ⚠️ After any scope or event change, **reinstall the app** (step 5) to get a fresh token.
 
-> ⚠️ **Do not use `/` prefix in Slack** — Slack intercepts `/cmd` as a native slash command. Use `ta cmd` instead (`ta help`, `ta sync`, etc.).
+> ⚠️ **Do not use `/` prefix in Slack** — Slack intercepts `/cmd` as a native slash command. Use `gate cmd` instead (`gate help`, `gate sync`, etc.). If you need to send a message starting with `/`, prepend a space: ` /cmd`.
 
 ---
 

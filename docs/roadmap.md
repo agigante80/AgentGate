@@ -1,4 +1,4 @@
-# TeleAgent — Roadmap
+# AgentGate — Roadmap
 
 > Last updated: 2026-03-07
 

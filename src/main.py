@@ -30,7 +30,7 @@ def _read_version() -> str:
 def _log_startup_banner(settings: Settings, version: str) -> None:
     sep = "=" * 56
     logger.info(sep)
-    logger.info("TeleAgent v%s", version)
+    logger.info("AgentGate v%s", version)
     logger.info("  Platform : %s", settings.platform)
     logger.info("  AI       : %s", settings.ai.ai_cli)
     logger.info("  Repo     : %s", settings.github.github_repo)
@@ -70,10 +70,10 @@ async def _startup_telegram(settings: Settings, backend, start_time: float) -> N
     app = build_app(settings, backend, start_time)
     p = _prefix(settings)
     ready_msg = (
-        f"🟢 *TeleAgent Ready*\n"
+        f"🟢 *AgentGate Ready*\n"
         f"📁 `{settings.github.github_repo}` | 🌿 `{settings.github.branch}`\n"
         f"🤖 AI: `{settings.ai.ai_cli}`\n"
-        f"Type `/{p}help` for commands"
+        f"Type `/{p} help` for commands"
     )
 
     async with app:

@@ -21,7 +21,7 @@ pytest tests/ --cov=src --cov-report=term-missing
 
 ## Architecture
 
-TeleAgent is an async Python bot (Telegram **or** Slack) that acts as a gateway to pluggable AI backends. Each deployment is one Docker container per project repo.
+AgentGate is an async Python bot (Telegram **or** Slack) that acts as a gateway to pluggable AI backends. Each deployment is one Docker container per project repo.
 
 **Startup flow** (`src/main.py`): validate config → clone GitHub repo → auto-install deps → init SQLite history DB → create AI backend → start bot (Telegram or Slack) → send 🟢 Ready.
 
@@ -29,9 +29,9 @@ TeleAgent is an async Python bot (Telegram **or** Slack) that acts as a gateway 
 
 **Platform abstraction** (`src/platform/`):
 - `common.py` — shared helpers used by both bots: `build_prompt()` (injects history for stateless backends), `save_to_history()`, `is_allowed_slack()`.
-- `slack.py` — `SlackBot` class using `slack-bolt[async]` in Socket Mode. Message events with prefix parsing (e.g. `ta run`, `ta sync`). Streaming via `client.chat_update(ts=…)`. Confirmation dialogs via Block Kit Actions. Voice via file download with auth header.
+- `slack.py` — `SlackBot` class using `slack-bolt[async]` in Socket Mode. Message events with prefix parsing (e.g. `gate run`, `gate sync`). Streaming via `client.chat_update(ts=…)`. Confirmation dialogs via Block Kit Actions. Voice via file download with auth header.
 
-**Bot handlers** (`src/bot.py`): all Telegram handlers live in `_BotHandlers`. Every handler method is guarded by `@_requires_auth` (checks `TG_CHAT_ID` and optional `ALLOWED_USERS`). Utility commands use the configurable prefix (default `ta`); everything else is forwarded to the AI.
+**Bot handlers** (`src/bot.py`): all Telegram handlers live in `_BotHandlers`. Every handler method is guarded by `@_requires_auth` (checks `TG_CHAT_ID` and optional `ALLOWED_USERS`). Utility commands use the configurable prefix (default `gate`); everything else is forwarded to the AI.
 
 **Platform selection**: `PLATFORM=telegram` (default) uses `src/bot.py`; `PLATFORM=slack` uses `src/platform/slack.py::SlackBot`. Both call the same AI backends, history, executor, and repo modules.
 - `adapter.py` defines the `AICLIBackend` ABC: `send()`, `stream()`, `clear_history()`, and the `is_stateful` class-level flag. Also defines `SubprocessMixin` for backends that spawn child processes in `REPO_DIR`.
@@ -42,7 +42,7 @@ TeleAgent is an async Python bot (Telegram **or** Slack) that acts as a gateway 
 
 **Stateful vs stateless backends** (`src/bot.py → forward_to_ai`): if `backend.is_stateful` is `True`, the raw prompt is sent directly. If `False`, the last 10 history exchanges from SQLite are prepended via `history.build_context()` before sending.
 
-**Bot handlers** (`src/bot.py`): all Telegram handlers live in `_BotHandlers`. Every handler method is guarded by `@_requires_auth` (checks `TG_CHAT_ID` and optional `ALLOWED_USERS`). Utility commands use the configurable prefix (default `ta`); everything else is forwarded to the AI.
+**Bot handlers** (`src/bot.py`): all Telegram handlers live in `_BotHandlers`. Every handler method is guarded by `@_requires_auth` (checks `TG_CHAT_ID` and optional `ALLOWED_USERS`). Utility commands use the configurable prefix (default `gate`); everything else is forwarded to the AI.
 
 **CI/CD** (`.github/workflows/ci-cd.yml`): single unified pipeline. Jobs: `version` → `lint` + `test` (parallel) → `docker-publish` + `security-scan` → `release` → `summary`. On `develop`: publishes `:develop` Docker tag. On `main`: version-bump check, publishes `:latest`, creates a GitHub Release. Multi-platform builds (amd64 + arm64). `workflow_dispatch` supports `skip_tests` and `skip_docker_publish` inputs.
 

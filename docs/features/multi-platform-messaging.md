@@ -7,7 +7,7 @@
 
 ## Overview
 
-TeleAgent currently supports only Telegram as its messaging front-end. This document describes the design for adding Slack as an optional alternative, chosen via a single environment variable (`PLATFORM=telegram|slack`). The AI backends, history DB, executor, repo, and voice transcription layers need zero changes — only the messaging layer is platform-specific.
+AgentGate currently supports only Telegram as its messaging front-end. This document describes the design for adding Slack as an optional alternative, chosen via a single environment variable (`PLATFORM=telegram|slack`). The AI backends, history DB, executor, repo, and voice transcription layers need zero changes — only the messaging layer is platform-specific.
 
 ---
 

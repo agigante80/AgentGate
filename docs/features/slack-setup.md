@@ -3,7 +3,7 @@
 > Platform: **Slack** (`PLATFORM=slack`)  
 > Connection: Socket Mode (WebSocket — no public endpoint required)
 
-This guide walks through creating a Slack App, configuring the required scopes and events, obtaining the tokens, and wiring them into TeleAgent.
+This guide walks through creating a Slack App, configuring the required scopes and events, obtaining the tokens, and wiring them into AgentGate.
 
 ---
 
@@ -133,7 +133,7 @@ The bot sends a 🟢 Ready message to `SLACK_CHANNEL_ID` on startup (if set).
 ## Commands
 
 > ⚠️ **Slack intercepts any message starting with `/` as a native slash command.**  
-> TeleAgent does NOT use slash commands. Always use the plain-text `ta` prefix instead.  
+> AgentGate does NOT use slash commands. Always use the plain-text `gate` prefix instead (configurable via BOT_CMD_PREFIX).  
 > `ta help` ✅ — `/help` ❌ (Slack will reject it as an unknown slash command)  
 > If you accidentally type `/cmd`, precede it with a space (` /cmd`) to send it as text — but it's better to just use `ta`.
 

@@ -1,21 +1,21 @@
 """
-Slack bot adapter for TeleAgent.
+Slack bot adapter for AgentGate.
 
 Uses slack-bolt[async] in Socket Mode (WebSocket) — no public HTTPS endpoint needed.
 Connects when PLATFORM=slack is set in the environment.
 
-Commands are triggered by messages starting with the bot prefix (default: "ta"):
-  ta run <cmd>   — run a shell command
-  ta sync        — git pull
-  ta git         — git status
-  ta diff [n]    — git diff
-  ta log [n]     — container logs
-  ta status      — AI activity
-  ta clear       — clear history
-  ta restart     — restart AI backend
-  ta confirm [on|off] — toggle destructive-command confirmation
-  ta info        — project info
-  ta help        — this message
+Commands are triggered by messages starting with the bot prefix (default: "gate"):
+  gate run <cmd>   — run a shell command
+  gate sync        — git pull
+  gate git         — git status
+  gate diff [n]    — git diff
+  gate log [n]     — container logs
+  gate status      — AI activity
+  gate clear       — clear history
+  gate restart     — restart AI backend
+  gate confirm [on|off] — toggle destructive-command confirmation
+  gate info        — project info
+  gate help        — this message
 
 All other messages are forwarded to the active AI backend.
 Voice/audio file uploads are transcribed and forwarded to the AI.
@@ -54,7 +54,7 @@ def _init_transcriber(
 
 class SlackBot:
     """
-    Slack bot that mirrors TeleAgent's Telegram functionality.
+    Slack bot that mirrors AgentGate's Telegram functionality.
     All handler methods receive plain Python arguments (str, list[str]) —
     Slack-specific I/O happens only in _send, _edit, _stream_to_slack.
     """
@@ -181,7 +181,7 @@ class SlackBot:
 
         p = self._p
         lower = text.lower()
-        # Parse "ta <subcommand> [args…]" prefix
+        # Parse "{p} <subcommand> [args…]" prefix
         if lower.startswith(f"{p} ") or lower == p:
             parts = text.split(maxsplit=2)
             sub = parts[1].lower() if len(parts) > 1 else ""
@@ -308,7 +308,7 @@ class SlackBot:
             n = int(args[0]) if args else 20
             n = max(1, min(n, 200))
         except ValueError:
-            await say("Usage: `ta log [lines]` — e.g. `ta log 50`")
+            await say(f"Usage: `{self._p} log [lines]` — e.g. `{self._p} log 50`")
             return
         result = await executor.run_shell(
             (
@@ -387,7 +387,7 @@ class SlackBot:
     ) -> None:
         p = self._p
         text = (
-            f"🤖 *TeleAgent v{VERSION} — Slack Command Reference*\n\n"
+            f"🤖 *AgentGate v{VERSION} — Slack Command Reference*\n\n"
             f"*Send messages starting with `{p} <command>`:*\n\n"
             f"`{p} run <cmd>` — run a shell command in the repo\n"
             f"`{p} sync` — git pull (fetch latest changes)\n"
@@ -429,7 +429,7 @@ class SlackBot:
             else "disabled"
         )
         text = (
-            f"ℹ️ *TeleAgent Info*\n\n"
+            f"ℹ️ *AgentGate Info*\n\n"
             f"📁 Repo: `{self._settings.github.github_repo}`\n"
             f"🌿 Branch: `{self._settings.github.branch}`\n"
             f"🤖 AI backend: `{ai_label}`\n"
@@ -538,7 +538,7 @@ class SlackBot:
             logger.info("SLACK_CHANNEL_ID not set — skipping ready message.")
             return
         text = (
-            f"🟢 *TeleAgent Ready*\n"
+            f"🟢 *AgentGate Ready*\n"
             f"📁 `{self._settings.github.github_repo}`"
             f" | 🌿 `{self._settings.github.branch}`\n"
             f"🤖 AI: `{self._settings.ai.ai_cli}`\n"

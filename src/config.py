@@ -31,7 +31,7 @@ class GitHubConfig(BaseSettings):
 class BotConfig(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
-    bot_cmd_prefix: str = "ta"
+    bot_cmd_prefix: str = "gate"
     max_output_chars: int = 3000
     history_enabled: bool = True  # Set HISTORY_ENABLED=false to disable chat storage
     stream_responses: bool = True  # Set STREAM_RESPONSES=false to wait for full response

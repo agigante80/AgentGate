@@ -73,7 +73,7 @@ class TestGitHubConfig:
 class TestBotConfig:
     def test_defaults(self):
         cfg = BotConfig()
-        assert cfg.bot_cmd_prefix == "ta"
+        assert cfg.bot_cmd_prefix == "gate"
         assert cfg.max_output_chars == 3000
         assert cfg.history_enabled is True
         assert cfg.stream_responses is True
