@@ -13,6 +13,11 @@ def is_destructive(cmd: str) -> bool:
     return any(kw in cmd for kw in _DESTRUCTIVE_KEYWORDS)
 
 
+def is_exempt(cmd: str, skip_keywords: list[str]) -> bool:
+    """Return True if cmd matches any keyword in the skip list (confirmation bypassed)."""
+    return any(kw in cmd for kw in skip_keywords if kw)
+
+
 def truncate_output(text: str, max_chars: int) -> str:
     if len(text) <= max_chars:
         return text

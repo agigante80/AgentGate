@@ -278,8 +278,8 @@ class _BotHandlers:
     async def cmd_help(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
         p = self._p
         confirm_note = (
-            f"*Destructive shell commands* (push, merge, rm, force) require confirmation.\n"
-            f"Use `/ta confirm off` to disable for this session, `/ta confirm on` to re-enable."
+            "*Destructive shell commands* (push, merge, rm, force) require confirmation.\n"
+            "Use `/ta confirm off` to disable for this session, `/ta confirm on` to re-enable."
         )
         text = (
             f"🤖 *TeleAgent v{VERSION} — Command Reference*\n\n"
