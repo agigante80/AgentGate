@@ -51,6 +51,8 @@ VOLUME /repo
 VOLUME /data
 
 ENV PYTHONUNBUFFERED=1
+# Copilot/Codex CLIs write to $HOME — ensure it's always writable
+ENV HOME=/data
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD test -f /tmp/healthy
