@@ -18,6 +18,7 @@ from src.config import Settings, VERSION
 from src import executor, history, repo
 from src.ai import factory as ai_factory
 from src import transcriber as transcriber_mod
+from src.ready_msg import build_ready_message, ai_label as _ai_label
 
 logger = logging.getLogger(__name__)
 
@@ -295,7 +296,7 @@ class _BotHandlers:
             f"`/{p} clear` — clear conversation history\n"
             f"`/{p} restart` — restart AI backend session\n"
             f"`/{p} confirm` `[on|off]` — toggle/query confirmation prompts\n"
-            f"`/{p} info` — project & bot info\n"
+            f"`/{p} info` — show ready message (version, repo, AI, uptime)\n"
             f"`/{p} help` — this message\n\n"
             f"*AI commands (forwarded to AI CLI):*\n"
             f"Any other text or /command is sent directly to the AI.\n"
@@ -312,20 +313,16 @@ class _BotHandlers:
         uptime_s = int(time.time() - self._start_time)
         h, remainder = divmod(uptime_s, 3600)
         m, s = divmod(remainder, 60)
-        ai_label = self._settings.ai.ai_cli
-        if self._settings.ai.ai_cli == "copilot" and self._settings.ai.copilot_model:
-            ai_label += f" ({self._settings.ai.copilot_model})"
-        elif self._settings.ai.ai_cli == "codex":
-            ai_label += f" ({self._settings.ai.codex_model})"
-        elif self._settings.ai.ai_cli == "api" and self._settings.ai.ai_model:
-            ai_label += f" / {self._settings.ai.ai_provider} ({self._settings.ai.ai_model})"
+        ai = _ai_label(self._settings)
         confirm_state = "enabled 🛡" if self._confirm_destructive else "disabled ⚡"
         voice_state = f"enabled ({self._settings.voice.whisper_provider})" if self._transcriber else "disabled"
+        tag = self._settings.bot.image_tag
+        version_line = f"v{VERSION}" + (f" `:{tag}`" if tag else "")
         text = (
-            f"ℹ️ *TeleAgent Info*\n\n"
+            f"ℹ️ *AgentGate Info* — {version_line}\n\n"
             f"📁 Repo: `{self._settings.github.github_repo}`\n"
             f"🌿 Branch: `{self._settings.github.branch}`\n"
-            f"🤖 AI backend: `{ai_label}`\n"
+            f"🤖 AI: `{ai}`\n"
             f"⌨️ Prefix: `/{self._p}`\n"
             f"📏 Max output: `{self._settings.bot.max_output_chars}` chars\n"
             f"⏱ Uptime: `{h}h {m}m {s}s`\n"

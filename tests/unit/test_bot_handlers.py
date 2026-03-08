@@ -31,6 +31,7 @@ def _make_settings(
     bot.stream_throttle_secs = stream_throttle
     bot.confirm_destructive = confirm_destructive
     bot.skip_confirm_keywords = skip_confirm_keywords or []
+    bot.image_tag = ""
     gh = MagicMock(spec=GitHubConfig)
     gh.github_repo = "owner/repo"
     gh.branch = "main"

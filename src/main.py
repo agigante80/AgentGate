@@ -10,6 +10,7 @@ from src.config import Settings
 from src.ai.factory import create_backend
 from src import repo, runtime, history
 from src.logging_setup import configure_logging
+from src.ready_msg import build_ready_message
 logger = logging.getLogger(__name__)
 
 _HEALTH_FILE = pathlib.Path("/tmp/healthy")
@@ -67,12 +68,7 @@ async def _startup_telegram(settings: Settings, backend, start_time: float) -> N
 
     app = build_app(settings, backend, start_time)
     p = _prefix(settings)
-    ready_msg = (
-        f"🟢 *AgentGate Ready*\n"
-        f"📁 `{settings.github.github_repo}` | 🌿 `{settings.github.branch}`\n"
-        f"🤖 AI: `{settings.ai.ai_cli}`\n"
-        f"Type `/{p} help` for commands"
-    )
+    ready_msg = build_ready_message(settings, _read_version(), p)
 
     async with app:
         await app.bot.send_message(

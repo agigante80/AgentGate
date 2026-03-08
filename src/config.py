@@ -45,6 +45,7 @@ class BotConfig(BaseSettings):
     stream_throttle_secs: float = 1.0  # Seconds between Telegram message edits during streaming
     confirm_destructive: bool = True  # Set CONFIRM_DESTRUCTIVE=false to skip confirmation prompts
     skip_confirm_keywords: list[str] = []  # e.g. SKIP_CONFIRM_KEYWORDS=push,rm — always bypassed
+    image_tag: str = ""  # IMAGE_TAG — set by docker-compose to show "latest" or "development" in ready msg
 
 
 class AIConfig(BaseSettings):

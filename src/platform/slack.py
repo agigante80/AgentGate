@@ -28,6 +28,7 @@ from src.ai import factory as ai_factory
 from src.ai.adapter import AICLIBackend
 from src.config import Settings, VERSION
 from src.platform import common
+from src.ready_msg import build_ready_message, ai_label as _ai_label
 
 logger = logging.getLogger(__name__)
 
@@ -414,25 +415,20 @@ class SlackBot:
         uptime_s = int(time.time() - self._start_time)
         h, remainder = divmod(uptime_s, 3600)
         m, s = divmod(remainder, 60)
-        ai = self._settings.ai
-        ai_label = ai.ai_cli
-        if ai.ai_cli == "copilot" and ai.copilot_model:
-            ai_label += f" ({ai.copilot_model})"
-        elif ai.ai_cli == "codex":
-            ai_label += f" ({ai.codex_model})"
-        elif ai.ai_cli == "api" and ai.ai_model:
-            ai_label += f" / {ai.ai_provider} ({ai.ai_model})"
+        ai = _ai_label(self._settings)
         confirm_state = "enabled 🛡" if self._confirm_destructive else "disabled ⚡"
         voice_state = (
             f"enabled ({self._settings.voice.whisper_provider})"
             if self._transcriber
             else "disabled"
         )
+        tag = self._settings.bot.image_tag
+        version_line = f"v{VERSION}" + (f" `:{tag}`" if tag else "")
         text = (
-            f"ℹ️ *AgentGate Info*\n\n"
+            f"ℹ️ *AgentGate Info* — {version_line}\n\n"
             f"📁 Repo: `{self._settings.github.github_repo}`\n"
             f"🌿 Branch: `{self._settings.github.branch}`\n"
-            f"🤖 AI backend: `{ai_label}`\n"
+            f"🤖 AI: `{ai}`\n"
             f"💬 Platform: Slack\n"
             f"📏 Max output: `{self._settings.bot.max_output_chars}` chars\n"
             f"⏱ Uptime: `{h}h {m}m {s}s`\n"
@@ -537,13 +533,7 @@ class SlackBot:
         if not channel:
             logger.info("SLACK_CHANNEL_ID not set — skipping ready message.")
             return
-        text = (
-            f"🟢 *AgentGate Ready*\n"
-            f"📁 `{self._settings.github.github_repo}`"
-            f" | 🌿 `{self._settings.github.branch}`\n"
-            f"🤖 AI: `{self._settings.ai.ai_cli}`\n"
-            f"Type `{self._p} help` for commands"
-        )
+        text = build_ready_message(self._settings, VERSION, self._p)
         if client is None:
             client = self._app.client
         await client.chat_postMessage(channel=channel, text=text)

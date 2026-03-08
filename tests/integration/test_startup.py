@@ -18,8 +18,11 @@ class TestStartup:
         gh.branch = "main"
         bot = MagicMock(spec=BotConfig)
         bot.bot_cmd_prefix = "ta"
+        bot.image_tag = ""
         ai = MagicMock(spec=AIConfig)
         ai.ai_cli = "api"
+        ai.ai_provider = "openai"
+        ai.ai_model = ""
         settings = MagicMock(spec=Settings)
         settings.platform = "telegram"
         settings.telegram = tg
