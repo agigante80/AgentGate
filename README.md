@@ -157,7 +157,7 @@ Copy `.env.example` — it documents every variable with examples.
 |---|---|---|
 | `AI_CLI` | `copilot` | `copilot` \| `codex` \| `api` |
 | `COPILOT_GITHUB_TOKEN` | — | Fine-grained PAT with **Copilot Requests** permission (required for `copilot` backend) |
-| `AI_MODEL` | — | Model for any backend (e.g. `gpt-4o` for Copilot, `o3` for Codex, `claude-3-5-sonnet-20241022` for API). Codex defaults to `o3` when unset. |
+| `AI_MODEL` | — | Model for any backend (e.g. `gpt-4o` for Copilot, `o3` for Codex, `claude-3-5-sonnet-20241022` for API). Codex defaults to `o3` when unset. ⚠️ **Set this so the model name appears in the startup message and `/gate info`** — if unset, only the backend name is shown (e.g. `copilot` instead of `copilot (claude-sonnet-4.6)`). |
 | `AI_PROVIDER` | — | For `api`: `openai` \| `anthropic` \| `ollama` \| `openai-compat` |
 | `AI_API_KEY` | — | API key for `codex` or `api` backends |
 | `AI_BASE_URL` | — | Base URL for Ollama or compatible endpoints |
@@ -446,7 +446,7 @@ Copy `.env.example` — it documents every variable with examples.
 |---|---|---|
 | `AI_CLI` | `copilot` | `copilot` \| `codex` \| `api` |
 | `COPILOT_GITHUB_TOKEN` | — | Fine-grained PAT with **Copilot Requests** permission (required for `copilot` backend) |
-| `AI_MODEL` | — | Model for any backend (e.g. `gpt-4o` for Copilot, `o3` for Codex, `claude-3-5-sonnet-20241022` for API). Codex defaults to `o3` when unset. |
+| `AI_MODEL` | — | Model for any backend (e.g. `gpt-4o` for Copilot, `o3` for Codex, `claude-3-5-sonnet-20241022` for API). Codex defaults to `o3` when unset. ⚠️ **Set this so the model name appears in the startup message and `/gate info`** — if unset, only the backend name is shown (e.g. `copilot` instead of `copilot (claude-sonnet-4.6)`). |
 | `AI_PROVIDER` | — | For `api`: `openai` \| `anthropic` \| `ollama` \| `openai-compat` |
 | `AI_API_KEY` | — | API key for `codex` or `api` backends |
 | `AI_BASE_URL` | — | Base URL for Ollama or compatible endpoints |
