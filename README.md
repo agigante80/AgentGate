@@ -150,6 +150,23 @@ Copy `.env.example` — it documents every variable with examples.
 | `CONFIRM_DESTRUCTIVE` | `true` | Set `false` to skip confirmation for destructive shell commands |
 | `SKIP_CONFIRM_KEYWORDS` | — | Comma-separated keywords that bypass destructive confirmation (e.g. `push,rm`) |
 
+### Logging
+
+| Variable | Default | Description |
+|---|---|---|
+| `LOG_LEVEL` | `INFO` | Log verbosity: `DEBUG` \| `INFO` \| `WARNING` \| `ERROR` |
+| `LOG_DIR` | — | Directory for rotating log files (empty = stdout only). Logs rotate daily, kept 14 days, gzip compressed. Mount a host volume to persist across restarts. |
+
+> Full logging guide: **[docs/logging.md](docs/logging.md)**
+
+```yaml
+# Example: persist logs on host
+volumes:
+  - ./logs:/data/logs
+environment:
+  - LOG_DIR=/data/logs
+```
+
 ### Voice Transcription
 
 | Variable | Default | Description |
