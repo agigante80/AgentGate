@@ -28,6 +28,13 @@ class GitHubConfig(BaseSettings):
     branch: str = "main"
 
 
+class LogConfig(BaseSettings):
+    model_config = SettingsConfigDict(extra="ignore")
+
+    log_level: str = "INFO"   # LOG_LEVEL: DEBUG|INFO|WARNING|ERROR
+    log_dir: str = ""         # LOG_DIR: path to write rotating log files (empty = stdout only)
+
+
 class BotConfig(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
@@ -76,6 +83,7 @@ class Settings(BaseSettings):
     platform: Literal["telegram", "slack"] = "telegram"
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     github: GitHubConfig = Field(default_factory=GitHubConfig)
+    log: LogConfig = Field(default_factory=LogConfig)
     bot: BotConfig = Field(default_factory=BotConfig)
     ai: AIConfig = Field(default_factory=AIConfig)
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
@@ -86,6 +94,7 @@ class Settings(BaseSettings):
         return cls(
             telegram=TelegramConfig(),
             github=GitHubConfig(),
+            log=LogConfig(),
             bot=BotConfig(),
             ai=AIConfig(),
             voice=VoiceConfig(),

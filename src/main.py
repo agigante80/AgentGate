@@ -9,11 +9,7 @@ import time
 from src.config import Settings
 from src.ai.factory import create_backend
 from src import repo, runtime, history
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
+from src.logging_setup import configure_logging
 logger = logging.getLogger(__name__)
 
 _HEALTH_FILE = pathlib.Path("/tmp/healthy")
@@ -35,6 +31,8 @@ def _log_startup_banner(settings: Settings, version: str) -> None:
     logger.info("  AI       : %s", settings.ai.ai_cli)
     logger.info("  Repo     : %s", settings.github.github_repo)
     logger.info("  Branch   : %s", settings.github.branch)
+    logger.info("  Log level: %s", settings.log.log_level.upper())
+    logger.info("  Log dir  : %s", settings.log.log_dir or "(stdout only)")
     logger.info("  Python   : %s", sys.version.split()[0])
     logger.info("  PID      : %s", os.getpid())
     logger.info(sep)
@@ -145,9 +143,12 @@ def main() -> None:
         settings = Settings.load()
         _validate_config(settings)
     except Exception as exc:
+        # Basic fallback logging before configure_logging has run
+        logging.basicConfig(format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
         logger.error("Configuration error: %s", exc)
         sys.exit(1)
 
+    configure_logging(settings.log.log_level, settings.log.log_dir)
     _log_startup_banner(settings, version)
 
     try:
