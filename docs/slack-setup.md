@@ -11,7 +11,7 @@ This guide walks through creating a Slack App, configuring the required scopes a
 
 1. Go to [api.slack.com/apps](https://api.slack.com/apps)
 2. Click **Create New App** → **From scratch**
-3. Give it a name (e.g. `taVPNSentinel`) and pick your workspace
+3. Give it a name (e.g. `agentgate-bot`) and pick your workspace
 4. Click **Create App**
 
 ---
@@ -134,23 +134,23 @@ The bot sends a 🟢 Ready message to `SLACK_CHANNEL_ID` on startup (if set).
 
 > ⚠️ **Slack intercepts any message starting with `/` as a native slash command.**  
 > AgentGate does NOT use slash commands. Always use the plain-text `gate` prefix instead (configurable via BOT_CMD_PREFIX).  
-> `ta help` ✅ — `/help` ❌ (Slack will reject it as an unknown slash command)  
-> If you accidentally type `/cmd`, precede it with a space (` /cmd`) to send it as text — but it's better to just use `ta`.
+> `gate help` ✅ — `/help` ❌ (Slack will reject it as an unknown slash command)  
+> If you accidentally type `/cmd`, precede it with a space (` /cmd`) to send it as text — but it's better to just use `gate`.
 
-Commands use the configurable prefix (`BOT_CMD_PREFIX`, default `ta`) as plain-text messages — no slash command registration required:
+Commands use the configurable prefix (`BOT_CMD_PREFIX`, default `gate`) as plain-text messages — no slash command registration required:
 
 | Message | Action |
 |---|---|
-| `ta help` | Show available commands |
-| `ta sync` | Pull latest changes from the repo |
-| `ta run <cmd>` | Run a shell command in the repo directory |
-| `ta git <args>` | Run a git command |
-| `ta diff` | Show current git diff |
-| `ta log` | Show recent git log |
-| `ta status` | Show bot status (idle / processing) |
-| `ta clear` | Clear conversation history |
-| `ta confirm on\|off` | Toggle confirmation for destructive commands |
-| `ta restart` | Restart the AI backend session |
+| `gate help` | Show available commands |
+| `gate sync` | Pull latest changes from the repo |
+| `gate run <cmd>` | Run a shell command in the repo directory |
+| `gate git <args>` | Run a git command |
+| `gate diff` | Show current git diff |
+| `gate log` | Show recent git log |
+| `gate status` | Show bot status (idle / processing) |
+| `gate clear` | Clear conversation history |
+| `gate confirm on\|off` | Toggle confirmation for destructive commands |
+| `gate restart` | Restart the AI backend session |
 | *(anything else)* | Forwarded to the AI as a prompt |
 
 ---
@@ -159,7 +159,7 @@ Commands use the configurable prefix (`BOT_CMD_PREFIX`, default `ta`) as plain-t
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| "*`/cmd` is not a valid command*" error from Slack | Slack intercepts messages starting with `/` as slash commands | Use the `ta` prefix instead: `ta help`, `ta sync`. If you must type `/`, precede with a space: ` /cmd` |
+| "*`/cmd` is not a valid command*" error from Slack | Slack intercepts messages starting with `/` as slash commands | Use the `gate` prefix instead: `gate help`, `gate sync`. If you must type `/`, precede with a space: ` /cmd` |
 | Bot visible in Apps but can't DM it | Messages Tab disabled | **App Home** → **Messages Tab** → enable "Allow users to send Slash commands and messages from the messages tab" |
 | Can't invite bot to channel | Missing scope or not installed | Reinstall app (step 5) after adding scopes |
 | `/invite @BotName` doesn't work | Use the channel's **Integrations** tab instead | Channel settings → **Integrations** → **Add apps** |
