@@ -6,15 +6,17 @@
 
 When an AI backend takes longer than a few seconds to respond, users currently see a static
 "🤖 Thinking…" message with no indication of progress, elapsed time, or expected wait. This
-creates two related pain points:
+creates three related pain points:
 
 1. **Silent waiting** — the user has no feedback after the initial message; they cannot
    distinguish a slow response from a crashed or stalled process.
-2. **Abrupt timeout** — the Copilot backend has a hardcoded 180-second limit. If exceeded,
-   the user sees `⚠️ Copilot timed out after 180s.` with no prior warning. 360 seconds (or no
-   limit at all) may be more appropriate for complex tasks.
+2. **Abrupt timeout** — the Copilot backend has a hardcoded 180-second limit in
+   `CopilotSession`. If exceeded, the user sees `⚠️ Copilot timed out after 180s.` with no
+   prior warning. 360 seconds (or no limit at all) may be more appropriate for complex tasks.
+   Critically, `DirectAPIBackend` and `CodexBackend` have **no timeout at all**.
 3. **`gate status` is reactive, not proactive** — the command correctly shows elapsed time,
-   but requires the user to think to ask. Most users won't know to do this.
+   but requires the user to remember to ask. Most users won't know to do this, especially on
+   mobile.
 
 ---
 
@@ -22,14 +24,20 @@ creates two related pain points:
 
 | Layer | Location | Current behaviour |
 |-------|----------|-------------------|
-| Telegram | `src/bot.py:54,134` | Posts "🤖 Thinking…", edits with chunks during streaming |
-| Slack | `src/platform/slack.py:36,101,140` | Same pattern, `_THINKING = "🤖 Thinking…"` |
-| Timeout | `src/ai/session.py:15,40` | `TIMEOUT = 180` hardcoded; `asyncio.wait_for()` |
-| Status cmd | `src/bot.py:223-231` | Shows elapsed time per active prompt on demand |
-| Streaming | `src/config.py:44-45` | `stream_responses`, `stream_throttle_secs=1.0` |
+| Telegram streaming | `src/bot.py:54` (`_stream_to_telegram`) | Posts "🤖 Thinking…", edits with arriving chunks |
+| Telegram non-streaming | `src/bot.py:134` (`_run_ai_pipeline`) | Posts "🤖 Thinking…", single edit when response arrives |
+| Slack streaming | `src/platform/slack.py:101` (`_stream_to_slack`) | `say(_THINKING)` then `chat_update()` with chunks |
+| Slack non-streaming | `src/platform/slack.py:140` (`_run_ai_pipeline`) | `say(_THINKING)` then `chat_update()` when done |
+| `_THINKING` constant | `src/platform/slack.py:36` | `_THINKING = "🤖 Thinking…"` |
+| Timeout (Copilot only) | `src/ai/session.py:15,40` | `TIMEOUT = 180` module constant; `asyncio.wait_for(proc.communicate(), timeout=TIMEOUT)` |
+| Timeout (Direct API) | `src/ai/direct.py` | **No timeout** — relies entirely on provider HTTP client defaults |
+| Timeout (Codex) | `src/ai/codex.py` | **No timeout** — `proc.communicate()` with no `wait_for` |
+| Status cmd | `src/bot.py:222-229` | Shows elapsed time per active prompt on demand; queries `_active_ai` dict |
+| Streaming config | `src/config.py` (`BotConfig`) | `stream_responses: bool = True`, `stream_throttle_secs: float = 1.0` |
 
-The `gate status` command does surface elapsed time, but only when the user explicitly asks.
-Non-streaming (e.g., `CopilotBackend`) gives the user zero visibility until the response lands.
+**Key architectural gap**: the 180s timeout lives inside `CopilotSession.send()`, deep inside
+the AI stack. It is only reachable via the Copilot backend. There is no platform-level timeout
+that covers all backends uniformly. This needs to change — see Implementation Design below.
 
 ---
 
@@ -61,8 +69,7 @@ Edit the thinking message every N seconds with elapsed time.
 **Pros:**
 - Zero new messages — just edits the existing placeholder.
 - Instant reassurance that the process is alive.
-- Trivially implemented: a background `asyncio.Task` alongside `_run_ai_pipeline()`.
-- Works for both streaming and non-streaming backends.
+- A background `asyncio.Task` running alongside the AI call in `_run_ai_pipeline()`.
 - Low API call rate (one edit per 30s by default).
 
 **Cons:**
@@ -129,12 +136,12 @@ What should happen when an AI backend takes too long?
 
 #### Option 1 — Hardcoded 180s (status quo, Copilot backend only)
 ```python
-TIMEOUT = 180  # src/ai/session.py
+TIMEOUT = 180  # src/ai/session.py:15
 ```
 
 **Pros:** Simple. Protects against zombie processes.  
-**Cons:** Wrong default. Complex prompts (e.g., "refactor this 2000-line file") routinely
-take 3–5 minutes. Users are silently punished for doing real work.
+**Cons:** Wrong default for complex tasks. Applies only to `CopilotBackend` — `DirectAPIBackend`
+and `CodexBackend` have zero timeout. Users are silently punished for real work.
 
 ---
 
@@ -149,7 +156,7 @@ TIMEOUT = int(os.getenv("AI_TIMEOUT_SECS", "360"))
 - Still protects against truly stalled processes.
 
 **Cons:** Still arbitrary. A 361-second request will silently fail. No user warning before
-the cut-off.
+the cut-off. Still only covers Copilot if placed in `session.py`.
 
 ---
 
@@ -170,20 +177,25 @@ await proc.communicate()  # no asyncio.wait_for()
 
 ---
 
-#### Option 4 — Configurable timeout + pre-timeout warning
-At `(TIMEOUT - WARNING_SECS)`, edit the thinking message with a warning. Cancel on timeout.
+#### Option 4 — Configurable timeout + pre-timeout warning *(recommended)*
+At `(TIMEOUT - WARN_SECS)` the ticker message includes a cancellation warning. Cancel on
+timeout with a clear error message.
 
 ```
 ⏳ Still thinking… (290s) — approaching time limit, will cancel in 70s
 → 360s: ⚠️ Request cancelled after 360s. Use `gate status` to check for stuck processes.
 ```
 
-**Env vars:** `AI_TIMEOUT_SECS=360`, `AI_TIMEOUT_WARN_SECS=70`
+**Env vars:** `AI_TIMEOUT_SECS=360`, `AI_TIMEOUT_WARN_SECS=60`
+
+**Implemented at the platform layer** (`_run_ai_pipeline` in `bot.py` / `slack.py`) via
+`asyncio.wait_for()` wrapping the entire AI call. This covers **all backends uniformly**,
+not just Copilot.
 
 **Pros:**
 - User gets advance notice before cancellation.
 - Graceful UX — not a surprise error.
-- Gives the user a chance to decide (they could cancel manually).
+- Backend-agnostic: DirectAPIBackend and CodexBackend gain timeout coverage for free.
 
 **Cons:** More complexity. Two more config values. Warning message content needs care.
 
@@ -212,19 +224,19 @@ Combine **Option E** (progress ticker) with **Option 4** (configurable timeout +
 ```
 🤖 Thinking…
 → 15s:  ⏳ Still thinking… (15s)
-→ 45s:  ⏳ Still thinking… (45s)  
-→ 290s: ⏳ Still thinking… (290s) — approaching 360s time limit
-→ 360s: ⚠️ Request cancelled after 360s. Use /gate status if the process is stuck.
+→ 45s:  ⏳ Still thinking… (45s)
+→ 290s: ⏳ Still thinking… (290s) — approaching 360s time limit, will cancel in 70s
+→ 360s: ⚠️ Request cancelled after 360s. Use /gate status if the process appears stuck.
 ```
 
 ### New env vars
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AI_TIMEOUT_SECS` | `360` | Hard timeout for AI subprocess (0 = no timeout) |
+| `AI_TIMEOUT_SECS` | `360` | Hard timeout for any AI backend (0 = no timeout) |
 | `THINKING_SLOW_THRESHOLD_SECS` | `15` | Seconds before first elapsed-time update |
-| `THINKING_UPDATE_SECS` | `30` | Interval between subsequent updates |
-| `AI_TIMEOUT_WARN_SECS` | `60` | Warn this many seconds before hard timeout |
+| `THINKING_UPDATE_SECS` | `30` | Interval between subsequent ticker updates |
+| `AI_TIMEOUT_WARN_SECS` | `60` | Seconds before hard timeout to show a cancellation warning |
 
 Setting `AI_TIMEOUT_SECS=0` disables the timeout entirely (trust your backend, accept the
 risk of a stalled handler).
@@ -233,35 +245,34 @@ risk of a stalled handler).
 
 ## Implementation Design
 
-### `src/config.py`
+### Step 1 — `src/config.py`
 
 Add to `BotConfig`:
 
 ```python
-ai_timeout_secs: int = 360          # 0 = no timeout; env: AI_TIMEOUT_SECS
+ai_timeout_secs: int = 360                # 0 = no timeout; env: AI_TIMEOUT_SECS
 thinking_slow_threshold_secs: int = 15   # env: THINKING_SLOW_THRESHOLD_SECS
 thinking_update_secs: int = 30           # env: THINKING_UPDATE_SECS
 ai_timeout_warn_secs: int = 60           # env: AI_TIMEOUT_WARN_SECS
 ```
 
-### `src/ai/session.py`
+All four fields must go into `BotConfig` (not `AIConfig`) because they affect message
+presentation, not the AI backend itself.
 
-Replace hardcoded `TIMEOUT = 180` with a parameter:
+---
 
-```python
-async def send(self, prompt: str, timeout_secs: int = 360) -> str:
-    ...
-    if timeout_secs > 0:
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=timeout_secs
-        )
-    else:
-        stdout, stderr = await proc.communicate()
-```
+### Step 2 — `src/platform/common.py` — add `thinking_ticker()`
 
-### `src/platform/common.py` (new helper)
+This is a backend-agnostic `asyncio.Task` function. Add to `common.py` (already shared
+between Telegram and Slack). New imports required: `asyncio`, `time`, `Callable`, `Awaitable`
+from `collections.abc`.
 
 ```python
+import asyncio
+import time
+from collections.abc import Awaitable, Callable
+
+
 async def thinking_ticker(
     edit_fn: Callable[[str], Awaitable[None]],
     slow_threshold: int,
@@ -269,41 +280,285 @@ async def thinking_ticker(
     timeout_secs: int,
     warn_before_secs: int,
 ) -> None:
-    """Background task: edits the 'Thinking…' placeholder with elapsed time."""
+    """Background task: edits the 'Thinking…' placeholder with elapsed time.
+
+    Sleeps for slow_threshold seconds first (Option E: quiet for fast responses).
+    After that, edits every update_interval seconds.
+    When timeout is set and remaining time <= warn_before_secs, adds a cancellation warning.
+    Cancelled externally when the AI call completes or is timed out.
+    """
     start = time.monotonic()
     await asyncio.sleep(slow_threshold)
     while True:
         elapsed = int(time.monotonic() - start)
-        remaining = timeout_secs - elapsed if timeout_secs > 0 else None
-        if remaining is not None and remaining <= warn_before_secs:
-            msg = f"⏳ Still thinking… ({elapsed}s) — will cancel in {remaining}s"
+        if timeout_secs > 0:
+            remaining = timeout_secs - elapsed
+            if remaining <= warn_before_secs:
+                text = f"⏳ Still thinking… ({elapsed}s) — will cancel in {remaining}s"
+            else:
+                text = f"⏳ Still thinking… ({elapsed}s)"
         else:
-            msg = f"⏳ Still thinking… ({elapsed}s)"
-        await edit_fn(msg)
+            text = f"⏳ Still thinking… ({elapsed}s)"
+        await edit_fn(text)
         await asyncio.sleep(update_interval)
 ```
 
-### `src/bot.py` and `src/platform/slack.py`
+---
 
-In `_run_ai_pipeline()`, launch the ticker as a background task and cancel it when done:
+### Step 3 — `src/bot.py` — non-streaming path
+
+The non-streaming path in `_run_ai_pipeline` (around line 133) becomes:
 
 ```python
+from contextlib import suppress  # add to top-level imports
+from src.platform.common import thinking_ticker  # add to top-level imports
+
+# inside _run_ai_pipeline, non-streaming branch:
+msg = await update.effective_message.reply_text("🤖 Thinking…")
+cfg = self._settings.bot
 ticker = asyncio.create_task(
     thinking_ticker(
-        edit_fn=lambda text: msg.edit_text(text),
-        slow_threshold=settings.bot.thinking_slow_threshold_secs,
-        update_interval=settings.bot.thinking_update_secs,
-        timeout_secs=settings.bot.ai_timeout_secs,
-        warn_before_secs=settings.bot.ai_timeout_warn_secs,
+        edit_fn=msg.edit_text,
+        slow_threshold=cfg.thinking_slow_threshold_secs,
+        update_interval=cfg.thinking_update_secs,
+        timeout_secs=cfg.ai_timeout_secs,
+        warn_before_secs=cfg.ai_timeout_warn_secs,
     )
 )
 try:
-    result = await backend.send(prompt, timeout_secs=settings.bot.ai_timeout_secs)
+    if cfg.ai_timeout_secs > 0:
+        response = await asyncio.wait_for(
+            self._backend.send(prompt), timeout=cfg.ai_timeout_secs
+        )
+    else:
+        response = await self._backend.send(prompt)
+except asyncio.TimeoutError:
+    await msg.edit_text(
+        f"⚠️ Request cancelled after {cfg.ai_timeout_secs}s. "
+        "Use /gate status to check if the process is stuck."
+    )
+    return
 finally:
     ticker.cancel()
     with suppress(asyncio.CancelledError):
         await ticker
 ```
+
+**Important**: the timeout is applied here at the platform layer via `asyncio.wait_for()`,
+not inside `backend.send()`. This makes it backend-agnostic. `AICLIBackend.send()` signature
+**does not change** — no `timeout_secs` argument is added to the ABC or any backend.
+
+---
+
+### Step 4 — `src/bot.py` — streaming path (`_stream_to_telegram`)
+
+For streaming, the ticker must stop when the first chunk arrives. If the ticker has not yet
+fired when the first chunk lands, it is cancelled silently. This means the ticker only fires
+for slow-to-first-token streams. The timeout wraps the entire streaming coroutine.
+
+```python
+async def _stream_to_telegram(
+    update: Update,
+    backend: AICLIBackend,
+    prompt: str,
+    max_chars: int,
+    throttle_secs: float = 1.0,
+    timeout_secs: int = 0,
+    slow_threshold: int = 15,
+    update_interval: int = 30,
+    warn_before_secs: int = 60,
+) -> str:
+    msg = await update.effective_message.reply_text("🤖 Thinking…")
+    accumulated = ""
+    last_edit = time.monotonic()
+    first_chunk = True
+
+    ticker = asyncio.create_task(
+        thinking_ticker(
+            edit_fn=msg.edit_text,
+            slow_threshold=slow_threshold,
+            update_interval=update_interval,
+            timeout_secs=timeout_secs,
+            warn_before_secs=warn_before_secs,
+        )
+    )
+
+    async def _stream_body() -> str:
+        nonlocal accumulated, last_edit, first_chunk
+        async for chunk in backend.stream(prompt):
+            if first_chunk:
+                ticker.cancel()  # first token arrived — stop ticker
+                first_chunk = False
+            accumulated += chunk
+            now = time.monotonic()
+            if now - last_edit >= throttle_secs:
+                display = accumulated[-max_chars:] if len(accumulated) > max_chars else accumulated
+                try:
+                    await msg.edit_text(display + " ▌")
+                except Exception:
+                    logger.debug("Telegram edit skipped")
+                last_edit = now
+        return accumulated
+
+    try:
+        if timeout_secs > 0:
+            await asyncio.wait_for(_stream_body(), timeout=timeout_secs)
+        else:
+            await _stream_body()
+    except asyncio.TimeoutError:
+        await msg.edit_text(
+            f"⚠️ Stream cancelled after {timeout_secs}s. "
+            "Use /gate status to check for stuck processes."
+        )
+        return ""
+    finally:
+        ticker.cancel()
+        with suppress(asyncio.CancelledError):
+            await ticker
+
+    final = accumulated[-max_chars:] if len(accumulated) > max_chars else accumulated
+    try:
+        await msg.edit_text(final or "_(empty response)_")
+    except Exception:
+        logger.debug("Telegram final edit skipped")
+    return final
+```
+
+Call site in `_run_ai_pipeline` passes the new config values:
+```python
+response = await _stream_to_telegram(
+    update, self._backend, prompt,
+    self._settings.bot.max_output_chars,
+    self._settings.bot.stream_throttle_secs,
+    timeout_secs=self._settings.bot.ai_timeout_secs,
+    slow_threshold=self._settings.bot.thinking_slow_threshold_secs,
+    update_interval=self._settings.bot.thinking_update_secs,
+    warn_before_secs=self._settings.bot.ai_timeout_warn_secs,
+)
+```
+
+---
+
+### Step 5 — `src/platform/slack.py` — both paths
+
+Slack uses `self._edit(client, channel, ts, text)` instead of `msg.edit_text(text)`. The
+pattern is identical to Telegram; the `edit_fn` lambda captures the right references:
+
+**Non-streaming** (around line 140):
+```python
+resp = await say(_THINKING)
+ts = resp["ts"]
+cfg = self._settings.bot
+ticker = asyncio.create_task(
+    thinking_ticker(
+        edit_fn=lambda text: self._edit(client, channel, ts, text),
+        slow_threshold=cfg.thinking_slow_threshold_secs,
+        update_interval=cfg.thinking_update_secs,
+        timeout_secs=cfg.ai_timeout_secs,
+        warn_before_secs=cfg.ai_timeout_warn_secs,
+    )
+)
+try:
+    if cfg.ai_timeout_secs > 0:
+        response = await asyncio.wait_for(
+            self._backend.send(prompt), timeout=cfg.ai_timeout_secs
+        )
+    else:
+        response = await self._backend.send(prompt)
+except asyncio.TimeoutError:
+    await self._edit(client, channel, ts,
+        f"⚠️ Request cancelled after {cfg.ai_timeout_secs}s.")
+    return
+finally:
+    ticker.cancel()
+    with suppress(asyncio.CancelledError):
+        await ticker
+```
+
+**Streaming** (`_stream_to_slack`): same first-chunk cancellation pattern as Telegram,
+with `self._edit(client, channel, ts, text)` as the edit function. Also wrap the stream
+body in `asyncio.wait_for()` when `ai_timeout_secs > 0`.
+
+Add `from contextlib import suppress` to the top of `slack.py`.
+
+---
+
+### Step 6 — `src/ai/session.py` — remove or raise the internal timeout
+
+With a platform-level `asyncio.wait_for()` wrapping all backends, the `TIMEOUT = 180`
+module constant in `session.py` is now a secondary failsafe. The recommended approach is:
+
+**Option A (preferred):** Remove the `TIMEOUT` constant and the internal `asyncio.wait_for`
+entirely. Rely solely on the platform-level timeout. Simplifies `CopilotSession.send()`.
+
+**Option B (conservative):** Keep it, but raise it to a value that will never fire before
+the platform timeout (e.g., `TIMEOUT = 600`). Acts as a last-resort zombie killer if the
+platform-level timeout somehow fails to propagate.
+
+The implementation should choose **Option A** — one timeout, one place.
+
+Changed `CopilotSession.send()`:
+```python
+async def send(self, prompt: str) -> str:
+    try:
+        proc = await self._spawn(self._build_cmd(prompt), self._env)
+        stdout, stderr = await proc.communicate()  # no wait_for — platform layer handles it
+    except Exception as exc:
+        logger.exception("Copilot subprocess error")
+        return f"⚠️ Session error: {exc}"
+    if proc.returncode != 0:
+        err = stderr.decode().strip() or stdout.decode().strip()
+        logger.error("copilot CLI error (rc=%d): %s", proc.returncode, err)
+        return f"⚠️ Copilot error (rc={proc.returncode}):\n{err}"
+    return _strip_stats(stdout.decode())
+```
+
+Note: when `asyncio.wait_for()` times out at the platform level, it cancels the
+`CopilotSession.send()` coroutine, which propagates a `CancelledError` into `proc.communicate()`.
+`proc` is then an orphaned subprocess. Add a `try/finally` to kill the process on cancellation:
+
+```python
+async def send(self, prompt: str) -> str:
+    proc = None
+    try:
+        proc = await self._spawn(self._build_cmd(prompt), self._env)
+        stdout, stderr = await proc.communicate()
+    except asyncio.CancelledError:
+        if proc is not None:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        raise  # re-raise so the platform timeout handler sees it as TimeoutError
+    except Exception as exc:
+        logger.exception("Copilot subprocess error")
+        return f"⚠️ Session error: {exc}"
+    ...
+```
+
+---
+
+### Step 7 — Tests
+
+**`tests/unit/test_session.py`**
+- Remove test for internal 180s timeout (no longer applicable).
+- Add test: `send()` re-raises `CancelledError` and calls `proc.kill()`.
+
+**New `tests/unit/test_thinking_ticker.py`** (or extend `test_common.py`):
+- `test_ticker_fires_after_threshold` — verify edit_fn not called before threshold.
+- `test_ticker_fires_at_interval` — verify edit_fn called every `update_interval` seconds.
+- `test_ticker_warn_message` — verify warning text appears when remaining ≤ warn_before_secs.
+- `test_ticker_no_timeout` — verify no warning when `timeout_secs=0`.
+- `test_ticker_cancelled_immediately` — verify cancellation before threshold yields zero edits.
+
+**`tests/unit/test_bot.py`**
+- Add test: ticker is cancelled when non-streaming `send()` completes normally.
+- Add test: ticker is cancelled when non-streaming `send()` raises `TimeoutError`.
+- Add test: ticker is cancelled on first streaming chunk.
+- Add test: `_run_ai_pipeline` posts correct timeout error message.
+
+**`tests/unit/test_slack.py`** (if it exists) or new file:
+- Mirror the bot.py ticker tests for Slack's `_run_ai_pipeline`.
 
 ---
 
@@ -311,35 +566,54 @@ finally:
 
 ### Scenario 1 — Fast response (< 15s)
 User sends a prompt. AI replies in 8 seconds.
-- Ticker never fires (threshold is 15s).
+- Ticker is created, sleeps for 15s, but backend returns in 8s.
+- Ticker is cancelled during the `finally` block before it ever edits the message.
 - UX identical to today. ✅
 
 ### Scenario 2 — Medium response (15–60s)
 Prompt takes 40 seconds. Ticker fires at 15s and 45s.
 - User sees "⏳ Still thinking… (15s)" then "⏳ Still thinking… (45s)".
-- Response arrives, final edit replaces the ticker message. ✅
+- Response arrives at 40s — ticker cancelled in `finally`, response replaces the message. ✅
 
 ### Scenario 3 — Long response (60–300s)
 Copilot is rewriting a large file. Takes 4 minutes.
 - Ticker fires at 15, 45, 75, 105, 135, 165, 195, 225 seconds.
-- At 300s (360-60=300), message shifts to "…will cancel in 60s".
-- Response arrives at 240s — ticker cancelled, response shown. ✅
+- At 300s (360−60=300s elapsed), remaining ≤ warn_before_secs → message shifts to warning.
+- Response arrives at 240s — ticker cancelled, response shown normally. ✅
 
-### Scenario 4 — Timeout (360s)
-Backend stalls. Ticker runs until 300s warn message, then hard timeout at 360s.
-- User sees clear warning 60s ahead of kill.
-- `asyncio.TimeoutError` → `⚠️ Request cancelled after 360s.` ✅
+### Scenario 4 — Hard timeout (360s)
+Backend stalls completely. Ticker runs and shows warning at 300s.
+- At 360s: `asyncio.wait_for()` raises `TimeoutError` in `_run_ai_pipeline`.
+- Ticker is cancelled in `finally`. Error message is edited into the message. ✅
+- For CopilotBackend: the `CancelledError` propagates into `CopilotSession.send()`, which
+  calls `proc.kill()` on the stalled subprocess. No zombie process. ✅
 
 ### Scenario 5 — No timeout (`AI_TIMEOUT_SECS=0`)
-Power user running a long analysis. No cancellation.
-- Ticker runs indefinitely (every 30s).
+Power user running a very long analysis. `ai_timeout_secs = 0`.
+- `asyncio.wait_for()` is not called (the `if timeout_secs > 0` guard skips it).
+- Ticker runs indefinitely (every 30s), with no warning message variant.
 - User knows the bot is alive. Accepts the risk of no hard kill. ✅
 
-### Scenario 6 — Streaming backend
-For streaming backends, chunks arrive continuously so the ticker is largely cosmetic.
-- But: if the stream stalls mid-response, the ticker continues updating, alerting the user.
-- The timeout still applies to the total stream duration (via `asyncio.wait_for` on the
-  stream iterator). ✅
+### Scenario 6 — Streaming backend with fast first token
+`DirectAPIBackend` (streaming), first chunk arrives in 2s.
+- Ticker is created but sleeps for 15s (threshold).
+- First chunk arrives at 2s → ticker is cancelled immediately, before it ever edits.
+- Stream proceeds with normal chunk-edit cycle. Ticker never touches the message. ✅
+
+### Scenario 7 — Streaming backend with slow first token
+API backend is under load. First token takes 30s.
+- Ticker fires at 15s → "⏳ Still thinking… (15s)" edit.
+- At 30s first chunk arrives → ticker is cancelled mid-sleep.
+- Stream then takes over editing the message with content. ✅
+
+### Scenario 8 — Streaming stall mid-response
+A streaming response delivers 3 chunks then stalls for 60s (e.g., network issue).
+- After the 3rd chunk, first_chunk is already `False`, so ticker was already cancelled.
+- **The ticker does NOT help here** — it was cancelled on the first chunk.
+- The overall `asyncio.wait_for()` wrapping the entire stream body will fire at the
+  configured `AI_TIMEOUT_SECS`. The timeout error is shown, and the partial response is lost.
+- This is an acceptable trade-off. A mid-stream stall detector would need a different
+  mechanism (heartbeat coroutine monitoring the last-chunk timestamp) — out of scope here.
 
 ---
 
@@ -348,33 +622,66 @@ For streaming backends, chunks arrive continuously so the ticker is largely cosm
 | File | Change |
 |------|--------|
 | `src/config.py` | Add 4 new `BotConfig` fields |
-| `src/ai/session.py` | Parameterise timeout; accept `timeout_secs` arg |
-| `src/ai/adapter.py` | Update `AICLIBackend.send()` signature to accept `timeout_secs` |
-| `src/ai/copilot.py` | Pass `timeout_secs` through to `CopilotSession` |
-| `src/platform/common.py` | Add `thinking_ticker()` async helper |
-| `src/bot.py` | Launch ticker in `_run_ai_pipeline()`; pass timeout to backend |
-| `src/platform/slack.py` | Same as `bot.py` |
-| `tests/unit/test_bot.py` | Tests for ticker task lifecycle |
-| `tests/unit/test_session.py` | Tests for timeout=0 path and parameterised timeout |
+| `src/platform/common.py` | Add `thinking_ticker()` async helper; add `asyncio`, `time`, `Callable`, `Awaitable` imports |
+| `src/bot.py` | Add `from contextlib import suppress`; refactor `_stream_to_telegram()` signature; add ticker + `asyncio.wait_for()` to both streaming and non-streaming paths in `_run_ai_pipeline()` |
+| `src/platform/slack.py` | Add `from contextlib import suppress`; add ticker + `asyncio.wait_for()` to both paths in `_stream_to_slack()` and `_run_ai_pipeline()` |
+| `src/ai/session.py` | Remove `TIMEOUT = 180`; remove internal `asyncio.wait_for()`; add `CancelledError` handler that calls `proc.kill()` before re-raising |
+| `README.md` | Add 4 new env vars to the **Bot Behaviour** table (both Telegram and Slack sections) |
+| `tests/unit/test_session.py` | Remove old timeout tests; add `CancelledError` + `proc.kill()` test |
+| `tests/unit/test_thinking_ticker.py` | New file: 5 unit tests for `thinking_ticker()` |
+| `tests/unit/test_bot.py` | Add ticker lifecycle tests (normal, timeout, streaming first-chunk cancel) |
+
+**No changes to:**
+- `src/ai/adapter.py` — `AICLIBackend.send()` signature is **unchanged**
+- `src/ai/copilot.py` — delegates to `CopilotSession`; no changes needed at this layer
+- `src/ai/direct.py` — timeout now applied at platform layer; no internal changes needed
+- `src/ai/codex.py` — same; gains timeout coverage for free
+
+---
+
+## README Update
+
+Add to the **Bot Behaviour** environment variable table (in both Telegram and Slack sections):
+
+```markdown
+| `AI_TIMEOUT_SECS` | `360` | Hard timeout for any AI backend in seconds (0 = no timeout) |
+| `THINKING_SLOW_THRESHOLD_SECS` | `15` | Seconds of silence before first "Still thinking…" update |
+| `THINKING_UPDATE_SECS` | `30` | Seconds between subsequent elapsed-time updates |
+| `AI_TIMEOUT_WARN_SECS` | `60` | Seconds before hard timeout to include a cancellation warning |
+```
 
 ---
 
 ## Open Questions
 
-1. **Should the ticker message also show the active prompt text?**  
-   e.g., `⏳ Still thinking about "refactor auth module"… (45s)`  
-   Avoids confusion when multiple requests are queued (rare but possible).
+1. **Should the ticker message also show the active prompt text?**
+   e.g., `⏳ Still thinking about "refactor auth module"… (45s)`
+   Avoids confusion when multiple requests are queued (rare but possible). Risks leaking
+   sensitive prompt content into what is visible in a shared Slack channel.
 
-2. **Should `gate status` be retired or enhanced?**  
-   With proactive tickers, `gate status` becomes less useful. It could be kept for the
-   case where the user dismissed the thinking message, or repurposed to show bot-wide health
-   (memory, uptime, backend type).
+2. **Should `gate status` be retired or enhanced?**
+   With proactive tickers, `gate status` becomes less immediately useful. Options:
+   - Keep as-is (still useful if the user dismissed the thinking message, or when using CLI).
+   - Enhance to also show the current ticker message / estimated time to timeout.
+   - Retire it and redirect to `gate info` (which shows active AI task count).
 
-3. **Rate limits on Telegram edits:**  
-   Telegram allows ~20 edits/minute per chat. At 30s intervals, peak rate is 2/minute — well
-   within limits. At `THINKING_UPDATE_SECS=5` it would be 12/minute — still fine.
+3. **Rate limits on Telegram edits:**
+   Telegram allows ~20 edits/minute per chat. At `THINKING_UPDATE_SECS=30`, peak rate is
+   2/minute — well within limits. At `THINKING_UPDATE_SECS=5` it would be 12/minute — still
+   safe. Warn in docs that values below 5 are inadvisable.
 
-4. **Direct API / Codex backends:**  
-   `DirectAPIBackend` and `CodexBackend` have their own internal timeout/retry behaviour.
-   The wrapper timeout in `session.py` only applies to `CopilotBackend`. A unified timeout
-   wrapper should be considered at the `AICLIBackend` level.
+4. **Mid-stream stall detection (future scope):**
+   Scenario 8 shows that a stall after the first chunk arrives is not covered by the ticker.
+   A future enhancement could run a "last-chunk heartbeat" coroutine that re-arms the ticker
+   if no chunk arrives within N seconds of the previous one. Out of scope for this feature.
+
+5. **Interaction with copilot pre-warm feature:**
+   If `COPILOT_PREWARM_PROMPT` is set (see `docs/features/copilot-prewarm.md`), the cold-
+   start delay is reduced. This may lower the effective `THINKING_SLOW_THRESHOLD_SECS` needed
+   in practice, but doesn't change the implementation here.
+
+6. **Zombie subprocess risk when `CancelledError` propagates through `proc.communicate()`:**
+   Python's `asyncio` does not automatically kill child processes when a coroutine is
+   cancelled. Without the explicit `proc.kill()` in the `CancelledError` handler (Step 6),
+   the `copilot` subprocess would continue running invisibly in the background. This is the
+   most critical correctness issue in the entire implementation.
