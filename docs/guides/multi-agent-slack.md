@@ -6,11 +6,11 @@ This guide shows how to run multiple AgentGate instances as specialised AI agent
 
 Three agents, one `#agentgate` Slack channel:
 
-| Agent | Trigger prefix | Backend | Skills file |
-|-------|---------------|---------|-------------|
-| `@GateCode` — Developer | `dev` | Copilot | `skills/dev-agent.md` |
-| `@GateSec` — Security | `sec` | Anthropic Claude | `skills/sec-agent.md` |
-| `@GateDocs` — Docs writer | `docs` | OpenAI GPT-4o | `skills/docs-agent.md` |
+| Agent | Trigger prefix | Backend | Model |
+|-------|---------------|---------|-------|
+| `@GateCode` — Developer | `dev` | Copilot | `claude-sonnet-4-6` |
+| `@GateSec` — Security | `sec` | Copilot | `claude-opus-4-6` |
+| `@GateDocs` — Docs writer | `docs` | Copilot | `gpt-5-mini` |
 
 **Prerequisites**: A Slack workspace where you can install apps, Docker, and the credentials for at least one AI backend.
 
@@ -219,7 +219,8 @@ PREFIX_ONLY=true
 GITHUB_REPO=agigante80/AgentGate
 GITHUB_REPO_TOKEN=ghp_...
 AI_CLI=copilot
-AI_MODEL=claude-sonnet-4-5
+AI_MODEL=claude-sonnet-4-6
+COPILOT_GITHUB_TOKEN=ghp_...
 COPILOT_SKILLS_DIRS=/skills
 TRUSTED_AGENT_BOT_IDS=["GateSec","GateDocs"]   # display names of @GateSec and @GateDocs
 ```
@@ -234,11 +235,10 @@ BOT_CMD_PREFIX=sec
 PREFIX_ONLY=true
 GITHUB_REPO=agigante80/AgentGate
 GITHUB_REPO_TOKEN=ghp_...
-AI_CLI=api
-AI_PROVIDER=anthropic
-AI_API_KEY=sk-ant-...
-AI_MODEL=claude-opus-4-5
-SYSTEM_PROMPT_FILE=/skills/sec-agent.md
+AI_CLI=copilot
+AI_MODEL=claude-opus-4-6
+COPILOT_GITHUB_TOKEN=ghp_...
+COPILOT_SKILLS_DIRS=/skills
 TRUSTED_AGENT_BOT_IDS=["GateCode","GateDocs"]   # display names of @GateCode and @GateDocs
 ```
 
@@ -252,15 +252,16 @@ BOT_CMD_PREFIX=docs
 PREFIX_ONLY=true
 GITHUB_REPO=agigante80/AgentGate
 GITHUB_REPO_TOKEN=ghp_...
-AI_CLI=api
-AI_PROVIDER=openai
-AI_API_KEY=sk-...
-AI_MODEL=gpt-4o
-SYSTEM_PROMPT_FILE=/skills/docs-agent.md
+AI_CLI=copilot
+AI_MODEL=gpt-5-mini
+COPILOT_GITHUB_TOKEN=ghp_...
+COPILOT_SKILLS_DIRS=/skills
 TRUSTED_AGENT_BOT_IDS=["GateCode","GateSec"]    # display names of @GateCode and @GateSec
 ```
 
-> **Note**: `COPILOT_SKILLS_DIRS` loads skills for the Copilot CLI backend. `SYSTEM_PROMPT_FILE` loads skills for the `api` backend (OpenAI / Anthropic / Ollama). Both read the same markdown file format.
+> **Note**: All agents use `AI_CLI=copilot`. `COPILOT_GITHUB_TOKEN` is required — use a GitHub Personal Access Token with Copilot access. `AI_MODEL` selects the model per agent; see [GitHub Copilot model comparison](https://docs.github.com/en/copilot/reference/ai-models/model-comparison) for the full list of available models.
+>
+> **Note**: `COPILOT_SKILLS_DIRS` points to a directory of markdown files that are injected into the Copilot context as skills. Each agent has its own file, mounted read-only via Docker volumes.
 >
 > **Note**: `TRUSTED_AGENT_BOT_IDS` accepts **display names** (e.g. `"GateCode"`) or raw `B`-prefixed bot IDs. Names are resolved automatically at startup — no manual ID lookup needed.
 >
@@ -377,4 +378,4 @@ Non-negotiable constraints.
 Step-by-step process for typical tasks.
 ```
 
-For the Copilot backend, all files in `COPILOT_SKILLS_DIRS` are loaded at subprocess spawn time — just edit the file, no restart needed. For the `api` backend, `SYSTEM_PROMPT_FILE` is read at container startup — restart the container after editing the file.
+For the Copilot backend, all files in `COPILOT_SKILLS_DIRS` are loaded at subprocess spawn time — just edit the file and restart the container to pick up changes.
