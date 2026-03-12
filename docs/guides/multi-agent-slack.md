@@ -264,7 +264,7 @@ TRUSTED_AGENT_BOT_IDS=["GateCode","GateSec"]    # display names of @GateCode and
 >
 > **Note**: `TRUSTED_AGENT_BOT_IDS` accepts **display names** (e.g. `"GateCode"`) or raw `B`-prefixed bot IDs. Names are resolved automatically at startup — no manual ID lookup needed.
 >
-> **Note**: `SLACK_CHANNEL_ID` is required — without it the bot cannot post its 🟢 Ready message on startup. Use the channel ID (starts with `C`) from your Slack channel. See [`docs/slack-setup.md`](../slack-setup.md) for details.
+> **Note**: `SLACK_CHANNEL_ID` is required — without it the bot cannot post its 🟢 Ready message on startup. To find the Channel ID: click the channel name at the top of the channel → **Channel details** opens → the ID is shown at the bottom of the panel (starts with `C`). See [`docs/guides/slack-setup.md`](slack-setup.md) for the full single-agent setup guide.
 
 ---
 

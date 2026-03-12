@@ -33,13 +33,16 @@ In the left sidebar: **OAuth & Permissions** → scroll to **Scopes** → **Bot 
 
 ## 3. Enable Socket Mode and get the App-Level Token
 
-In the left sidebar: **Settings** → **Socket Mode**:
+**Enable Socket Mode** — in the left sidebar: **Settings** → **Socket Mode** → toggle **Enable Socket Mode** → **ON**.
 
-1. Toggle **Enable Socket Mode** → **ON**
-2. A dialog appears — give the token a name (e.g. `socket-token`)
-3. Click **Add Scope** → select `connections:write`
-4. Click **Generate**
-5. Copy the token — it starts with `xapp-` → this is your **`SLACK_APP_TOKEN`**
+**Generate the App-Level Token** — in the left sidebar: **Settings** → **Basic Information** → scroll to **App-Level Tokens** → **Generate Token and Scopes**:
+
+1. Give the token a name (e.g. `socket-token`)
+2. Click **Add Scope** → select `connections:write`
+3. Click **Generate**
+4. Copy the token — it starts with `xapp-` → this is your **`SLACK_APP_TOKEN`**
+
+> 💡 **Shortcut**: If you create the app from a manifest (see the [multi-agent guide](multi-agent-slack.md)), Socket Mode is enabled automatically — you only need to complete the "Generate the App-Level Token" step above.
 
 ---
 
@@ -88,8 +91,8 @@ The bot will now appear under **Apps** in the Slack sidebar and accept DMs.
 In your Slack workspace:
 
 1. Open the channel you want the bot in
-2. Type `/invite @YourBotName` and press Enter
-3. To get the **Channel ID**: right-click the channel name → **Copy link** — the ID is the last segment of the URL (e.g. `C08XXXXXXXX`) → this is your **`SLACK_CHANNEL_ID`** (optional but recommended)
+2. Type `/invite @YourBotName` and press Enter — or go to **Channel Settings** → **Integrations** → **Add apps** and select your bot
+3. To get the **Channel ID**: click the channel name at the top to open **Channel details** → the ID is shown at the bottom of the panel (starts with `C`, e.g. `C08XXXXXXXX`) → this is your **`SLACK_CHANNEL_ID`**
 
 ---
 
