@@ -221,7 +221,7 @@ GITHUB_REPO_TOKEN=ghp_...
 AI_CLI=copilot
 AI_MODEL=claude-sonnet-4-6
 COPILOT_GITHUB_TOKEN=ghp_...
-COPILOT_SKILLS_DIRS=/skills
+COPILOT_SKILLS_DIRS=/repo/skills
 TRUSTED_AGENT_BOT_IDS=["GateSec","GateDocs"]   # display names of @GateSec and @GateDocs
 ```
 
@@ -238,7 +238,7 @@ GITHUB_REPO_TOKEN=ghp_...
 AI_CLI=copilot
 AI_MODEL=claude-opus-4-6
 COPILOT_GITHUB_TOKEN=ghp_...
-COPILOT_SKILLS_DIRS=/skills
+COPILOT_SKILLS_DIRS=/repo/skills
 TRUSTED_AGENT_BOT_IDS=["GateCode","GateDocs"]   # display names of @GateCode and @GateDocs
 ```
 
@@ -255,13 +255,13 @@ GITHUB_REPO_TOKEN=ghp_...
 AI_CLI=copilot
 AI_MODEL=gpt-5-mini
 COPILOT_GITHUB_TOKEN=ghp_...
-COPILOT_SKILLS_DIRS=/skills
+COPILOT_SKILLS_DIRS=/repo/skills
 TRUSTED_AGENT_BOT_IDS=["GateCode","GateSec"]    # display names of @GateCode and @GateSec
 ```
 
 > **Note**: All agents use `AI_CLI=copilot`. `COPILOT_GITHUB_TOKEN` is required — use a GitHub Personal Access Token with Copilot access. `AI_MODEL` selects the model per agent; see [GitHub Copilot model comparison](https://docs.github.com/en/copilot/reference/ai-models/model-comparison) for the full list of available models.
 >
-> **Note**: `COPILOT_SKILLS_DIRS` points to a directory of markdown files that are injected into the Copilot context as skills. Each agent has its own file, mounted read-only via Docker volumes.
+> **Note**: `COPILOT_SKILLS_DIRS=/repo/skills` points to the `skills/` directory inside the cloned repo (`/repo` is where the container clones `GITHUB_REPO` at startup). No host copy or volume mount needed — the skills are already there.
 >
 > **Note**: `TRUSTED_AGENT_BOT_IDS` accepts **display names** (e.g. `"GateCode"`) or raw `B`-prefixed bot IDs. Names are resolved automatically at startup — no manual ID lookup needed.
 >
@@ -282,8 +282,7 @@ services:
     env_file: .env.dev
     volumes:
       - repo_dev:/repo
-      - data_dev:/data
-      - ./skills/dev-agent.md:/skills/dev-agent.md:ro
+      - ./data/dev:/data
     labels:
       agentgate.agent: dev
 
@@ -293,8 +292,7 @@ services:
     env_file: .env.sec
     volumes:
       - repo_sec:/repo
-      - data_sec:/data
-      - ./skills/sec-agent.md:/skills/sec-agent.md:ro
+      - ./data/sec:/data
     labels:
       agentgate.agent: sec
 
@@ -304,21 +302,19 @@ services:
     env_file: .env.docs
     volumes:
       - repo_docs:/repo
-      - data_docs:/data
-      - ./skills/docs-agent.md:/skills/docs-agent.md:ro
+      - ./data/docs:/data
     labels:
       agentgate.agent: docs
 
 volumes:
   repo_dev:
-  data_dev:
   repo_sec:
-  data_sec:
   repo_docs:
-  data_docs:
 ```
 
-Each agent has its own named volumes so histories and repo clones are fully isolated.
+Each agent has its own named volume for `/repo` (the cloned git repo) and its own local `./data/<agent>/` folder for `/data` (SQLite history DB, logs). The three `data/` folders are fully isolated — no write conflicts between agents.
+
+Skills files (`skills/`) live inside the cloned repo at `/repo/skills/` — no host copy needed. `COPILOT_SKILLS_DIRS=/repo/skills` points there directly.
 
 ---
 
@@ -378,4 +374,4 @@ Non-negotiable constraints.
 Step-by-step process for typical tasks.
 ```
 
-For the Copilot backend, all files in `COPILOT_SKILLS_DIRS` are loaded at subprocess spawn time — just edit the file and restart the container to pick up changes.
+For the Copilot backend, skills are loaded from `COPILOT_SKILLS_DIRS` at subprocess spawn time. Since they live in the cloned repo at `/repo/skills/`, you can update them with a `dev sync` (git pull) without rebuilding — just restart the container after syncing.
