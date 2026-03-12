@@ -6,6 +6,47 @@ Allow recurring shell commands or AI prompts to be triggered automatically on an
 
 ---
 
+## ⚠️ Prerequisite Questions
+
+> Answer these before writing a single line of code. A wrong assumption costs 10× more to fix than a clarification takes.
+
+1. **Scope** — Both platforms. Telegram handlers go in `src/bot.py`; Slack handlers go in `src/platform/slack.py`. The `AgentScheduler` core (`src/scheduler.py`) is platform-agnostic and injected at startup.
+2. **Backend** — All backends. `ai:` jobs call `backend.send()` the same way interactive messages do. Shell jobs call `executor.run_shell()`. Neither depends on which backend is active.
+3. **Stateful vs stateless** — N/A for the scheduler itself. The backend reference is passed in at init time; the scheduler does not inspect `is_stateful`.
+4. **Breaking change?** — No. `SCHEDULE_ENABLED=false` (default) means the feature is entirely absent for existing deployments. The `gate schedule` command does not exist until enabled.
+5. **New dependency?** — No new pip packages. `apscheduler` (3.x) is already installed as a transitive dependency of `python-telegram-bot[job-queue]`. `aiosqlite` is already present.
+6. **Persistence** — Yes. A new SQLite database at `SCHEDULES_DB_PATH` (`/data/schedules.db`) stores job definitions. Jobs survive container restarts.
+7. **Auth** — No new credential. Scheduled jobs run with the same auth context as the container. Shell commands are subject to the existing `is_destructive()` / confirmation flow.
+8. **`gate restart` interaction** — When `gate restart` is called, the `backend.send` reference in `AgentScheduler` becomes stale. Pass a lambda `lambda p: handler._backend.send(p)` instead of a direct reference so that backend swaps propagate automatically.
+
+---
+
+## Problem Statement
+
+Today, AgentGate responds only to explicit user messages. There is no way to automate repetitive tasks:
+
+1. **No recurring commands** — a user who wants `git pull` run every 6 hours must send the command manually each time.
+2. **No AI-driven monitoring** — there is no mechanism to ask the AI a question (e.g., "are there any new errors?") on a schedule and receive proactive notifications.
+3. **No persistence** — even if a workaround were possible (e.g., `sleep` loops in a shell script), it would not survive container restarts.
+
+Teams running CI/CD bots, nightly summaries, or health-check workflows have no automation primitive — they must build it outside AgentGate, defeating the purpose of the bot.
+
+---
+
+## Current Behaviour (as of v0.7.x)
+
+| Layer | Location | Current behaviour |
+|-------|----------|-------------------|
+| Command dispatch | `src/bot.py` (prefix dispatch dict) | `gate <cmd>` commands include `run`, `sync`, `restart`, `clear`, etc. No `schedule` command exists. |
+| Shell execution | `src/executor.py` (`run_shell`) | Synchronous/async shell execution; destructive-check; output truncation. No scheduling. |
+| AI forwarding | `src/bot.py` (`forward_to_ai`) | Interactive messages only; no timer-based invocation. |
+| APScheduler | `requirements.txt` (transitive) | `apscheduler==3.11.2` is installed (via `python-telegram-bot[job-queue]`) but unused by AgentGate directly. |
+| Slack | `src/platform/slack.py` | Same — no schedule command or timer infrastructure. |
+
+> **Key gap**: There is no scheduling primitive. APScheduler is available but not wired up. Job persistence (DB) does not exist.
+
+---
+
 ## Usage
 
 **Telegram** (prefix is `/gate` by default):
@@ -33,7 +74,7 @@ gate schedule cancel abc123
 
 ---
 
-## Critical Architecture Notes
+## Architecture Notes
 
 ### APScheduler version already present
 
@@ -621,3 +662,102 @@ The feature requires **one new file** (`src/scheduler.py`) and targeted edits to
 - injecting the `post_message` callback into `AgentScheduler` after the bot client is initialized
 - keeping the `backend.send` reference live across `gate restart` calls
 - ensuring test coverage of the persistence-and-restore cycle
+
+---
+
+## Documentation Updates
+
+### `README.md`
+
+1. **Features bullet list** — add:
+   > 📅 **Scheduled commands** — run shell commands or AI prompts on a recurring interval with `gate schedule`.
+
+2. **Bot commands table** — add:
+   ```markdown
+   | `gate schedule shell: "<cmd>" every <interval>` | Add a recurring shell job |
+   | `gate schedule ai: "<prompt>" every <interval>` | Add a recurring AI prompt job |
+   | `gate schedule list` | List all active jobs for this chat |
+   | `gate schedule cancel <id>` | Cancel a scheduled job by ID |
+   ```
+
+3. **Environment variables table** — add:
+   ```markdown
+   | `SCHEDULE_ENABLED` | `false` | Enable the `gate schedule` command. Set `true` to activate. |
+   | `SCHEDULE_MAX_JOBS` | `10` | Maximum number of scheduled jobs per chat. |
+   ```
+
+### `.github/copilot-instructions.md`
+
+Add to the architecture section:
+
+> **Scheduling** (`src/scheduler.py`): `AgentScheduler` wraps APScheduler `AsyncIOScheduler` with `aiosqlite`-backed persistence at `SCHEDULES_DB_PATH` (`/data/schedules.db`). Initialised in `main.py` after the bot app is built; injected into both `_BotHandlers` (Telegram) and `SlackBot` (Slack) via `set_scheduler()`. All schedule operations are scoped by `chat_id`.
+
+### `docs/roadmap.md`
+
+After merge to `main`, mark item **2.1** done:
+```markdown
+| 2.1 | ✅ `gate schedule` — run shell commands or AI prompts on a recurring schedule | [→ features/schedule.md](features/schedule.md) |
+```
+
+### `docs/features/schedule.md`
+
+Change `Status: **Planned**` → `Status: **Implemented**` on merge to `main`. Add `Implemented in: v0.8.0`.
+
+---
+
+## Version Bump
+
+Consult `docs/versioning.md` for the full decision guide. Quick reference:
+
+| This feature… | Bump |
+|---------------|------|
+| Adds new `gate schedule` command (new user-visible feature) | **MINOR** |
+| Adds 2 new env vars with safe defaults (`SCHEDULE_ENABLED=false`) | **MINOR** |
+| Adds new `/data/schedules.db` file (new Docker volume content, non-breaking) | **MINOR** |
+| No existing commands, env vars, or Docker mounts renamed or removed | Not MAJOR |
+
+**Expected bump for this feature**: `MINOR` → `0.8.0` (from current `0.7.3`)
+
+> Bump `VERSION` on `develop` _before_ the merge PR to `main`. Never edit `VERSION` directly on `main`.
+
+---
+
+## Roadmap Update
+
+When this feature is complete, update `docs/roadmap.md` item **2.1**:
+
+```markdown
+| 2.1 | ✅ `gate schedule` — run shell commands or AI prompts on a recurring schedule | [→ features/schedule.md](features/schedule.md) |
+```
+
+Potential stretch goal (from Open Questions item 7): cron-syntax trigger support (`@daily`, `0 9 * * 1-5`). Add as a new row if pursued:
+
+```markdown
+| 2.1a | `gate schedule` cron syntax — support `@daily`/`@weekly`/cron expressions in addition to interval syntax | [→ features/schedule.md](features/schedule.md) |
+```
+
+---
+
+## Acceptance Criteria
+
+> The feature is **done** when ALL of the following are true.
+
+- [ ] All implementation steps above are complete.
+- [ ] `pytest tests/ -v --tb=short` passes with no failures or errors.
+- [ ] `ruff check src/` reports no new linting issues.
+- [ ] `README.md` is updated: features bullet, command table rows, env var rows.
+- [ ] `docs/roadmap.md` item 2.1 is marked done (✅).
+- [ ] `docs/features/schedule.md` status changed to `Implemented` on merge to `main`.
+- [ ] `.github/copilot-instructions.md` updated with `AgentScheduler` description.
+- [ ] `VERSION` file bumped to `0.8.0` on `develop` before merge to `main`.
+- [ ] `SCHEDULE_ENABLED=false` (default) — `gate schedule` command does not exist; the handler returns a "feature disabled" message or is not registered.
+- [ ] Scheduled jobs survive a container restart: pre-populated DB rows are re-registered on `start()`.
+- [ ] Both `shell:` and `ai:` job types fire correctly and post results to the correct chat.
+- [ ] Feature works on both **Telegram** and **Slack** — jobs created via one platform do not cross-contaminate another.
+- [ ] `gate schedule cancel <id>` removes the job from both APScheduler and the SQLite DB.
+- [ ] `SCHEDULE_MAX_JOBS` limit is enforced — adding a job beyond the limit returns an error.
+- [ ] Destructive `shell:` commands (`rm`, `drop`, etc.) require explicit confirmation (or are blocked when `CONFIRM_DESTRUCTIVE=true`).
+- [ ] `backend.send` reference stays live across `gate restart` calls (lambda wrapper, not direct reference).
+- [ ] Edge cases in the Open Questions section above are resolved and either handled or documented.
+- [ ] PR is merged to `develop` first; CI is green; then merged to `main`.
+

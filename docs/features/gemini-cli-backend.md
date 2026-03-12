@@ -9,6 +9,21 @@ dedicated Google AI Studio API key, with no OpenAI/Anthropic dependency.
 
 ---
 
+## ⚠️ Prerequisite Questions
+
+> Answer these before writing a single line of code. A wrong assumption costs 10× more to fix than a clarification takes.
+
+1. **Scope** — Both platforms. `GeminiBackend` is called identically by both `src/bot.py` (Telegram) and `src/platform/slack.py` (Slack). No platform-specific changes are required beyond registering the backend in `factory.py`.
+2. **Backend** — New `gemini` backend only. No changes to existing `copilot`, `codex`, or `api` backend behaviour.
+3. **Stateful vs stateless** — **Stateless** (`is_stateful = False`). Mirrors `CopilotBackend`: each call spawns a fresh `gemini --non-interactive -p "prompt"` subprocess. History is injected via `build_prompt()` in `platform/common.py`.
+4. **Breaking change?** — No. `AI_CLI` defaults to `copilot`; adding `gemini` as a valid value is purely additive. Existing deployments are unaffected.
+5. **New dependency?** — Yes, but npm-only. `@google/gemini-cli` must be installed globally in the Docker image (`npm install -g @google/gemini-cli`). Node.js is already present in the container. No new Python pip package.
+6. **Persistence** — No new DB table or file. History is handled by the existing SQLite history layer.
+7. **Auth** — New: `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) env var is required. No interactive browser auth is supported in headless/Docker mode.
+8. **Interactive auth guard** — The Gemini CLI will hang indefinitely if invoked without `--non-interactive` and no API key is set. **Always use `--non-interactive`**. Validate that `GEMINI_API_KEY` is non-empty in `_validate_config()` when `AI_CLI=gemini`.
+
+---
+
 ## Background
 
 Google released the **Gemini CLI** in June 2025 (Apache 2.0, open source).
@@ -94,6 +109,33 @@ platform settings remain unchanged.
   so Gemini can access project files via the `@filename` syntax.
 - **`clear_history()`** — no-op (inherited from `AICLIBackend` base class).
   The backend is stateless; history is injected into each prompt by the bot layer.
+
+---
+
+## Current Behaviour (as of v0.7.x)
+
+| Layer | Location | Current behaviour |
+|-------|----------|-------------------|
+| Backend factory | `src/ai/factory.py` | `ai_cli` accepts `"copilot"`, `"codex"`, `"api"` only; raises `ValueError` for any other value |
+| `AIConfig` | `src/config.py` (`AIConfig`) | `ai_cli: Literal["copilot", "codex", "api"] = "copilot"` — `"gemini"` is not a valid value |
+| Dockerfile | `Dockerfile` | Node.js is installed; `@github/copilot-cli` and `@openai/codex` are added; `@google/gemini-cli` is absent |
+
+> **Key gap**: `AI_CLI=gemini` currently raises a validation error at startup. No Gemini-flavoured subprocess backend exists. All three current backends (copilot, codex, api) are fully implemented and stable — this feature adds a fourth without modifying any existing path.
+
+---
+
+## Architecture Notes
+
+> **Read before touching code.** These are non-obvious constraints specific to this feature.
+
+- **`is_stateful = False`** — `GeminiBackend` must be stateless, mirroring `CopilotBackend`. History context is injected by `build_prompt()` in `platform/common.py`; the backend never manages its own history.
+- **`SubprocessMixin`** — use `SubprocessMixin` from `src/ai/adapter.py` to run the subprocess in `REPO_DIR`. Study `CopilotBackend` as the reference implementation.
+- **`--non-interactive` is mandatory** — always include it; do not allow `AI_CLI_OPTS` to omit it unless explicitly documented. Without it, the CLI hangs on auth dialogs in Docker.
+- **Exit code handling** — exit code 0 = success; 1 = general error; 42 = invalid input; 53 = turn limit exceeded. Map non-zero codes to user-facing error messages (don't silently return empty output).
+- **API key validation** — when `AI_CLI=gemini`, `GEMINI_API_KEY` must be non-empty. Add a check in `_validate_config()` in `src/main.py` — same pattern as the Telegram/Slack token checks.
+- **Timeout interaction** — if the AI response feedback feature (`docs/features/ai-response-feedback.md`) is implemented first, the platform-layer timeout replaces the internal 180s timeout. Coordinate: do not add a new internal `asyncio.wait_for()` inside `GeminiBackend` if the platform already wraps it.
+- **`REPO_DIR` and `DB_PATH`** — import from `src/config.py`; never hardcode paths.
+- **`asyncio_mode = auto`** — all `async def test_*` functions run without `@pytest.mark.asyncio`.
 
 ---
 
@@ -561,3 +603,157 @@ def test_gemini_model_passed_through(self, monkeypatch):
 | **Privacy** | Data sent to Google | Data sent to GitHub/OpenAI | Data sent to OpenAI | Data sent to provider |
 | **Offline** | ❌ | ❌ | ❌ | ❌ (unless Ollama) |
 | **Built-in tools** | ⚠️ Web search, shell (disable recommended) | ✅ Code-focused tools | ✅ Code-focused | ❌ (none via CLI) |
+
+---
+
+## Dependencies
+
+| Package | Status | Notes |
+|---------|--------|-------|
+| `@google/gemini-cli` | ❌ New (npm global) | Add `RUN npm install -g @google/gemini-cli@<version>` to `Dockerfile`. Pin to a specific version to avoid surprise breakage. |
+| `subprocess`, `asyncio`, `shlex`, `os` | ✅ stdlib | Already used by `copilot.py` and `codex.py`. |
+| No new pip packages | ✅ Pure Python | `GeminiBackend` uses only existing stdlib and project modules. |
+
+> **Rule**: Node.js is already installed in the Docker image (required for Copilot and Codex CLIs). Adding `@google/gemini-cli` does not change the base image or Python deps — it is one additional `npm install -g` line in the `Dockerfile`.
+
+---
+
+## Test Plan
+
+The detailed test implementations are embedded in the Architecture section (`tests/unit/test_gemini_backend.py`, `tests/contract/test_backends_contract.py`, `tests/integration/test_factory.py`). Summary:
+
+### `tests/unit/test_gemini_backend.py` (new file)
+
+| Test | What it checks |
+|------|----------------|
+| `test_not_stateful` | `GeminiBackend.is_stateful == False` |
+| `test_default_cmd_has_non_interactive` | `--non-interactive` always present in subprocess args |
+| `test_prompt_in_cmd` | Prompt passed as `-p <value>` |
+| `test_env_contains_api_key` | `GEMINI_API_KEY` is set in subprocess env |
+| `test_model_flag_added_when_set` | `--model <value>` added when `AI_MODEL` is non-empty |
+| `test_model_flag_absent_when_empty` | No `--model` flag when `AI_MODEL` is empty |
+| `test_opts_replaces_non_interactive` | `AI_CLI_OPTS` replaces the default `--non-interactive` |
+| `test_send_success` | Exit code 0 returns stdout as a string |
+| `test_send_error_rc1` | Exit code 1 returns a user-facing error message |
+| `test_send_error_rc42_invalid_input` | Exit code 42 returns "invalid input" message |
+| `test_send_error_rc53_turn_limit` | Exit code 53 returns "turn limit exceeded" message |
+| `test_send_timeout` | `asyncio.TimeoutError` returns timeout message; subprocess killed |
+| `test_stream_yields_lines` | `stream()` yields stdout lines progressively |
+| `test_stream_error_appended` | Non-zero exit code appended to stream output |
+| `test_clear_history_does_not_raise` | `clear_history()` is a no-op that does not raise |
+
+### `tests/contract/test_backends_contract.py` additions
+
+| Test | What it checks |
+|------|----------------|
+| `test_gemini_is_not_stateful` | `GeminiBackend` satisfies `AICLIBackend` contract with `is_stateful = False` |
+
+### `tests/integration/test_factory.py` additions
+
+| Test | What it checks |
+|------|----------------|
+| `test_creates_gemini_backend` | `create_backend()` with `AI_CLI=gemini` returns `GeminiBackend` instance |
+| `test_gemini_falls_back_to_ai_api_key` | If `GEMINI_API_KEY` unset but `AI_API_KEY` set, backend uses the fallback |
+| `test_gemini_model_passed_through` | `AI_MODEL` value reaches `GeminiBackend` constructor |
+
+### Coverage note
+
+Run `pytest tests/ --cov=src --cov-report=term-missing` after implementation. Target: 100% branch coverage on `GeminiBackend.send()` and `stream()`, including all non-zero exit code branches. The timeout branch requires a mock that stalls indefinitely.
+
+---
+
+## Documentation Updates
+
+### `README.md`
+
+1. **`AI_CLI` row** — extend the accepted values to include `gemini`:
+   ```markdown
+   | `AI_CLI` | `copilot` | AI backend to use. Options: `copilot`, `codex`, `api`, `gemini`. |
+   ```
+2. **New env var row** in the AI configuration table:
+   ```markdown
+   | `GEMINI_API_KEY` | `""` | API key for the Gemini CLI backend (`AI_CLI=gemini`). Get one from [aistudio.google.com](https://aistudio.google.com/app/apikey). |
+   ```
+3. **Features bullet list** — add:
+   > 🤖 **Gemini CLI backend** — use Google Gemini 2.5 Pro (1M token context) via `AI_CLI=gemini`.
+
+### `.github/copilot-instructions.md`
+
+Add `GeminiBackend` to the backends description in the AI backend section:
+> `gemini.py` — stateless `GeminiBackend` (`is_stateful = False`). Spawns `gemini --non-interactive -p <prompt>` per call. Requires `GEMINI_API_KEY`.
+
+### `docker-compose.yml.example`
+
+Add a commented-out Gemini block:
+```yaml
+# Gemini CLI backend (alternative to copilot)
+# AI_CLI=gemini
+# GEMINI_API_KEY=AIza...
+# AI_MODEL=gemini-2.5-pro
+```
+
+### `docs/roadmap.md`
+
+This feature is not currently listed. Add it to the Features table:
+```markdown
+| 2.10 | Gemini CLI backend — `AI_CLI=gemini` using Google Gemini 2.5 Pro | [→ features/gemini-cli-backend.md](features/gemini-cli-backend.md) |
+```
+After merge to `main`, mark it done (✅).
+
+### `docs/features/gemini-cli-backend.md`
+
+Change `Status: **Planned**` → `Status: **Implemented**` on merge to `main`. Add `Implemented in: v0.8.0`.
+
+---
+
+## Version Bump
+
+Consult `docs/versioning.md` for the full decision guide. Quick reference:
+
+| This feature… | Bump |
+|---------------|------|
+| Adds a new backend option (`AI_CLI=gemini`) with a safe default (existing default `copilot` unchanged) | **MINOR** |
+| Adds `GEMINI_API_KEY` env var (no existing var renamed/removed) | **MINOR** |
+| Modifies `Dockerfile` (one new `npm install` line) | **MINOR** |
+
+**Expected bump for this feature**: `MINOR` → `0.8.0` (from current `0.7.3`)
+
+> Bump `VERSION` on `develop` _before_ the merge PR to `main`. Never edit `VERSION` directly on `main`.
+
+---
+
+## Roadmap Update
+
+When this feature is complete, update `docs/roadmap.md`:
+
+```markdown
+| 2.10 | ✅ Gemini CLI backend — `AI_CLI=gemini` using Google Gemini 2.5 Pro (1M token context) | [→ features/gemini-cli-backend.md](features/gemini-cli-backend.md) |
+```
+
+Potential stretch goal: streaming progressiveness verification (Open Questions item 4) — if Gemini CLI buffers output rather than streaming progressively, a `stream()`-via-`send()` fallback mode may be worth documenting.
+
+---
+
+## Acceptance Criteria
+
+> The feature is **done** when ALL of the following are true.
+
+- [ ] All implementation steps above are complete.
+- [ ] `pytest tests/ -v --tb=short` passes with no failures or errors.
+- [ ] `ruff check src/` reports no new linting issues.
+- [ ] `README.md` is updated: `AI_CLI` values include `gemini`; `GEMINI_API_KEY` row added.
+- [ ] `docker-compose.yml.example` has the commented Gemini block.
+- [ ] `.github/copilot-instructions.md` updated with `GeminiBackend` description.
+- [ ] `docs/roadmap.md` entry added and marked done (✅).
+- [ ] `docs/features/gemini-cli-backend.md` status changed to `Implemented` on merge to `main`.
+- [ ] `VERSION` file bumped to `0.8.0` on `develop` before merge to `main`.
+- [ ] `AI_CLI=gemini` end-to-end: a message reaches the Gemini CLI subprocess and the response is returned to the user in both Telegram and Slack.
+- [ ] `--non-interactive` is always included in the subprocess command (cannot be accidentally omitted).
+- [ ] `GEMINI_API_KEY` missing triggers a clear error at startup (not a silent hang).
+- [ ] All non-zero exit codes (1, 42, 53) return user-facing error messages (not empty strings or tracebacks).
+- [ ] Subprocess is killed on timeout (no zombie `gemini` processes).
+- [ ] Existing backends (`copilot`, `codex`, `api`) are unaffected — no regression.
+- [ ] Contract test (`test_backends_contract.py`) passes with `GeminiBackend` included.
+- [ ] Edge cases in the Open Questions section above are resolved and either handled or documented.
+- [ ] PR is merged to `develop` first; CI is green; then merged to `main`.
+

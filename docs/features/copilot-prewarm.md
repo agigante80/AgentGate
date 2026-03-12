@@ -8,6 +8,21 @@ and project orientation on every call.
 
 ---
 
+## ⚠️ Prerequisite Questions
+
+> Answer these before writing a single line of code. A wrong assumption costs 10× more to fix than a clarification takes.
+
+1. **Scope** — Both platforms. Preamble injection lives in `CopilotBackend`, which is called identically by both Telegram (`src/bot.py`) and Slack (`src/platform/slack.py`). No platform-specific changes are required.
+2. **Backend** — `AI_CLI=copilot` **only**. Has no effect on `codex` or `api` backends. The feature is meaningless for stateful backends or direct-API backends that accept a proper `system` role.
+3. **Stateful vs stateless** — Stateless only. `CopilotBackend.is_stateful = False`; preamble must be prepended on every individual call, not just once. No interaction with `CodexBackend`.
+4. **Breaking change?** — No. `COPILOT_PREWARM=false` (default) is a strict no-op. All existing deployments are unaffected without setting the new env var.
+5. **New dependency?** — No. Preamble injection is pure string manipulation. No new pip or npm package is required.
+6. **Persistence** — No new DB table or file. The preamble is static config loaded at startup from `AIConfig`.
+7. **Auth** — No new credential needed. Uses the existing `AI_CLI=copilot` GitHub Copilot authentication.
+8. **`gate clear` interaction** — `clear_history()` must **not** reset the preamble. The preamble is operator config, not user conversation history. Confirm: preamble always comes back on the very next call after `gate clear`.
+
+---
+
 ## Architectural Reality Check
 
 > **⚠️ The original draft of this document contained several factual errors. This
@@ -90,6 +105,20 @@ The preamble is set once via env var; no runtime switching.
 ```
 You are an AI coding assistant. Be concise and precise. Prefer code over prose.
 ```
+
+---
+
+## Architecture Notes
+
+> **Read before touching code.** These are non-obvious constraints specific to this feature.
+
+- **`CopilotBackend.is_stateful = False`** (`src/ai/copilot.py`) — there is no persistent session. Every call to `send()` and `stream()` spawns a fresh `copilot -p` subprocess. The preamble must be prepended on _every_ call, not just the first one.
+- **Inject in `CopilotBackend`, not `CopilotSession`** — `CopilotSession` is a low-level subprocess wrapper that must remain ignorant of persona config. Config-aware logic belongs in `CopilotBackend`. Never touch `CopilotSession` for this feature.
+- **No platform-specific change needed** — both `src/bot.py` and `src/platform/slack.py` call the same `CopilotBackend`. The preamble injection is transparent to the platform layer.
+- **Preamble vs. history ordering** — inject preamble _before_ the history context that `build_prompt()` in `platform/common.py` prepends. Runtime call order: `preamble + history_context + user_message`. If total prompt length is a concern, the preamble is the first thing to trim.
+- **Field placement** — add `copilot_prewarm*` fields to `AIConfig`, not `BotConfig`. These are AI-provider-specific settings, not bot-behaviour settings.
+- **`REPO_DIR` and `DB_PATH`** — not directly relevant to this feature; the preamble is a string in memory, not a file on disk.
+- **`asyncio_mode = auto`** — all `async def test_*` functions in `tests/` run without `@pytest.mark.asyncio`.
 
 ---
 
@@ -202,6 +231,117 @@ Extend `tests/integration/test_factory.py`:
 
 ---
 
+## Files to Create / Change
+
+| File | Action | Summary of change |
+|------|--------|-------------------|
+| `src/config.py` | **Edit** | Add 3 new fields to `AIConfig`: `copilot_prewarm`, `copilot_prewarm_prompt`, `copilot_prewarm_healthcheck` |
+| `src/ai/copilot.py` | **Edit** | Add `_preamble` attribute; prepend in `send()` and `stream()`; accept prewarm args via `__init__` |
+| `src/ai/factory.py` | **Edit** | Pass prewarm config to `CopilotBackend()` constructor |
+| `src/main.py` | **Edit** | Add optional startup health-check block (if `COPILOT_PREWARM_HEALTHCHECK=true`) |
+| `README.md` | **Edit** | Add 3 env vars to the AI configuration table; add usage note for multi-agent persona |
+| `docker-compose.yml.example` | **Edit** | Add commented-out `COPILOT_PREWARM` block under the Copilot section |
+| `docs/features/multi-agent-slack.md` | **Edit** | Update each agent env block with a `COPILOT_PREWARM_PROMPT` example |
+| `docs/features/copilot-prewarm.md` | **Edit** | Mark status as `Implemented` after merge to `main` |
+| `docs/roadmap.md` | **Edit** | Mark item 2.9 as done (✅) |
+
+**No changes to:**
+- `src/ai/session.py` — `CopilotSession` must remain ignorant of persona config
+- `src/bot.py` / `src/platform/slack.py` — preamble injection is transparent to the platform layer
+- `src/ai/adapter.py` — `AICLIBackend.send()` signature is unchanged
+
+---
+
+## Dependencies
+
+| Package | Status | Notes |
+|---------|--------|-------|
+| None new | ✅ No new packages required | Preamble injection is pure string manipulation; no pip or npm additions needed |
+
+> All required stdlib modules (`asyncio`, `logging`) are already imported in `copilot.py`.
+
+---
+
+## Test Plan
+
+### `tests/unit/test_copilot_backend.py` (new file)
+
+| Test | What it checks |
+|------|----------------|
+| `test_prewarm_disabled_no_preamble` | `_preamble == ""` when `prewarm=False` |
+| `test_prewarm_default_preamble` | `_preamble` contains the built-in default text when `prewarm=True, prewarm_prompt=""` |
+| `test_prewarm_custom_preamble` | Custom prompt is used verbatim (with `\n\n` separator) |
+| `test_send_prepends_preamble` | Mock `CopilotSession.send`; assert call arg starts with preamble |
+| `test_stream_prepends_preamble` | Mock `CopilotSession.stream`; assert call arg starts with preamble |
+| `test_clear_history_preserves_preamble` | After `clear_history()`, `_preamble` is unchanged on the new session |
+| `test_empty_preamble_no_separator` | When `prewarm=False`, no extra `\n\n` is injected into the prompt |
+
+### `tests/unit/test_config.py` additions
+
+| Test | What it checks |
+|------|----------------|
+| `test_copilot_prewarm_defaults` | `copilot_prewarm=False`, `copilot_prewarm_prompt=""`, `copilot_prewarm_healthcheck=False` by default |
+| `test_copilot_prewarm_env_vars` | All three env vars map correctly to `AIConfig` fields |
+
+### `tests/integration/test_factory.py` additions
+
+| Test | What it checks |
+|------|----------------|
+| `test_factory_passes_prewarm_to_backend` | `create_backend()` with prewarm env vars yields a `CopilotBackend` with the correct `_preamble` |
+| `test_factory_prewarm_disabled_default` | Default env (no `COPILOT_PREWARM` set) yields `_preamble == ""` |
+
+### Coverage note
+
+Run `pytest tests/ --cov=src --cov-report=term-missing` after implementation. Target: no uncovered branches in `CopilotBackend.__init__`, `send()`, and `stream()`. The healthcheck branch in `main.py` may use `# pragma: no cover` with a one-line explanation if it requires a live subprocess.
+
+---
+
+## Documentation Updates
+
+### `README.md`
+
+Add to the AI configuration environment variables table:
+
+```markdown
+| `COPILOT_PREWARM` | `false` | Prepend a static persona preamble to every Copilot prompt. Set `true` to enable. |
+| `COPILOT_PREWARM_PROMPT` | `""` | Preamble text injected before each prompt. Leave empty to use the built-in default. Multi-line: use `\n` in `.env` files. |
+| `COPILOT_PREWARM_HEALTHCHECK` | `false` | Run a startup ping (`copilot -p "READY"`) to verify the CLI is functional before accepting user messages. |
+```
+
+### `docker-compose.yml.example`
+
+Add a commented block under the Copilot AI section:
+
+```yaml
+# Copilot preamble / persona injection (optional)
+# COPILOT_PREWARM=true
+# COPILOT_PREWARM_PROMPT=You are GateCode, a coding assistant for the AgentGate project.\nBe concise. Prefer code.
+# COPILOT_PREWARM_HEALTHCHECK=false
+```
+
+### `docs/features/multi-agent-slack.md`
+
+Update each agent's env block (`@GateCode`, `@GateSec`, `@GateDocs`) to include:
+
+```yaml
+COPILOT_PREWARM=true
+COPILOT_PREWARM_PROMPT=You are GateCode, an AI coding assistant for AgentGate. Be concise. Prefer code.
+```
+
+### `.github/copilot-instructions.md`
+
+No change needed — no new module or architectural pattern is introduced. The feature is a targeted addition to `CopilotBackend.__init__`, `send()`, and `stream()`.
+
+### `docs/roadmap.md`
+
+After merge to `main`, change item 2.9:
+
+```markdown
+| 2.9 | ✅ Copilot session pre-warming — inject persona preamble into every Copilot prompt | [→ features/copilot-prewarm.md](features/copilot-prewarm.md) |
+```
+
+---
+
 ## Token Cost Analysis
 
 | Scenario | Extra tokens per message | Annual impact (100 msgs/day, 50-token preamble) |
@@ -278,4 +418,57 @@ with a proper `system` parameter instead.
 5. **Should `COPILOT_PREWARM_HEALTHCHECK` run on `clear_history()`?** When the user
    runs `gate clear`, `CopilotBackend.clear_history()` creates a new `CopilotSession`.
    Running a ping there would add latency. Recommend: startup only.
+
+---
+
+## Version Bump
+
+Consult `docs/versioning.md` for the full decision guide. Quick reference:
+
+| This feature… | Bump |
+|---------------|------|
+| Adds 3 new env vars with safe defaults (`COPILOT_PREWARM=false`) | **MINOR** |
+| No existing env vars renamed or removed | Not MAJOR |
+| Purely additive — no bug fix without user-visible API change | Not PATCH |
+
+**Expected bump for this feature**: `MINOR` → `0.8.0` (from current `0.7.3`)
+
+> Bump `VERSION` on `develop` _before_ the merge PR to `main`. Never edit `VERSION` directly on `main`.
+
+---
+
+## Roadmap Update
+
+When this feature is complete, update `docs/roadmap.md` item **2.9**:
+
+```markdown
+| 2.9 | ✅ Copilot session pre-warming — inject persona preamble into every Copilot prompt | [→ features/copilot-prewarm.md](features/copilot-prewarm.md) |
+```
+
+No stretch goal identified at this time. The `COPILOT_SKILLS_DIRS` native skills-file approach is a complementary (not competing) mechanism and warrants a separate feature doc if needed.
+
+---
+
+## Acceptance Criteria
+
+> The feature is **done** when ALL of the following are true.
+
+- [ ] All implementation steps above are complete.
+- [ ] `pytest tests/ -v --tb=short` passes with no failures or errors.
+- [ ] `ruff check src/` reports no new linting issues.
+- [ ] `README.md` is updated with the 3 new env vars.
+- [ ] `docker-compose.yml.example` has the commented-out `COPILOT_PREWARM` block.
+- [ ] `docs/roadmap.md` item 2.9 is marked done (✅).
+- [ ] `docs/features/copilot-prewarm.md` status changed to `Implemented` on merge to `main`.
+- [ ] `.github/copilot-instructions.md` is unchanged (no new module or architectural pattern).
+- [ ] `VERSION` file bumped to `0.8.0` on `develop` before merge to `main`.
+- [ ] `COPILOT_PREWARM=false` (default) produces zero behavioural change vs. current behaviour.
+- [ ] `COPILOT_PREWARM=true` with a custom prompt: every single message to Copilot CLI starts with the preamble text.
+- [ ] `gate clear` does **not** clear the preamble — preamble returns on the next call.
+- [ ] Startup health check fires only when `COPILOT_PREWARM_HEALTHCHECK=true`, not otherwise.
+- [ ] Feature is transparent on both **Telegram** and **Slack** — no platform-specific code paths.
+- [ ] Feature is a strict no-op for `AI_CLI=codex` and `AI_CLI=api` deployments.
+- [ ] Edge cases in the Open Questions section above are resolved and either handled or documented.
+- [ ] PR is merged to `develop` first; CI is green; then merged to `main`.
+
 
