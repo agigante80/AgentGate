@@ -88,8 +88,8 @@ You can customise these files to fit your team. For inspiration, see:
 1. Go to [https://api.slack.com/apps](https://api.slack.com/apps) → **Create New App** → **From scratch**
 2. Name the app (`GateCode`, `GateSec`, or `GateDocs`)
 3. **Enable Socket Mode** → generate an App-Level Token (`xapp-...`) → scope: `connections:write`
-4. **Event Subscriptions** → Subscribe to bot events: `message.channels`, `message.groups`
-5. **OAuth & Permissions** → Bot Token Scopes: `channels:history`, `chat:write`, `files:read`, `app_mentions:read`
+4. **Event Subscriptions** → Subscribe to bot events: `message.channels`, `message.groups`, `message.im`, `message.mpim`
+5. **OAuth & Permissions** → Bot Token Scopes: `channels:history`, `chat:write`, `files:read`
 6. Install to workspace → copy the Bot User OAuth Token (`xoxb-...`)
 7. Note the bot's **member ID** (starts with `B`) — needed for agent-to-agent requests
 
@@ -112,7 +112,7 @@ GITHUB_REPO_TOKEN=ghp_...
 AI_CLI=copilot
 AI_MODEL=claude-sonnet-4-5
 COPILOT_SKILLS_DIRS=/skills
-TRUSTED_AGENT_BOT_IDS=BSECAGENT,BDOCSAGENT   # bot IDs of @GateSec and @GateDocs
+TRUSTED_AGENT_BOT_IDS=["BSECAGENT","BDOCSAGENT"]   # bot IDs of @GateSec and @GateDocs
 ```
 
 ```bash
@@ -130,7 +130,7 @@ AI_PROVIDER=anthropic
 AI_API_KEY=sk-ant-...
 AI_MODEL=claude-opus-4-5
 SYSTEM_PROMPT_FILE=/skills/sec-agent.md
-TRUSTED_AGENT_BOT_IDS=BDEVAGENT,BDOCSAGENT   # bot IDs of @GateCode and @GateDocs
+TRUSTED_AGENT_BOT_IDS=["BDEVAGENT","BDOCSAGENT"]   # bot IDs of @GateCode and @GateDocs
 ```
 
 ```bash
@@ -148,10 +148,12 @@ AI_PROVIDER=openai
 AI_API_KEY=sk-...
 AI_MODEL=gpt-4o
 SYSTEM_PROMPT_FILE=/skills/docs-agent.md
-TRUSTED_AGENT_BOT_IDS=BDEVAGENT,BSECAGENT    # bot IDs of @GateCode and @GateSec
+TRUSTED_AGENT_BOT_IDS=["BDEVAGENT","BSECAGENT"]    # bot IDs of @GateCode and @GateSec
 ```
 
 > **Note**: `COPILOT_SKILLS_DIRS` loads skills for the Copilot CLI backend. `SYSTEM_PROMPT_FILE` loads skills for the `api` backend (OpenAI / Anthropic / Ollama). Both read the same markdown file format.
+>
+> **Note**: `SLACK_CHANNEL_ID` is required — without it the bot cannot post its 🟢 Ready message on startup. Use the channel ID (starts with `C`) from Step 7 of the Slack app setup. See [`docs/slack-setup.md`](../slack-setup.md) for details.
 
 ---
 
