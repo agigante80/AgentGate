@@ -43,6 +43,7 @@ def _make_settings(
     bot.confirm_destructive = confirm_destructive
     bot.skip_confirm_keywords = skip_confirm_keywords or []
     bot.prefix_only = prefix_only
+    bot.system_prompt = ""
     bot.ai_timeout_secs = 0
     bot.thinking_slow_threshold_secs = 15
     bot.thinking_update_secs = 30

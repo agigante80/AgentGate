@@ -18,21 +18,28 @@ Three agents, one `#agentgate` Slack channel:
 
 ## How agents trigger
 
-Agents listen to ALL messages in the channels they're in. The **prefix** is the trigger — not an @-mention.
+Agents respond to two types of messages:
 
+**Prefix trigger** — messages starting with the agent's prefix:
 ```
 dev explain the history module      ← @GateCode responds
 sec review src/executor.py          ← @GateSec responds
 docs write a README for this func   ← @GateDocs responds
 ```
 
-With `PREFIX_ONLY=true` (required for multi-agent), each bot silently ignores messages that don't start with its prefix. This prevents all three bots answering the same message.
+**@mention trigger** — directly @mentioning the bot anywhere in a message:
+```
+@GateCode what's the status of the auth refactor?   ← GateCode responds (bypasses PREFIX_ONLY)
+@GateSec are you available?                          ← GateSec responds
+```
+
+With `PREFIX_ONLY=true` (required for multi-agent), each bot silently ignores unprefixed messages from human users. @mentions always get a response regardless of `PREFIX_ONLY`.
 
 ---
 
 ## Agent isolation and awareness
 
-Each agent is an independent container with no awareness of the others:
+Each agent is an independent container with its own clone of the repo and history DB:
 
 | Question | Answer |
 |----------|--------|
@@ -40,6 +47,31 @@ Each agent is an independent container with no awareness of the others:
 | Do agents respond to each other's messages? | No by default — bots ignore bot messages |
 | Can agents request work from each other? | Yes, via `TRUSTED_AGENT_BOT_IDS` (see below) |
 | Do agents respond to `@here` or `@channel`? | No — `PREFIX_ONLY=true` ignores these |
+| Does each agent know its teammates? | **Yes** — team context is auto-generated at startup |
+
+### Auto-generated team context
+
+At startup, each agent automatically builds a team context string and prepends it to every AI prompt. This means bots always know who they are, who their teammates are, and how to address them — without any manual configuration:
+
+```
+You are GateCode (prefix: dev).
+Your team in this Slack workspace:
+  - GateSec (prefix: sec) — users address them with: sec <message>
+  - GateDocs (prefix: docs) — users address them with: docs <message>
+Repo: agigante80/AgentGate | Branch: develop
+```
+
+This context is derived automatically from `BOT_CMD_PREFIX`, `TRUSTED_AGENT_BOT_IDS` (including their prefixes), and `GITHUB_REPO`/`BRANCH`. No additional env var is needed.
+
+### Optional `SYSTEM_PROMPT`
+
+You can add a `SYSTEM_PROMPT` env var to each `.env` file for agent-specific role descriptions or persona customisation. It is appended after the auto-generated team context:
+
+```bash
+SYSTEM_PROMPT=You are a security-focused code reviewer. Always check for injection vulnerabilities, insecure defaults, and missing input validation.
+```
+
+Leave it empty (default) to rely entirely on the skills files.
 
 ---
 
@@ -53,7 +85,9 @@ You can configure agents to delegate work to each other. For example, after `@Ga
 2. A trusted agent's message that starts with the receiving bot's prefix is processed as a command
 3. The sending agent's skills file instructs the AI when and how to format a delegation request
 
-**Finding a bot's `bot_id`**: You don't need to. Use the bot's **display name** (e.g. `"GateCode"`) directly in `TRUSTED_AGENT_BOT_IDS` — AgentGate resolves it to the internal `bot_id` automatically at startup via the Slack API. This works even when each agent runs in its own independent container, since `users.list` is workspace-scoped.
+**Finding a bot's `bot_id`**: You don't need to. Use the bot's **display name and prefix** (e.g. `"GateCode:dev"`) directly in `TRUSTED_AGENT_BOT_IDS` — AgentGate resolves the name to the internal `bot_id` automatically at startup via the Slack API. The `:prefix` suffix tells each agent how to address its teammates in the auto-generated team context. This works even when each agent runs in its own independent container, since `users.list` is workspace-scoped.
+
+**Format**: `"DisplayName:prefix"` (e.g. `"GateSec:sec"`). The `:prefix` part is optional but strongly recommended — without it the team context won't include how to address that agent.
 
 **Skills file delegation example** (from `skills/dev-agent.md`):
 > "When your response involves security-sensitive changes, append at the end: `sec review: <description>`"
@@ -224,7 +258,7 @@ AI_CLI=copilot
 AI_MODEL=claude-sonnet-4.6
 COPILOT_GITHUB_TOKEN=ghp_...
 COPILOT_SKILLS_DIRS=/repo/skills
-TRUSTED_AGENT_BOT_IDS=["GateSec","GateDocs"]   # display names of @GateSec and @GateDocs
+TRUSTED_AGENT_BOT_IDS=["GateSec:sec","GateDocs:docs"]   # name:prefix of each teammate
 ```
 
 ```bash
@@ -241,7 +275,7 @@ AI_CLI=copilot
 AI_MODEL=claude-opus-4.6
 COPILOT_GITHUB_TOKEN=ghp_...
 COPILOT_SKILLS_DIRS=/repo/skills
-TRUSTED_AGENT_BOT_IDS=["GateCode","GateDocs"]   # display names of @GateCode and @GateDocs
+TRUSTED_AGENT_BOT_IDS=["GateCode:dev","GateDocs:docs"]   # name:prefix of each teammate
 ```
 
 ```bash
@@ -258,14 +292,14 @@ AI_CLI=copilot
 AI_MODEL=gpt-5-mini
 COPILOT_GITHUB_TOKEN=ghp_...
 COPILOT_SKILLS_DIRS=/repo/skills
-TRUSTED_AGENT_BOT_IDS=["GateCode","GateSec"]    # display names of @GateCode and @GateSec
+TRUSTED_AGENT_BOT_IDS=["GateCode:dev","GateSec:sec"]    # name:prefix of each teammate
 ```
 
 > **Note**: All agents use `AI_CLI=copilot`. `COPILOT_GITHUB_TOKEN` is required — use a GitHub Personal Access Token with Copilot access. `AI_MODEL` selects the model per agent; see [GitHub Copilot model comparison](https://docs.github.com/en/copilot/reference/ai-models/model-comparison) for the full list of available models.
 >
 > **Note**: `COPILOT_SKILLS_DIRS=/repo/skills` points to the `skills/` directory inside the cloned repo (`/repo` is where the container clones `GITHUB_REPO` at startup). No host copy or volume mount needed — the skills are already there.
 >
-> **Note**: `TRUSTED_AGENT_BOT_IDS` accepts **display names** (e.g. `"GateCode"`) or raw `B`-prefixed bot IDs. Names are resolved automatically at startup — no manual ID lookup needed.
+> **Note**: `TRUSTED_AGENT_BOT_IDS` accepts entries in `"DisplayName:prefix"` format (e.g. `"GateSec:sec"`) or bare `B`-prefixed bot IDs. Names are resolved automatically at startup — no manual ID lookup needed. The `:prefix` suffix enables auto-generated team context so each agent knows how to address its teammates.
 >
 > **Note**: `SLACK_CHANNEL_ID` is required — without it the bot cannot post its 🟢 Ready message on startup. To find the Channel ID: click the channel name at the top of the channel → **Channel details** opens → the ID is shown at the bottom of the panel (starts with `C`). See [`docs/guides/slack-setup.md`](slack-setup.md) for the full single-agent setup guide.
 

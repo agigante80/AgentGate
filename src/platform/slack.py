@@ -78,13 +78,22 @@ class SlackBot:
         self._active_ai: dict[str, float] = {}
         self._confirm_destructive: bool = settings.bot.confirm_destructive
         self._transcriber = _init_transcriber(settings)
-        # Pre-populate entries that already look like bot_ids (B-prefix).
-        # Name-based entries are resolved at startup via _resolve_trusted_ids().
+        # Parse TRUSTED_AGENT_BOT_IDS entries as "Name:prefix" or "Name" or "B-prefixed-id".
+        # B-prefixed entries are pre-populated; name-based entries are resolved at startup.
         import re
         _bot_id_re = re.compile(r"^B[A-Z0-9]{6,}$")
-        self._trusted_bot_ids: set[str] = {
-            e for e in settings.slack.trusted_agent_bot_ids if _bot_id_re.match(e)
-        }
+        self._trusted_bot_ids: set[str] = set()
+        self._agent_name_prefix: list[tuple[str, str]] = []  # [(display_name, prefix)]
+        for entry in settings.slack.trusted_agent_bot_ids:
+            name, _, prefix = entry.partition(":")
+            if _bot_id_re.match(name):
+                self._trusted_bot_ids.add(name)
+            else:
+                self._agent_name_prefix.append((name, prefix))
+        # Bot self-identification — filled in at startup via auth.test
+        self._bot_user_id: str = ""      # U-prefixed, used for @mention detection
+        self._bot_display_name: str = "" # e.g. "GateCode"
+        self._team_context: str = ""     # Prepended to every AI prompt
 
         self._app = AsyncApp(token=settings.slack.slack_bot_token)
         self._register_handlers()
@@ -177,6 +186,15 @@ class SlackBot:
             prompt = await common.build_prompt(
                 text, channel, self._settings, self._backend
             )
+            # Prepend auto-generated team context and optional SYSTEM_PROMPT
+            context_parts: list[str] = []
+            if self._team_context:
+                context_parts.append(self._team_context)
+            sp = self._settings.bot.system_prompt.strip()
+            if sp:
+                context_parts.append(sp)
+            if context_parts:
+                prompt = "\n\n".join(context_parts) + "\n\n" + prompt
             if self._settings.bot.stream_responses:
                 response = await self._stream_to_slack(say, client, channel, prompt)
             else:
@@ -263,6 +281,12 @@ class SlackBot:
             return
 
         if not text:
+            return
+
+        # @mention trigger: "<@UXXXXXXX> …" bypasses prefix and PREFIX_ONLY restrictions
+        if self._bot_user_id and f"<@{self._bot_user_id}>" in text:
+            mention_text = text.replace(f"<@{self._bot_user_id}>", "").strip()
+            await self._run_ai_pipeline(say, client, mention_text or text, channel)
             return
 
         p = self._p
@@ -611,14 +635,13 @@ class SlackBot:
     # ── Startup ───────────────────────────────────────────────────────────
 
     async def _resolve_trusted_ids(self) -> None:
-        """Resolve name-based entries in TRUSTED_AGENT_BOT_IDS to bot_ids via users.list."""
-        import re
-        _bot_id_re = re.compile(r"^B[A-Z0-9]{6,}$")
-        unresolved = [
-            e for e in self._settings.slack.trusted_agent_bot_ids
-            if not _bot_id_re.match(e)
-        ]
-        if not unresolved:
+        """Resolve name-based entries in TRUSTED_AGENT_BOT_IDS to bot_ids via users.list.
+
+        Also looks up this bot's own display name (for team context) using the
+        user_id obtained from auth.test at startup.
+        """
+        if not self._agent_name_prefix and not self._bot_user_id:
+            self._build_team_context()
             return
 
         try:
@@ -629,16 +652,21 @@ class SlackBot:
                     continue
                 profile = member.get("profile", {})
                 bot_id = profile.get("bot_id", "")
+                display_name = profile.get("display_name") or member.get("name", "")
+                # Match our own user_id to learn our display name
+                if self._bot_user_id and member.get("id") == self._bot_user_id and display_name:
+                    self._bot_display_name = display_name
                 if not bot_id:
                     continue
-                for key in (profile.get("display_name", ""), member.get("name", "")):
+                for key in (display_name, member.get("name", "")):
                     if key:
                         name_to_bot_id[key.lower()] = bot_id
         except Exception:
             logger.exception("Failed to call users.list for trusted agent resolution")
+            self._build_team_context()
             return
 
-        for name in unresolved:
+        for name, _prefix in self._agent_name_prefix:
             resolved = name_to_bot_id.get(name.lower())
             if resolved:
                 self._trusted_bot_ids.add(resolved)
@@ -650,9 +678,40 @@ class SlackBot:
                     name,
                 )
 
+        self._build_team_context()
+
+    def _build_team_context(self) -> None:
+        """Build the team context string prepended to every AI prompt."""
+        own_name = self._bot_display_name or self._p.capitalize()
+        lines = [f"You are {own_name} (prefix: {self._p})."]
+        if self._agent_name_prefix:
+            lines.append("Your team in this Slack workspace:")
+            for name, prefix in self._agent_name_prefix:
+                if prefix:
+                    lines.append(
+                        f"  - {name} (prefix: {prefix})"
+                        f" — users address them with: {prefix} <message>"
+                    )
+                else:
+                    lines.append(f"  - {name}")
+        repo = self._settings.github.github_repo
+        branch = self._settings.github.branch
+        if repo:
+            lines.append(f"Repo: {repo} | Branch: {branch}")
+        self._team_context = "\n".join(lines)
+        logger.info("Team context: %s", self._team_context.replace("\n", " | "))
+
     async def run_async(self) -> None:
         """Start the Slack Socket Mode connection."""
         from slack_bolt.adapter.socket_mode.async_handler import AsyncSocketModeHandler
+
+        # Get bot's own identity for @mention detection and team context
+        try:
+            auth = await self._app.client.auth_test()
+            self._bot_user_id = auth.get("user_id", "")
+            logger.info("Bot user_id: %s", self._bot_user_id)
+        except Exception:
+            logger.exception("Failed to call auth.test for bot identity")
 
         await self._resolve_trusted_ids()
         handler = AsyncSocketModeHandler(
