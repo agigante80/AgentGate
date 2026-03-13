@@ -35,4 +35,5 @@ Items ordered by priority. Each item links to a feature doc with full design det
 | 2.12 | Voice transcription — Google Speech-to-Text (`WHISPER_PROVIDER=google`) | [→ features/whisper-google.md](features/whisper-google.md) |
 | 2.13 | Lightweight web dashboard — read-only HTTP status page inside the container | [→ features/web-dashboard.md](features/web-dashboard.md) |
 | 2.14 | ✅ AI response feedback — proactive "Still thinking…" ticker and configurable per-backend timeout | Implemented in v0.8.0 |
+| 2.15 | Thinking ticker UX — human-readable elapsed time (`2m 5s` instead of `125s` after 60s) + default `AI_TIMEOUT_SECS=0` (no timeout) | [→ features/thinking-ticker-ux.md](features/thinking-ticker-ux.md) |
 
