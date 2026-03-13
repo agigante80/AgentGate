@@ -53,6 +53,7 @@ def _make_settings():
     slack.allowed_users = []
     slack.trusted_agent_bot_ids = []
     slack.slack_delete_thinking = True
+    slack.slack_thread_replies = False
     gh = MagicMock(spec=GitHubConfig)
     gh.github_repo = "owner/repo"
     gh.branch = "main"
