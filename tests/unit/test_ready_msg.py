@@ -2,15 +2,17 @@
 from unittest.mock import MagicMock
 
 from src.ready_msg import ai_label, build_ready_message
-from src.config import Settings, AIConfig, BotConfig, GitHubConfig
+from src.config import Settings, AIConfig, BotConfig, GitHubConfig, DirectAIConfig
 
 
 def _make_settings(cli="api", provider="openai", model="gpt-4o", image_tag=""):
     s = MagicMock(spec=Settings)
     ai = MagicMock(spec=AIConfig)
     ai.ai_cli = cli
-    ai.ai_provider = provider
     ai.ai_model = model
+    direct = MagicMock(spec=DirectAIConfig)
+    direct.ai_provider = provider
+    ai.direct = direct
     bot = MagicMock(spec=BotConfig)
     bot.image_tag = image_tag
     gh = MagicMock(spec=GitHubConfig)

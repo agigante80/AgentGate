@@ -161,6 +161,8 @@ Copy `.env.example` — it documents every variable with examples.
 | `AI_MODEL` | — | Model for any backend (e.g. `gpt-4o` for Copilot, `o3` for Codex, `claude-3-5-sonnet-20241022` for API). Codex defaults to `o3` when unset. ⚠️ **Set this so the model name appears in the startup message and `/gate info`** — if unset, only the backend name is shown (e.g. `copilot` instead of `copilot (claude-sonnet-4.6)`). |
 | `AI_PROVIDER` | — | For `api`: `openai` \| `anthropic` \| `ollama` \| `openai-compat` |
 | `AI_API_KEY` | — | API key for `codex` or `api` backends |
+| `CODEX_API_KEY` | — | Per-backend API key for `codex`; falls back to `AI_API_KEY` |
+| `CODEX_MODEL` | — | Per-backend model for `codex`; falls back to `AI_MODEL` then `o3` |
 | `AI_BASE_URL` | — | Base URL for Ollama or compatible endpoints |
 | `AI_CLI_OPTS` | — | Raw options passed verbatim to the CLI subprocess. **Empty (default) = full-auto per backend** (Copilot: `--allow-all`; Codex: `--approval-mode full-auto`). **When set, replaces the defaults entirely** — must include full-auto flags if still needed (e.g. `--allow-all --allow-url github.com`). Ignored (with a warning) when `AI_CLI=api`. |
 
@@ -461,6 +463,8 @@ Copy `.env.example` — it documents every variable with examples.
 | `AI_MODEL` | — | Model for any backend (e.g. `gpt-4o` for Copilot, `o3` for Codex, `claude-3-5-sonnet-20241022` for API). Codex defaults to `o3` when unset. ⚠️ **Set this so the model name appears in the startup message and `/gate info`** — if unset, only the backend name is shown (e.g. `copilot` instead of `copilot (claude-sonnet-4.6)`). |
 | `AI_PROVIDER` | — | For `api`: `openai` \| `anthropic` \| `ollama` \| `openai-compat` |
 | `AI_API_KEY` | — | API key for `codex` or `api` backends |
+| `CODEX_API_KEY` | — | Per-backend API key for `codex`; falls back to `AI_API_KEY` |
+| `CODEX_MODEL` | — | Per-backend model for `codex`; falls back to `AI_MODEL` then `o3` |
 | `AI_BASE_URL` | — | Base URL for Ollama or compatible endpoints |
 | `AI_CLI_OPTS` | — | Raw options passed verbatim to the CLI subprocess. **Empty (default) = full-auto per backend** (Copilot: `--allow-all`; Codex: `--approval-mode full-auto`). **When set, replaces the defaults entirely** — must include full-auto flags if still needed (e.g. `--allow-all --allow-url github.com`). Ignored (with a warning) when `AI_CLI=api`. |
 

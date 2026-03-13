@@ -59,13 +59,50 @@ class BotConfig(BaseSettings):
     allow_secrets: bool = False             # ALLOW_SECRETS=true disables secret redaction in outgoing messages
 
 
+class CopilotAIConfig(BaseSettings):
+    """Fields exclusive to AI_CLI=copilot."""
+
+    model_config = SettingsConfigDict(extra="ignore")
+
+    copilot_skills_dirs: str = ""  # COPILOT_SKILLS_DIRS
+
+
+class CodexAIConfig(BaseSettings):
+    """Fields exclusive to AI_CLI=codex. Both fall back to AIConfig shared fields when empty."""
+
+    model_config = SettingsConfigDict(extra="ignore")
+
+    codex_api_key: str = ""  # CODEX_API_KEY — falls back to AIConfig.ai_api_key when empty
+    codex_model: str = ""    # CODEX_MODEL — falls back to AIConfig.ai_model when empty, then "o3"
+
+
+class DirectAIConfig(BaseSettings):
+    """Fields exclusive to AI_CLI=api (DirectAPIBackend)."""
+
+    model_config = SettingsConfigDict(extra="ignore")
+
+    # System prompt file — path to a markdown file loaded as the system message.
+    # Must not point inside REPO_DIR; mount it via a separate Docker volume.
+    system_prompt_file: str = ""  # SYSTEM_PROMPT_FILE — e.g. /skills/sec-agent.md
+    ai_provider: Literal["openai", "anthropic", "ollama", "openai-compat", ""] = ""
+    ai_base_url: str = ""         # AI_BASE_URL — custom base URL for OpenAI-compat/Ollama
+
+
 class AIConfig(BaseSettings):
+    """Top-level AI configuration.
+
+    Shared fields (ai_api_key, ai_model, ai_cli_opts) are accessible at this level and
+    serve as fallbacks for backend-specific sub-configs. Backend-exclusive fields live in
+    the copilot / codex / direct nested configs.
+    """
+
     model_config = SettingsConfigDict(extra="ignore")
 
     ai_cli: Literal["copilot", "codex", "api"] = "copilot"
 
-    # Copilot
-    copilot_skills_dirs: str = ""
+    # Shared fields — used as fallbacks and by non-factory code (redact.py, ready_msg.py, voice)
+    ai_api_key: str = ""  # AI_API_KEY — shared secret; codex and voice fall back to this
+    ai_model: str = ""    # AI_MODEL — shared model name; ready_msg and codex fall back to this
 
     # CLI options passthrough — passed verbatim to the backend CLI subprocess.
     # Empty (default) = each backend applies its own full-auto defaults:
@@ -74,16 +111,10 @@ class AIConfig(BaseSettings):
     # Ignored (with a warning) when AI_CLI=api (no subprocess).
     ai_cli_opts: str = ""
 
-    # System prompt file — path to a markdown file loaded as the system message.
-    # Used by the api backend (DirectAPIBackend). Ignored by copilot and codex backends.
-    # Useful in multi-agent setups where each container loads its own skills file.
-    system_prompt_file: str = ""  # e.g. SYSTEM_PROMPT_FILE=/skills/sec-agent.md
-
-    # Generic / api backend
-    ai_provider: Literal["openai", "anthropic", "ollama", "openai-compat", ""] = ""
-    ai_api_key: str = ""
-    ai_model: str = ""
-    ai_base_url: str = ""
+    # Backend-specific sub-configs
+    copilot: CopilotAIConfig = Field(default_factory=CopilotAIConfig)
+    codex: CodexAIConfig = Field(default_factory=CodexAIConfig)
+    direct: DirectAIConfig = Field(default_factory=DirectAIConfig)
 
 
 class VoiceConfig(BaseSettings):

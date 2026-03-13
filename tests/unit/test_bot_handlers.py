@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.bot import _BotHandlers, build_app, _stream_to_telegram
-from src.config import Settings, TelegramConfig, BotConfig, AIConfig, GitHubConfig, VoiceConfig
+from src.config import Settings, TelegramConfig, BotConfig, AIConfig, GitHubConfig, VoiceConfig, DirectAIConfig
 from src.ai.adapter import AICLIBackend
 
 
@@ -45,9 +45,11 @@ def _make_settings(
     gh.github_repo_token = ""
     ai = MagicMock(spec=AIConfig)
     ai.ai_cli = "api"
-    ai.ai_provider = "openai"
     ai.ai_model = "gpt-4o"
     ai.ai_api_key = ""
+    direct = MagicMock(spec=DirectAIConfig)
+    direct.ai_provider = "openai"
+    ai.direct = direct
     voice = MagicMock(spec=VoiceConfig)
     voice.whisper_provider = "none"
     voice.whisper_api_key = ""

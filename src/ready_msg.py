@@ -6,8 +6,8 @@ def ai_label(settings: Settings) -> str:
     """Human-readable AI backend + model string."""
     cli = settings.ai.ai_cli
     model = settings.ai.ai_model
-    if cli == "api" and settings.ai.ai_provider:
-        label = f"{cli}/{settings.ai.ai_provider}"
+    if cli == "api" and settings.ai.direct.ai_provider:
+        label = f"{cli}/{settings.ai.direct.ai_provider}"
     else:
         label = cli
     if model:

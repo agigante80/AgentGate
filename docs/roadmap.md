@@ -13,7 +13,7 @@ If adding a new item, create a feature document using `docs/features/_template.m
 | # | Item | Detail |
 |---|------|--------|
 | 1.3 | Conversation storage — introduce `ConversationStorage` ABC to replace hardcoded SQLite | [→ features/history-storage.md](features/history-storage.md) |
-| 1.4 | Split AI config — separate Copilot / Codex / Direct API fields in `AIConfig` | [→ features/aiconfig-split.md](features/aiconfig-split.md) |
+| 1.4 | Split AI config — separate Copilot / Codex / Direct API fields in `AIConfig` | [→ features/split-aiconfig.md](features/split-aiconfig.md) |
 
 ---
 

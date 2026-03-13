@@ -66,6 +66,10 @@ class SecretRedactor:
         except AttributeError:
             pass
         try:
+            candidates.append(settings.ai.codex.codex_api_key)
+        except AttributeError:
+            pass
+        try:
             candidates.append(settings.voice.whisper_api_key)
         except AttributeError:
             pass

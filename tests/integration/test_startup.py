@@ -21,8 +21,10 @@ class TestStartup:
         bot.image_tag = ""
         ai = MagicMock(spec=AIConfig)
         ai.ai_cli = "api"
-        ai.ai_provider = "openai"
         ai.ai_model = ""
+        direct = MagicMock()
+        direct.ai_provider = "openai"
+        ai.direct = direct
         settings = MagicMock(spec=Settings)
         settings.platform = "telegram"
         settings.telegram = tg

@@ -9,6 +9,8 @@ logger = logging.getLogger(__name__)
 
 
 class CodexBackend(SubprocessMixin, AICLIBackend):
+    """Stateful backend that delegates to the Codex CLI subprocess."""
+
     def __init__(self, api_key: str, model: str = "o3", opts: str = "") -> None:
         self._api_key = api_key
         self._model = model
