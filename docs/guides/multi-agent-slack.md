@@ -413,6 +413,40 @@ docs write a one-paragraph overview of the Slack integration
 
 ---
 
+## Thread Reply Mode
+
+When multiple agents respond to the same message in a busy channel, the root feed becomes noisy quickly. Set `SLACK_THREAD_REPLIES=true` in each agent's `.env` to keep all bot output — AI responses, command output, and delegation messages — inside a thread anchored to the triggering message.
+
+```bash
+# .env (per agent)
+SLACK_THREAD_REPLIES=true
+```
+
+**How it works:**
+
+- If the triggering message is at channel root, the bot starts a new thread anchored to that message (`ts`).
+- If the triggering message is already inside a thread, the bot continues that thread (`thread_ts`).
+- When agent-to-agent delegation is also enabled (`TRUSTED_AGENT_BOT_IDS`), delegation messages are posted into the same thread, keeping the full chain in one place.
+
+**Example (all three agents with `SLACK_THREAD_REPLIES=true`):**
+
+```
+#agentgate (channel root):
+  You: "dev review auth.py"
+
+  Thread under your message:
+    GateCode: ⏳ Thinking…
+    GateCode: "Here's my review: ..."
+    GateSec:  "sec Here's the security review: ..."   ← delegation
+    GateDocs: "docs Here's the doc update: ..."        ← delegation
+```
+
+All conversation stays in a single thread. The channel root only shows your original message.
+
+> **Default:** `false` — existing deployments are unaffected. Each agent can be configured independently (some threaded, some channel-root).
+
+---
+
 ## Channel strategy
 
 | Strategy | Best for |

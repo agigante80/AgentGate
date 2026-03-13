@@ -20,6 +20,7 @@ class SlackConfig(BaseSettings):
     allowed_users: list[str] = Field(default=[], alias="SLACK_ALLOWED_USERS")  # Slack user IDs (e.g. U0123456)
     trusted_agent_bot_ids: list[str] = Field(default=[], alias="TRUSTED_AGENT_BOT_IDS")  # Bot IDs of trusted AgentGate agents (e.g. B0123456) for agent-to-agent messaging
     slack_delete_thinking: bool = Field(True, alias="SLACK_DELETE_THINKING")  # Delete ⏳ placeholder after posting final AI response
+    slack_thread_replies: bool = Field(False, alias="SLACK_THREAD_REPLIES")   # Reply in a thread anchored to the triggering message
 
 
 class GitHubConfig(BaseSettings):

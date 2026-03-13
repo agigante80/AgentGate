@@ -1,6 +1,6 @@
 # Slack: Thread Reply Mode (`SLACK_THREAD_REPLIES`)
 
-> Status: **Planned** | Priority: **High** | Last reviewed: 2026-01-01
+> Status: **Implemented** | Priority: **High** | Last reviewed: 2026-03-13
 
 Docs update: README.md and .env.example were updated to document `SLACK_DELETE_THINKING` and `SLACK_THREAD_REPLIES`.
 
