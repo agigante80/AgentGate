@@ -105,3 +105,16 @@ class TestBackendFactory:
         assert isinstance(backend, DirectAPIBackend)
         assert backend._system_prompt == ""
         assert any("SYSTEM_PROMPT_FILE" in msg for msg in caplog.messages)
+
+    def test_api_backend_system_prompt_file_inside_repo_raises(self, monkeypatch):
+        """SYSTEM_PROMPT_FILE pointing inside REPO_DIR must raise ValueError."""
+        from src.config import REPO_DIR
+        monkeypatch.setenv("AI_CLI", "api")
+        monkeypatch.setenv("AI_PROVIDER", "openai")
+        monkeypatch.setenv("AI_API_KEY", "sk-test")
+        # Point to a path inside REPO_DIR
+        inside_path = str(REPO_DIR / "some-prompt.md")
+        monkeypatch.setenv("SYSTEM_PROMPT_FILE", inside_path)
+        cfg = AIConfig()
+        with pytest.raises(ValueError, match="SYSTEM_PROMPT_FILE"):
+            create_backend(cfg)

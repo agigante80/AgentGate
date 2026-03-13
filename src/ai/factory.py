@@ -1,8 +1,9 @@
 import logging
+import os
 from pathlib import Path
 
 from src.ai.adapter import AICLIBackend
-from src.config import AIConfig
+from src.config import AIConfig, REPO_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +25,14 @@ def create_backend(ai: AIConfig) -> AICLIBackend:
             )
         system_prompt = ""
         if ai.system_prompt_file:
+            resolved = os.path.realpath(ai.system_prompt_file)
+            if Path(resolved).is_relative_to(REPO_DIR.resolve()):
+                raise ValueError(
+                    f"SYSTEM_PROMPT_FILE must not point inside the cloned repo ({REPO_DIR}). "
+                    "Mount it via a separate Docker volume (e.g. /config/system-prompt.md)."
+                )
             try:
-                system_prompt = Path(ai.system_prompt_file).read_text()
+                system_prompt = Path(resolved).read_text()
             except OSError as exc:
                 logger.warning("Could not read SYSTEM_PROMPT_FILE %r: %s", ai.system_prompt_file, exc)
         from src.ai.direct import DirectAPIBackend

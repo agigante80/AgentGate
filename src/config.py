@@ -55,6 +55,7 @@ class BotConfig(BaseSettings):
     thinking_slow_threshold_secs: int = 15  # Seconds of silence before first "Still thinking…" update; env: THINKING_SLOW_THRESHOLD_SECS
     thinking_update_secs: int = 30          # Seconds between subsequent elapsed-time updates; env: THINKING_UPDATE_SECS
     ai_timeout_warn_secs: int = 60          # Seconds before hard timeout to include a cancellation warning; env: AI_TIMEOUT_WARN_SECS
+    allow_secrets: bool = False             # ALLOW_SECRETS=true disables secret redaction in outgoing messages
 
 
 class AIConfig(BaseSettings):

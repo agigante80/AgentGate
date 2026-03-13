@@ -46,6 +46,7 @@ def _make_settings():
     bot.thinking_slow_threshold_secs = 15
     bot.thinking_update_secs = 30
     bot.ai_timeout_warn_secs = 60
+    bot.allow_secrets = False
     slack = MagicMock(spec=SlackConfig)
     slack.slack_bot_token = "xoxb-test"
     slack.slack_app_token = "xapp-test"
@@ -57,6 +58,7 @@ def _make_settings():
     gh = MagicMock(spec=GitHubConfig)
     gh.github_repo = "owner/repo"
     gh.branch = "main"
+    gh.github_repo_token = ""
     ai_cfg = MagicMock(spec=AIConfig)
     ai_cfg.ai_cli = "api"
     ai_cfg.ai_api_key = "sk-test"
@@ -64,7 +66,9 @@ def _make_settings():
     ai_cfg.ai_provider = ""
     voice = MagicMock(spec=VoiceConfig)
     voice.whisper_provider = "none"
+    voice.whisper_api_key = ""
     tg = MagicMock(spec=TelegramConfig)
+    tg.bot_token = ""
     settings = MagicMock(spec=Settings)
     settings.platform = "slack"
     settings.bot = bot

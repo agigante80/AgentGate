@@ -24,6 +24,7 @@ def _make_settings(
     tg = MagicMock(spec=TelegramConfig)
     tg.chat_id = chat_id
     tg.allowed_users = allowed_users or []
+    tg.bot_token = ""
     bot = MagicMock(spec=BotConfig)
     bot.bot_cmd_prefix = prefix
     bot.max_output_chars = max_output
@@ -37,9 +38,11 @@ def _make_settings(
     bot.thinking_slow_threshold_secs = 15
     bot.thinking_update_secs = 30
     bot.ai_timeout_warn_secs = 60
+    bot.allow_secrets = False
     gh = MagicMock(spec=GitHubConfig)
     gh.github_repo = "owner/repo"
     gh.branch = "main"
+    gh.github_repo_token = ""
     ai = MagicMock(spec=AIConfig)
     ai.ai_cli = "api"
     ai.ai_provider = "openai"
@@ -55,6 +58,9 @@ def _make_settings(
     s.github = gh
     s.ai = ai
     s.voice = voice
+    s.slack = MagicMock()
+    s.slack.slack_bot_token = ""
+    s.slack.slack_app_token = ""
     return s
 
 
@@ -456,8 +462,11 @@ class TestHandleVoice:
         transcription_call = status_msg.edit_text.call_args_list[0][0][0]
         assert "run the tests" in transcription_call
 
-        # AI was called with transcription
-        backend.send.assert_awaited_once_with("run the tests")
+        # AI was called with framed transcription (voice injection protection)
+        backend.send.assert_awaited_once()
+        call_arg = backend.send.call_args[0][0]
+        assert "run the tests" in call_arg
+        assert "voice transcription" in call_arg
 
     async def test_voice_transcription_error_shown(self):
         """If transcription fails, error is shown."""

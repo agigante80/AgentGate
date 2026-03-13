@@ -9,6 +9,7 @@ import time
 from src.config import Settings
 from src.ai.factory import create_backend
 from src import repo, runtime, history
+from src.config import REPO_DIR
 from src.logging_setup import configure_logging
 from src.ready_msg import build_ready_message
 logger = logging.getLogger(__name__)
@@ -51,6 +52,11 @@ def _validate_config(settings: Settings) -> None:
             raise ValueError("SLACK_BOT_TOKEN is required when PLATFORM=slack")
         if not settings.slack.slack_app_token:
             raise ValueError("SLACK_APP_TOKEN is required when PLATFORM=slack")
+        if not settings.slack.slack_channel_id:
+            raise ValueError(
+                "SLACK_CHANNEL_ID is required when PLATFORM=slack — "
+                "set it to the channel where the bot should operate"
+            )
 
 
 async def _startup_telegram(settings: Settings, backend, start_time: float) -> None:
@@ -104,6 +110,61 @@ async def _startup_slack(settings: Settings, backend, start_time: float) -> None
     await bot.run_async()
 
 
+async def _install_commit_msg_hook() -> None:
+    """Install a commit-msg hook that warns if secrets are committed.
+
+    The hook is installed unconditionally — git history is permanent and
+    ALLOW_SECRETS only controls output redaction, not commit-time scanning.
+    """
+    hooks_dir = REPO_DIR / ".git" / "hooks"
+    hook_file = hooks_dir / "commit-msg"
+    try:
+        hooks_dir.mkdir(parents=True, exist_ok=True)
+        hook_script = (
+            "#!/usr/bin/env python3\n"
+            "\"\"\"Warn if commit message or staged diff contain common secret patterns.\"\"\"\n"
+            "import os, re, subprocess, sys\n"
+            "_PATTERNS = [\n"
+            "    re.compile(r'ghp_[A-Za-z0-9]{36,}'),\n"
+            "    re.compile(r'xoxb-[A-Za-z0-9\\-]{36,}'),\n"
+            "    re.compile(r'xoxp-[A-Za-z0-9\\-]{36,}'),\n"
+            "    re.compile(r'xapp-[A-Za-z0-9\\-]{36,}'),\n"
+            "    re.compile(r'sk-[A-Za-z0-9]{36,}'),\n"
+            "    re.compile(r'github_pat_[A-Za-z0-9_]{36,}'),\n"
+            "    re.compile(r'Bearer\\s+[A-Za-z0-9\\-._~+/]{36,}=*'),\n"
+            "    re.compile(r'https?://[^\\s@]+:[^\\s@]+@[^\\s]+'),\n"
+            "]\n"
+            "_SKIP_PATHS = ('tests/', 'test_', '.md', '.txt')\n"
+            "def check(text):\n"
+            "    for p in _PATTERNS:\n"
+            "        if p.search(text): return True\n"
+            "    return False\n"
+            "def filter_diff(diff):\n"
+            "    \"\"\"Return diff lines excluding test files and comment-like additions.\"\"\"\n"
+            "    lines = []; in_skip = False\n"
+            "    for line in diff.splitlines():\n"
+            "        if line.startswith('diff --git'):\n"
+            "            in_skip = any(s in line for s in _SKIP_PATHS)\n"
+            "        if not in_skip and line.startswith('+') and not line.startswith('+++'):\n"
+            "            lines.append(line)\n"
+            "    return '\\n'.join(lines)\n"
+            "if os.environ.get('ALLOW_SECRETS') == 'true':\n"
+            "    sys.exit(0)\n"
+            "msg = open(sys.argv[1]).read()\n"
+            "raw_diff = subprocess.run(['git', 'diff', '--cached'], capture_output=True, text=True).stdout\n"
+            "diff = filter_diff(raw_diff)\n"
+            "if check(msg) or check(diff):\n"
+            "    print('\\033[31m[commit-msg hook] WARNING: possible secret detected in commit. ')\n"
+            "    print('Run with ALLOW_SECRETS=true to bypass this warning.\\033[0m')\n"
+            "    sys.exit(1)\n"
+        )
+        hook_file.write_text(hook_script)
+        hook_file.chmod(0o755)
+        logger.info("Commit-msg hook installed at %s", hook_file)
+    except Exception:
+        logger.warning("Could not install commit-msg hook at %s", hook_file, exc_info=True)
+
+
 async def startup(settings: Settings) -> None:
     start_time = time.time()
 
@@ -115,6 +176,7 @@ async def startup(settings: Settings) -> None:
         settings.github.branch,
     )
     await repo.configure_git_auth(token)
+    await _install_commit_msg_hook()
 
     logger.info("Installing dependencies…")
     dep_result = await runtime.install_deps()

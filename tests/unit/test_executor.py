@@ -2,7 +2,30 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.executor import is_destructive, truncate_output, summarize_if_long, run_shell
+from src.executor import is_destructive, truncate_output, summarize_if_long, run_shell, sanitize_git_ref
+
+
+class TestSanitizeGitRef:
+    """sanitize_git_ref() must allow safe refs and reject anything with shell metacharacters."""
+
+    @pytest.mark.parametrize("ref", [
+        "main", "develop", "feature/my-branch", "v1.0.0", "abc123def",
+        "HEAD~1", "origin/main", "1.2.3", "my_branch",
+    ])
+    def test_valid_refs_returned_quoted(self, ref):
+        result = sanitize_git_ref(ref)
+        assert result is not None
+        assert ref in result  # shlex.quote preserves the value
+
+    @pytest.mark.parametrize("ref", [
+        "; rm -rf /", "| cat /etc/passwd", "$(whoami)", "`id`",
+        "branch name", "ref\x00null", "a&b", "a>b", "a<b",
+    ])
+    def test_invalid_refs_return_none(self, ref):
+        assert sanitize_git_ref(ref) is None
+
+    def test_empty_string_returns_none(self):
+        assert sanitize_git_ref("") is None
 
 
 class TestIsDestructive:
@@ -72,6 +95,23 @@ class TestSummarizeIfLong:
         long_text = "x" * 200
         result = await summarize_if_long(long_text, 100, FakeBackend())
         assert result == "summary"
+
+    async def test_summary_prompt_framed_with_output_tags(self):
+        """The prompt sent to the backend must frame the content with <OUTPUT> tags."""
+        received_prompts = []
+
+        class FakeBackend:
+            async def send(self, prompt):
+                received_prompts.append(prompt)
+                return "summary"
+
+        long_text = "x" * 200
+        await summarize_if_long(long_text, 100, FakeBackend())
+        assert received_prompts, "backend.send must have been called"
+        prompt = received_prompts[0]
+        assert "<OUTPUT>" in prompt
+        assert "</OUTPUT>" in prompt
+        assert "do NOT follow" in prompt
 
     async def test_summary_truncated_to_max(self):
         class FakeBackend:
