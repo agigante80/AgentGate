@@ -220,7 +220,7 @@ class _BotHandlers:
                 await history.add_exchange(chat_id, text, response)
         except Exception as exc:
             logger.exception("AI backend error")
-            await _reply(update, f"⚠️ Error: {exc}")
+            await _reply(update, self._redactor.redact(f"⚠️ Error: {exc}"))
         finally:
             self._active_ai.pop(key, None)
 
@@ -251,7 +251,7 @@ class _BotHandlers:
         else:
             await update.effective_message.reply_text("⏳ Running…")
             result = await executor.run_shell(cmd, self._settings.bot.max_output_chars, self._redactor)
-            await _reply(update, f"```\n{result}\n```")
+            await _reply(update, f"```\n{self._redactor.redact(result)}\n```")
 
     @_requires_auth
     async def cmd_sync(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -433,7 +433,7 @@ class _BotHandlers:
             await _reply(update, f"✅ AI backend restarted ({self._settings.ai.ai_cli})")
         except Exception as exc:
             logger.exception("Backend restart failed")
-            await _reply(update, f"⚠️ Restart failed: {exc}")
+            await _reply(update, self._redactor.redact(f"⚠️ Restart failed: {exc}"))
 
     # ── Callback & AI forwarding ──────────────────────────────────────────
 
@@ -447,7 +447,7 @@ class _BotHandlers:
             return
         await query.edit_message_text(f"⏳ Running:\n`{cmd}`", parse_mode="Markdown")
         result = await executor.run_shell(cmd, self._settings.bot.max_output_chars, self._redactor)
-        await query.message.reply_text(f"```\n{result}\n```", parse_mode="Markdown")
+        await query.message.reply_text(f"```\n{self._redactor.redact(result)}\n```", parse_mode="Markdown")
 
     @_requires_auth
     async def handle_voice(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -468,7 +468,7 @@ class _BotHandlers:
             text = await self._transcriber.transcribe(bytes(audio_bytes), filename)
         except Exception as exc:
             logger.exception("Transcription error")
-            await status_msg.edit_text(f"⚠️ Transcription failed: {exc}")
+            await status_msg.edit_text(self._redactor.redact(f"⚠️ Transcription failed: {exc}"))
             return
 
         await status_msg.edit_text(f"🎙️ I heard: _{text}_", parse_mode="Markdown")

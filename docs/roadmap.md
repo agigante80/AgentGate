@@ -10,13 +10,9 @@ Items ordered by priority. Each item links to a feature doc with full design det
 
 | # | Item | Detail |
 |---|------|--------|
-| ✅ 1.1 | Improve test coverage for error paths in `bot.py`, `main.py`, `ai/session.py`, `ai/direct.py` | [→ features/test-coverage.md](features/test-coverage.md) |
 | 1.2 | npm globals (`@github/copilot-cli`, `@openai/codex`) not covered by Dependabot | [→ features/npm-dependabot.md](features/npm-dependabot.md) |
 | 1.3 | History storage hardcoded to SQLite — introduce `ConversationStorage` ABC | [→ features/history-storage.md](features/history-storage.md) |
 | 1.4 | `AIConfig` mixes Copilot, Codex, and Direct API fields in one flat struct | [→ features/aiconfig-split.md](features/aiconfig-split.md) |
-| ✅ 1.5 | Shell injection in `gate diff` + auth bypass with empty `SLACK_CHANNEL_ID` | Implemented in v0.10.0 |
-| ✅ 1.6 | AI prompt injection hardening — frame untrusted content, restrict system-prompt paths, harden history replay | Implemented in v0.10.0 |
-| ✅ 1.7 | Secret redaction — redact tokens/keys from AI responses and git commit messages (`ALLOW_SECRETS`) | Implemented in v0.10.0 |
 
 ---
 
