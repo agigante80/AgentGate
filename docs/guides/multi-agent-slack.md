@@ -8,8 +8,8 @@ Three agents, one `#agentgate` Slack channel:
 
 | Agent | Trigger prefix | Backend | Model |
 |-------|---------------|---------|-------|
-| `@GateCode` — Developer | `dev` | Copilot | `claude-sonnet-4-6` |
-| `@GateSec` — Security | `sec` | Copilot | `claude-opus-4-6` |
+| `@GateCode` — Developer | `dev` | Copilot | `claude-sonnet-4.6` |
+| `@GateSec` — Security | `sec` | Copilot | `claude-opus-4.6` |
 | `@GateDocs` — Docs writer | `docs` | Copilot | `gpt-5-mini` |
 
 **Prerequisites**: A Slack workspace where you can install apps, Docker, and the credentials for at least one AI backend.
@@ -221,7 +221,7 @@ PREFIX_ONLY=true
 GITHUB_REPO=agigante80/AgentGate
 GITHUB_REPO_TOKEN=ghp_...
 AI_CLI=copilot
-AI_MODEL=claude-sonnet-4-6
+AI_MODEL=claude-sonnet-4.6
 COPILOT_GITHUB_TOKEN=ghp_...
 COPILOT_SKILLS_DIRS=/repo/skills
 TRUSTED_AGENT_BOT_IDS=["GateSec","GateDocs"]   # display names of @GateSec and @GateDocs
@@ -238,7 +238,7 @@ PREFIX_ONLY=true
 GITHUB_REPO=agigante80/AgentGate
 GITHUB_REPO_TOKEN=ghp_...
 AI_CLI=copilot
-AI_MODEL=claude-opus-4-6
+AI_MODEL=claude-opus-4.6
 COPILOT_GITHUB_TOKEN=ghp_...
 COPILOT_SKILLS_DIRS=/repo/skills
 TRUSTED_AGENT_BOT_IDS=["GateCode","GateDocs"]   # display names of @GateCode and @GateDocs
