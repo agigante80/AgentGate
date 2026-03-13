@@ -61,6 +61,18 @@ the final response is always posted as a new message.
 
 ---
 
+## Code Review Notes (2026-03-13)
+
+Verified against `src/platform/slack.py` on `develop`:
+
+- **Line numbers confirmed**: `_stream_to_slack()` final `_edit()` is at line 177; non-streaming final `_edit()` is at line 233; streaming timeout is at lines 162–165; non-streaming timeout is at lines 221–224. All match the Implementation Steps below.
+- **`_handle_files()` edit calls** (lines 618, 629, 632): These use `_edit()` for transcription status updates (`"🎙️ Transcribing…"`, error text, `"🎙️ I heard: …"`). These are bot status messages, _not_ AI responses — they do **not** need to change for this feature. The AI response itself goes through `_run_ai_pipeline()` at line 633, which is covered by Steps 2–3.
+- **Initial thinking placeholder**: Lines 120 (`_stream_to_slack`) and 201 (`_run_ai_pipeline`) post ⏳ via `say()` — this remains `say()` for 2.1. Only the **final** delivery (lines 177 and 233) switches to `chat_postMessage`. (When 2.3 is also enabled, the initial `say()` will also switch to `client.chat_postMessage` with `thread_ts` — handled by `slack-thread-replies.md` Steps 3–4.)
+- **Command handlers** (`_cmd_run`, `_cmd_sync`, etc.) already use `say()` which posts new messages — no changes needed there.
+- **`_on_message` subtype guard** (line 258): `if event.get("subtype"): return` — confirmed in current code. Leave as-is.
+
+---
+
 ## Design Space
 
 ### Axis 1 — How to deliver the final AI response

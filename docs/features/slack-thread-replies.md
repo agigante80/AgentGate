@@ -57,6 +57,26 @@ that triggered it.
 
 ---
 
+## Code Review Notes (2026-03-13)
+
+Verified against `src/platform/slack.py` on `develop`:
+
+- **All `_run_ai_pipeline()` call sites in `_on_message()`**: After extracting `thread_ts`, it must be passed to all of them:
+  - Line 289: `_run_ai_pipeline()` call for `@mention` trigger
+  - Line 305: `_run_ai_pipeline()` for prefix-as-addressing (unknown subcommand)
+  - Line 309: `_run_ai_pipeline()` for unprefixed messages
+- **`_dispatch()` call sites in `_on_message()`**:
+  - Line 272: trusted bot path dispatch (must pass `thread_ts`)
+  - Line 302: prefix command dispatch (must pass `thread_ts`)
+- **`_handle_files()` at line 280**: Called from `_on_message()` — also needs `thread_ts`. This method uses `say()` at line 613, `_edit()` at lines 618/629/632, and calls `_run_ai_pipeline()` at line 633. A new Step 5b (below) covers this.
+- **`_edit()` calls** during streaming/thinking tick do NOT need `thread_ts` — they update an already-posted message by `ts`. Only the **initial** `chat_postMessage` (thinking placeholder) and final delivery need `thread_ts`.
+- **Confirmed line numbers**: `_send()` at 106, `_stream_to_slack()` at 117, `_on_message()` at 250, `_dispatch()` at 311. Match the steps below.
+- **`say()` and `thread_ts`**: `slack-bolt`'s `say()` shorthand does support a `thread_ts` keyword arg in recent versions, but for clarity and explicit control, prefer `client.chat_postMessage(channel=channel, ...)` for all threaded paths.
+- **Interaction with 2.1**: When 2.1 is also implemented, the initial thinking placeholder in `_stream_to_slack()` and `_run_ai_pipeline()` will switch from `say()` to `client.chat_postMessage()` anyway — so 2.3's Step 3/4 (which already uses `client.chat_postMessage`) is forward-compatible.
+- **Interaction with 2.2**: Delegation `chat_postMessage` calls in `_run_ai_pipeline()` must also include `thread_ts` when thread mode is enabled.
+
+---
+
 ## Design Space
 
 ### Axis 1 — When to use thread replies
@@ -308,7 +328,7 @@ async def _stream_to_slack(
 
 ### Step 5 — `src/platform/slack.py`: update `_dispatch()` and prefix command handlers
 
-All prefix command handlers that call `say()` must use `thread_ts` when available:
+Add `thread_ts` parameter to `_dispatch()` and propagate to all `say()` / `chat_postMessage()` calls in command handlers. Introduce a `_reply()` helper to reduce repetition:
 
 ```python
 async def _dispatch(
@@ -317,7 +337,7 @@ async def _dispatch(
 ) -> None:
     ...
 
-# Each command handler uses a helper:
+# Private helper for all threaded replies:
 async def _reply(self, client, channel: str, text: str, thread_ts: str | None) -> None:
     await client.chat_postMessage(
         channel=channel,
@@ -326,17 +346,62 @@ async def _reply(self, client, channel: str, text: str, thread_ts: str | None) -
     )
 ```
 
+Replace every `await say(...)` call inside command handlers (`_cmd_run`, `_cmd_sync`, `_cmd_git`, `_cmd_diff`, `_cmd_log`, `_cmd_status`, `_cmd_confirm`, `_cmd_clear`, `_cmd_restart`, `_cmd_info`, `_cmd_help`) with `await self._reply(client, channel, ..., thread_ts)`. Update each handler's signature to include `*, thread_ts: str | None = None`.
+
+---
+
+### Step 5b — `src/platform/slack.py`: update `_handle_files()` to accept `thread_ts`
+
+`_handle_files()` (called from `_on_message()` at line 280) posts transcription status via `say()` (line 613) and `_edit()` (lines 618, 629, 632), then calls `_run_ai_pipeline()` at line 633. Add `thread_ts` and use `client.chat_postMessage` for the initial status post:
+
+```python
+async def _handle_files(
+    self, event: dict, say, client, channel: str, *, thread_ts: str | None = None
+) -> None:
+    ...
+    resp = await client.chat_postMessage(
+        channel=channel,
+        text="🎙️ Transcribing…",
+        **({"thread_ts": thread_ts} if thread_ts else {}),
+    )
+    ts = resp["ts"]
+    # _edit() calls for transcription errors/result use ts — no thread_ts needed there
+    ...
+    await self._run_ai_pipeline(say, client, text, channel, thread_ts=thread_ts)
+```
+
+Update the call site in `_on_message()` (line 280):
+
+```python
+await self._handle_files(event, say, client, channel, thread_ts=thread_ts)
+```
+
 ---
 
 ### Step 6 — `src/platform/slack.py`: thread_ts for trusted bot messages
 
-When trusted bots send messages, extract `thread_ts` the same way:
+When trusted bots send messages, extract `thread_ts` the same way and pass to `_dispatch()`:
 
 ```python
-# In _on_message(), trusted bot path:
+# In _on_message(), trusted bot path (line 272):
 thread_ts = event.get("thread_ts") or event.get("ts") if self._settings.slack.slack_thread_replies else None
 await self._dispatch(sub, args, say, client, channel, thread_ts=thread_ts)
 ```
+
+---
+
+### Step 2 — complete call-site list
+
+After extracting `thread_ts` in `_on_message()`, pass it to **all** internal dispatch/pipeline calls:
+
+| Current line | Call | Change |
+|---|---|---|
+| 272 | `_dispatch(sub, args, say, client, channel)` | add `thread_ts=thread_ts` |
+| 280 | `_handle_files(event, say, client, channel)` | add `thread_ts=thread_ts` |
+| 289 | `_run_ai_pipeline(say, client, mention_text or text, channel)` | add `thread_ts=thread_ts` |
+| 302 | `_dispatch(sub, args, say, client, channel)` | add `thread_ts=thread_ts` |
+| 305 | `_run_ai_pipeline(say, client, text[len(p):].strip(), channel)` | add `thread_ts=thread_ts` |
+| 309 | `_run_ai_pipeline(say, client, text, channel)` | add `thread_ts=thread_ts` |
 
 ---
 
@@ -345,7 +410,7 @@ await self._dispatch(sub, args, say, client, channel, thread_ts=thread_ts)
 | File | Action | Summary of change |
 |------|--------|-------------------|
 | `src/config.py` | **Edit** | Add `slack_thread_replies: bool = False` to `SlackConfig` |
-| `src/platform/slack.py` | **Edit** | Extract `thread_ts` in `_on_message()`; thread `thread_ts` through `_run_ai_pipeline()`, `_stream_to_slack()`, `_dispatch()`, and all `say()` / `chat_postMessage()` calls |
+| `src/platform/slack.py` | **Edit** | Extract `thread_ts` in `_on_message()`; add `_reply()` helper; thread `thread_ts` through `_run_ai_pipeline()`, `_stream_to_slack()`, `_dispatch()`, all command handlers, and `_handle_files()`; update all 6 call sites in `_on_message()` (see Step 2 table) |
 | `tests/unit/test_slack_bot.py` | **Edit** | Add `slack_thread_replies` to `_make_settings()`; add thread mode tests |
 | `docs/roadmap.md` | **Edit** | Mark feature done on completion |
 | `docs/features/slack-thread-replies.md` | **Edit** | Change status to `Implemented` after merge |

@@ -59,6 +59,19 @@ delegation sentinel that the bot detects and posts as a standalone new message.
 
 ---
 
+## Code Review Notes (2026-03-13)
+
+Verified against `src/platform/slack.py` on `develop`:
+
+- **`import re` is inside `__init__`** (line 83), not at module level. The `_extract_delegations` helper must be a **module-level function** (not a method), so `import re` must be added to the top-of-file imports (after the existing `import` block around line 23–26). Step 1 covers this.
+- **`_extract_delegations` as module-level function**: Since the function needs no `self`, define it at module level (similar to `_prefix()` at line 42). This keeps it testable in isolation.
+- **Line numbers confirmed**: `_build_team_context()` is at line 684; trusted bot guard is at lines 262–273; `_run_ai_pipeline()` is at line 180. All match the Implementation Steps below.
+- **`skills/` files** confirmed at `/repo/skills/dev-agent.md`, `sec-agent.md`, `docs-agent.md` — platform-neutral content only. Do not add delegation instructions there (Slack-specific).
+- **Streaming path**: The `[DELEGATE: …]` sentinel may arrive in the final streaming chunks. Extraction runs on the **complete** `accumulated` string after `_stream_body()` completes, before `chat_postMessage` — no partial-sentinel risk. Step 4 covers this.
+- **Interaction with 2.3**: When `SLACK_THREAD_REPLIES=true` is also enabled, delegation `chat_postMessage` calls must include `thread_ts`. Coordinate with `slack-thread-replies.md` Step 3/4; pass `thread_ts` through `_run_ai_pipeline()` to the delegation posting loop.
+
+---
+
 ## Design Space
 
 ### Axis 1 — How the AI signals a delegation request
@@ -270,10 +283,12 @@ Optional future extension:
 
 ### Step 1 — `src/platform/slack.py`: add sentinel parser
 
-Add a module-level regex and extraction helper:
+Add `import re` to the **module-level** imports (top of file, alongside the existing stdlib imports — `asyncio`, `logging`, `time`). Currently `import re` only appears inside `__init__` at line 83; move it to module scope.
+
+Then add a **module-level** regex and extraction helper (after `_THINKING` constant, around line 41):
 
 ```python
-import re
+import re  # add to top-of-file imports
 
 _DELEGATE_RE = re.compile(r'\[DELEGATE:\s*(\w+)\s+(.*?)\]', re.DOTALL)
 
@@ -286,6 +301,8 @@ def _extract_delegations(text: str) -> tuple[str, list[tuple[str, str]]]:
     cleaned = _DELEGATE_RE.sub(_replace, text).strip()
     return cleaned, delegations
 ```
+
+Also remove the `import re` from inside `SlackBot.__init__` (line 83) since it will now be at module level.
 
 ---
 
