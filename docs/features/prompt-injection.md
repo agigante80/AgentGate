@@ -277,7 +277,7 @@ User runs: gate run git log --format="%B" -20
 
 - **`is_stateful` flag** — History framing (Axis 3) only applies to stateless backends (`CopilotBackend`). Stateful backends (`CodexBackend`, `DirectAPIBackend`) manage their own context and are not affected by `build_context()`.
 - **`REPO_DIR` and `DB_PATH`** — `SYSTEM_PROMPT_FILE` path validation uses `REPO_DIR` from `src/config.py`.
-- **Platform symmetry** — `summarize_if_long()` is called from both `src/bot.py:205` and `src/platform/slack.py:230`; the fix is in the shared `executor.py`, so both platforms benefit automatically.
+- **Platform symmetry** — `summarize_if_long()` is called from both `src/bot.py:205` and `src/platform/slack.py:339`; the fix is in the shared `executor.py`, so both platforms benefit automatically.
 - **Auth guard** — Not affected; this feature is about content framing, not access control.
 - **Settings loading** — `SYSTEM_PROMPT_FILE` path validation runs in `factory.py` during backend creation.
 - **Prompt injection is inherently probabilistic** — No framing technique provides a cryptographic guarantee against LLM prompt injection. These mitigations significantly raise the bar but should be documented as defence-in-depth, not absolute prevention.
