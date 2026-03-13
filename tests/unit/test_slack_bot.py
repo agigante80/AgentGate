@@ -236,6 +236,37 @@ class TestCommandRouting:
         await bot._on_message(event, say, client)
         backend.send.assert_not_awaited()
 
+    async def test_trusted_agent_ai_delegation_forwarded_to_ai(self):
+        """Trusted bot sends 'gate Please review...' — unknown sub → forwarded to AI, not 'Unknown command'."""
+        backend = _make_backend(response="AI response")
+        bot = _make_bot(backend=backend, settings=_make_settings(trusted_agent_bot_ids=["BTRUSTED"]))
+        say = _make_say()
+        client = _make_client()
+        # Simulate GateCode delegating to this bot: "gate Please review the docs..."
+        event = _make_event(text="gate Please review the docs for security issues")
+        event["bot_id"] = "BTRUSTED"
+        await bot._on_message(event, say, client)
+        # Should forward to AI, not reply with "Unknown command"
+        backend.send.assert_awaited_once()
+        unknown_cmd_replies = [
+            str(call) for call in client.chat_postMessage.call_args_list
+            if "Unknown command" in str(call)
+        ]
+        assert unknown_cmd_replies == [], "Should not reply 'Unknown command' for AI-addressed delegations"
+
+    async def test_trusted_agent_pull_delegation_forwarded_to_ai(self):
+        """Regression: 'gate Pull latest develop...' from trusted bot must not return Unknown command: pull."""
+        backend = _make_backend(response="Pulled latest develop.")
+        bot = _make_bot(backend=backend, settings=_make_settings(trusted_agent_bot_ids=["BTRUSTED"]))
+        say = _make_say()
+        client = _make_client()
+        event = _make_event(text="gate Pull latest `develop` and review for security")
+        event["bot_id"] = "BTRUSTED"
+        await bot._on_message(event, say, client)
+        backend.send.assert_awaited_once()
+        for call in client.chat_postMessage.call_args_list:
+            assert "Unknown command" not in str(call)
+
     async def test_untrusted_bot_messages_still_ignored(self):
         backend = _make_backend(response="AI response")
         bot = _make_bot(backend=backend, settings=_make_settings(trusted_agent_bot_ids=["BTRUSTED"]))

@@ -396,7 +396,14 @@ class SlackBot:
                 sub = parts[1].lower() if len(parts) > 1 else ""
                 args_str = parts[2] if len(parts) > 2 else ""
                 args = args_str.split() if args_str else []
-                await self._dispatch(sub, args, say, client, channel, thread_ts=thread_ts)
+                # Same routing as human messages: only known utility commands go to
+                # _dispatch; anything else is an AI-addressed delegation → AI pipeline
+                if sub in {"run", "sync", "git", "diff", "log", "status", "clear", "restart", "confirm", "info", "help"} or not sub:
+                    await self._dispatch(sub, args, say, client, channel, thread_ts=thread_ts)
+                else:
+                    await self._run_ai_pipeline(
+                        say, client, text[len(p):].strip(), channel, thread_ts=thread_ts
+                    )
             return
 
         if not self._is_allowed(channel, user):
