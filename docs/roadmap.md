@@ -16,6 +16,7 @@ Items ordered by priority. Each item links to a feature doc with full design det
 | 1.4 | `AIConfig` mixes Copilot, Codex, and Direct API fields in one flat struct | [→ features/aiconfig-split.md](features/aiconfig-split.md) |
 | 1.5 | Shell injection in `gate diff` + auth bypass with empty `SLACK_CHANNEL_ID` | [→ features/input-sanitization.md](features/input-sanitization.md) |
 | 1.6 | AI prompt injection hardening — frame untrusted content, restrict system-prompt paths, harden history replay | [→ features/prompt-injection.md](features/prompt-injection.md) |
+| 1.7 | Secret redaction — redact tokens/keys from AI responses and git commit messages (`ALLOW_SECRETS`) | [→ features/secret-redaction.md](features/secret-redaction.md) |
 
 ---
 
