@@ -42,6 +42,8 @@ def _log_startup_banner(settings: Settings, version: str) -> None:
 
 def _validate_config(settings: Settings) -> None:
     """Raise if the required tokens for the selected platform are missing."""
+    if settings.bot.history_turns < 0:
+        raise ValueError("HISTORY_TURNS must be >= 0")
     if settings.platform == "telegram":
         if not settings.telegram.bot_token:
             raise ValueError("TG_BOT_TOKEN is required when PLATFORM=telegram")

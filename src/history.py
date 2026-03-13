@@ -35,12 +35,15 @@ async def add_exchange(chat_id: str, user_msg: str, ai_msg: str) -> None:
         logger.exception("Failed to save history for chat %s", chat_id)
 
 
-async def get_history(chat_id: str) -> list[tuple[str, str]]:
+async def get_history(chat_id: str, limit: int = HISTORY_LIMIT) -> list[tuple[str, str]]:
+    if limit == 0:
+        return []
     try:
+        capped = min(limit, 100)
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute(
                 "SELECT user_msg, ai_msg FROM history WHERE chat_id=? ORDER BY id DESC LIMIT ?",
-                (chat_id, HISTORY_LIMIT),
+                (chat_id, capped),
             ) as cur:
                 rows = await cur.fetchall()
         return list(reversed(rows))  # oldest first

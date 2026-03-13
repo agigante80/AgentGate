@@ -95,6 +95,26 @@ class TestHistoryDB:
         rows = await history_module.get_history("chat1")
         assert len(rows) == history_module.HISTORY_LIMIT
 
+    async def test_get_history_custom_limit(self):
+        await history_module.init_db()
+        for i in range(8):
+            await history_module.add_exchange("chat1", f"q{i}", f"a{i}")
+        rows = await history_module.get_history("chat1", limit=5)
+        assert len(rows) == 5
+
+    async def test_get_history_zero_returns_empty(self):
+        await history_module.init_db()
+        await history_module.add_exchange("chat1", "q", "a")
+        rows = await history_module.get_history("chat1", limit=0)
+        assert rows == []
+
+    async def test_get_history_cap_at_100(self):
+        await history_module.init_db()
+        for i in range(15):
+            await history_module.add_exchange("chat1", f"q{i}", f"a{i}")
+        rows = await history_module.get_history("chat1", limit=200)
+        assert len(rows) == 15  # only 15 stored; cap doesn't reduce this
+
     async def test_history_oldest_first(self):
         await history_module.init_db()
         await history_module.add_exchange("chat1", "first", "r1")

@@ -1,6 +1,6 @@
 # Context Window Control (`HISTORY_TURNS`)
 
-> Status: **Planned** | Priority: **High** | Last reviewed: 2026-03-13
+> Status: **Implemented in v0.11.0** | Priority: **High** | Last reviewed: 2026-03-13
 
 Control how many recent SQLite conversation exchanges are injected into every AI prompt.
 Setting this to `0` disables local memory injection entirely — useful when the AI backend

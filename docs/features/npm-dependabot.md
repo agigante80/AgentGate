@@ -1,6 +1,6 @@
 # npm Globals Not Covered by Dependabot
 
-> Status: **Planned** | Priority: Low | Last reviewed: 2026-03-12
+> Status: **Implemented in v0.11.0** | Priority: Low | Last reviewed: 2026-03-12
 
 Add Dependabot coverage for `@github/copilot-cli` and `@openai/codex` npm packages, which are currently pinned in the Dockerfile but never auto-updated.
 

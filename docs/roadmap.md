@@ -15,7 +15,7 @@ If adding a new item, create a feature document using `docs/features/_template.m
 | 1.5 | Input sanitization — block shell-injection in command handlers (e.g., `gate diff`) | [→ features/input-sanitization.md](features/input-sanitization.md) |
 | 1.6 | Prompt injection hardening — frame untrusted content; restrict system-prompt paths | [→ features/prompt-injection.md](features/prompt-injection.md) |
 | 1.7 | Secret redaction — redact tokens/keys from AI responses and git commits (`ALLOW_SECRETS`) | [→ features/secret-redaction.md](features/secret-redaction.md) |
-| 1.2 | npm Dependabot — cover npm globals (`@github/copilot-cli`, `@openai/codex`) | [→ features/npm-dependabot.md](features/npm-dependabot.md) |
+| 1.2 | ✅ npm Dependabot — cover npm globals (`@github/copilot-cli`, `@openai/codex`) | [→ features/npm-dependabot.md](features/npm-dependabot.md) |
 | 1.3 | Conversation storage — introduce `ConversationStorage` ABC to replace hardcoded SQLite | [→ features/history-storage.md](features/history-storage.md) |
 | 1.4 | Split AI config — separate Copilot / Codex / Direct API fields in `AIConfig` | [→ features/aiconfig-split.md](features/aiconfig-split.md) |
 
@@ -25,7 +25,7 @@ If adding a new item, create a feature document using `docs/features/_template.m
 
 | # | Item | Detail |
 |---|------|--------|
-| 2.10 | `HISTORY_TURNS` env var — control how many SQLite exchanges are injected (0 = none) | [→ features/history-turns.md](features/history-turns.md) |
+| 2.10 | ✅ `HISTORY_TURNS` env var — control how many SQLite exchanges are injected (0 = none) | [→ features/history-turns.md](features/history-turns.md) |
 | 2.4 | `/gate schedule` — recurring shell commands or AI prompts | [→ features/schedule.md](features/schedule.md) |
 | 2.7 | `/gate file` — send/receive files to/from `/repo` via chat | [→ features/file-transfer.md](features/file-transfer.md) |
 | 2.6 | `/gate switch` — hot-swap the AI backend at runtime | [→ features/switch-backend.md](features/switch-backend.md) |
@@ -35,7 +35,7 @@ If adding a new item, create a feature document using `docs/features/_template.m
 | 2.11 | Voice transcription — local Whisper provider | [→ features/whisper-local.md](features/whisper-local.md) |
 | 2.12 | Voice transcription — Google Speech-to-Text provider | [→ features/whisper-google.md](features/whisper-google.md) |
 | 2.13 | Lightweight web dashboard — read-only HTTP status page in the container | [→ features/web-dashboard.md](features/web-dashboard.md) |
-| 2.15 | Thinking ticker UX — human-readable elapsed time + improved defaults | [→ features/thinking-ticker-ux.md](features/thinking-ticker-ux.md) |
+| 2.15 | ✅ Thinking ticker UX — human-readable elapsed time + improved defaults | [→ features/thinking-ticker-ux.md](features/thinking-ticker-ux.md) |
 
 ---
 

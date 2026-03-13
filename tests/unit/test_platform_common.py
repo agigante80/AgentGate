@@ -11,11 +11,13 @@ from src.config import BotConfig, SlackConfig, Settings
 
 def _make_settings(
     history_enabled=True,
+    history_turns=10,
     slack_channel_id="",
     allowed_users=None,
 ):
     bot = MagicMock(spec=BotConfig)
     bot.history_enabled = history_enabled
+    bot.history_turns = history_turns
     slack = MagicMock(spec=SlackConfig)
     slack.slack_channel_id = slack_channel_id
     slack.allowed_users = allowed_users or []
@@ -66,6 +68,14 @@ class TestBuildPrompt:
         ):
             result = await build_prompt("hello", "chan1", settings, backend)
         assert result == "context+hello"
+
+    async def test_history_turns_zero_no_injection(self):
+        """HISTORY_TURNS=0: build_prompt returns raw text even when history_enabled=True."""
+        backend = _make_backend(is_stateful=False)
+        settings = _make_settings(history_enabled=True, history_turns=0)
+        result = await build_prompt("hello", "chan1", settings, backend)
+        assert result == "hello"
+        assert "<HISTORY>" not in result
 
 
 # ── save_to_history ───────────────────────────────────────────────────────────

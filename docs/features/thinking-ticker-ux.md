@@ -1,6 +1,6 @@
 # Thinking ticker UX — human-readable elapsed time + no-timeout default (`AI_TIMEOUT_SECS`, `THINKING_*`)
 
-> Status: **Planned** | Priority: Medium | Last reviewed: 2026-03-13
+> Status: **Implemented in v0.11.0** | Priority: Medium | Last reviewed: 2026-03-13
 
 Two small UX improvements to the "Still thinking…" ticker: elapsed time is shown in human-readable format after 60 seconds (e.g. `2m 5s` instead of `125s`), and the default hard timeout changes from 720s to 0 (no timeout) so long-running AI calls are never silently cancelled by default.
 

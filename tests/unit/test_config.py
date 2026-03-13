@@ -77,6 +77,8 @@ class TestBotConfig:
         assert cfg.max_output_chars == 3000
         assert cfg.history_enabled is True
         assert cfg.stream_responses is True
+        assert cfg.ai_timeout_secs == 0       # 2.15: no-timeout default
+        assert cfg.history_turns == 10        # 2.10: default injection window
 
     def test_overrides(self, monkeypatch):
         monkeypatch.setenv("BOT_CMD_PREFIX", "bot")
@@ -88,6 +90,21 @@ class TestBotConfig:
         assert cfg.max_output_chars == 1500
         assert cfg.history_enabled is False
         assert cfg.stream_responses is False
+
+    def test_history_turns_env(self, monkeypatch):
+        monkeypatch.setenv("HISTORY_TURNS", "5")
+        cfg = BotConfig()
+        assert cfg.history_turns == 5
+
+    def test_history_turns_zero(self, monkeypatch):
+        monkeypatch.setenv("HISTORY_TURNS", "0")
+        cfg = BotConfig()
+        assert cfg.history_turns == 0
+
+    def test_ai_timeout_env(self, monkeypatch):
+        monkeypatch.setenv("AI_TIMEOUT_SECS", "720")
+        cfg = BotConfig()
+        assert cfg.ai_timeout_secs == 720
 
 
 class TestAIConfig:

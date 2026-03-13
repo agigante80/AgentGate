@@ -44,6 +44,7 @@ class BotConfig(BaseSettings):
     bot_cmd_prefix: str = "gate"
     max_output_chars: int = 3000
     history_enabled: bool = True  # Set HISTORY_ENABLED=false to disable chat storage
+    history_turns: int = Field(10, env="HISTORY_TURNS")  # Number of past exchanges injected per prompt; 0 = disable injection only
     stream_responses: bool = True  # Set STREAM_RESPONSES=false to wait for full response
     stream_throttle_secs: float = 1.0  # Seconds between Telegram message edits during streaming
     confirm_destructive: bool = True  # Set CONFIRM_DESTRUCTIVE=false to skip confirmation prompts
@@ -51,7 +52,7 @@ class BotConfig(BaseSettings):
     image_tag: str = ""  # IMAGE_TAG — set by docker-compose to show "latest" or "development" in ready msg
     prefix_only: bool = False  # PREFIX_ONLY=true: ignore messages that don't start with the bot prefix (for multi-agent Slack)
     system_prompt: str = ""  # SYSTEM_PROMPT: optional text prepended to every AI prompt (team context is auto-generated separately)
-    ai_timeout_secs: int = 720              # Hard timeout for any AI backend (0 = no timeout); env: AI_TIMEOUT_SECS
+    ai_timeout_secs: int = 0                # Hard timeout for any AI backend (0 = no timeout); env: AI_TIMEOUT_SECS
     thinking_slow_threshold_secs: int = 15  # Seconds of silence before first "Still thinking…" update; env: THINKING_SLOW_THRESHOLD_SECS
     thinking_update_secs: int = 30          # Seconds between subsequent elapsed-time updates; env: THINKING_UPDATE_SECS
     ai_timeout_warn_secs: int = 60          # Seconds before hard timeout to include a cancellation warning; env: AI_TIMEOUT_WARN_SECS

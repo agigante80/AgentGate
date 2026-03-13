@@ -55,3 +55,16 @@ updates:
     labels:
       - dependencies
       - docker
+
+  # npm globals (@github/copilot, @openai/codex) — manifest in package.json
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: UTC
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - npm

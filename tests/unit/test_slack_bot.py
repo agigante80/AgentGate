@@ -51,6 +51,7 @@ def _make_settings(
     bot.thinking_update_secs = 30
     bot.ai_timeout_warn_secs = 60
     bot.allow_secrets = False
+    bot.history_turns = 10
     slack = MagicMock(spec=SlackConfig)
     slack.slack_bot_token = slack_bot_token
     slack.slack_app_token = slack_app_token

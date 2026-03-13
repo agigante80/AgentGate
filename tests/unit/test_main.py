@@ -24,6 +24,7 @@ def _make_settings(platform="telegram", bot_token="abc:token", chat_id="99999",
     slack.slack_channel_id = slack_channel_id
     bot = MagicMock(spec=BotConfig)
     bot.bot_cmd_prefix = "gate"
+    bot.history_turns = 10
     ai = MagicMock(spec=AIConfig)
     ai.ai_cli = "api"
     gh = MagicMock(spec=GitHubConfig)

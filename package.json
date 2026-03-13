@@ -1,0 +1,9 @@
+{
+  "name": "agentgate-npm-manifest",
+  "private": true,
+  "description": "Dependabot manifest only — not installed in production. Keep versions in sync with Dockerfile.",
+  "dependencies": {
+    "@github/copilot": "0.0.421",
+    "@openai/codex": "0.111.0"
+  }
+}

@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from src.platform.common import thinking_ticker
+from src.platform.common import _format_elapsed, thinking_ticker
 
 
 def _make_sleep_counter(cancel_after: int):
@@ -123,3 +123,55 @@ async def test_ticker_zero_threshold_fires_immediately():
                       cancel_after_sleeps=1,
                       monotonic_values=[0.0, 0.0])
     assert edit_fn.call_count == 1
+
+
+class TestFormatElapsed:
+    def test_under_60s(self):
+        assert _format_elapsed(45) == "45s"
+
+    def test_zero(self):
+        assert _format_elapsed(0) == "0s"
+
+    def test_exactly_60s(self):
+        assert _format_elapsed(60) == "1m 0s"
+
+    def test_125s(self):
+        assert _format_elapsed(125) == "2m 5s"
+
+    def test_3600s(self):
+        assert _format_elapsed(3600) == "60m 0s"
+
+
+class TestTickerFormatsElapsed:
+    async def test_ticker_shows_seconds_below_60(self):
+        """Ticker text at elapsed<60s uses raw seconds format."""
+        edit_fn = AsyncMock()
+        await _run_ticker(edit_fn, slow_threshold=0, update_interval=30,
+                          timeout_secs=0, warn_before_secs=60,
+                          cancel_after_sleeps=1,
+                          monotonic_values=[0.0, 45.0])
+        text = edit_fn.call_args_list[0][0][0]
+        assert "45s" in text
+        assert "0m" not in text
+
+    async def test_ticker_shows_human_at_or_above_60(self):
+        """Ticker text at elapsed>=60s uses human-readable format."""
+        edit_fn = AsyncMock()
+        await _run_ticker(edit_fn, slow_threshold=0, update_interval=30,
+                          timeout_secs=0, warn_before_secs=60,
+                          cancel_after_sleeps=1,
+                          monotonic_values=[0.0, 125.0])
+        text = edit_fn.call_args_list[0][0][0]
+        assert "2m 5s" in text
+
+    async def test_ticker_cancel_warning_human(self):
+        """Warning branch remaining time also uses _format_elapsed."""
+        edit_fn = AsyncMock()
+        # elapsed=680s, timeout=720s, remaining=40s — under 60 → shows "40s"
+        await _run_ticker(edit_fn, slow_threshold=0, update_interval=30,
+                          timeout_secs=720, warn_before_secs=60,
+                          cancel_after_sleeps=1,
+                          monotonic_values=[0.0, 680.0])
+        text = edit_fn.call_args_list[-1][0][0]
+        assert "will cancel in" in text
+        assert "40s" in text

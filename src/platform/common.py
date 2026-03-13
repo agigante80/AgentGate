@@ -8,6 +8,17 @@ from src.ai.adapter import AICLIBackend
 from src.config import Settings
 
 
+def _format_elapsed(secs: int) -> str:
+    """Return elapsed time as a human-readable string.
+
+    Under 60s: '45s'. At 60s and above: '2m 5s'.
+    """
+    if secs < 60:
+        return f"{secs}s"
+    m, s = divmod(secs, 60)
+    return f"{m}m {s}s"
+
+
 async def thinking_ticker(
     edit_fn: Callable[[str], Awaitable[None]],
     slow_threshold: int,
@@ -33,11 +44,11 @@ async def thinking_ticker(
         if timeout_secs > 0:
             remaining = timeout_secs - elapsed
             if remaining <= warn_before_secs:
-                text = f"⏳ Still thinking… ({elapsed}s) — will cancel in {remaining}s"
+                text = f"⏳ Still thinking… ({_format_elapsed(elapsed)}) — will cancel in {_format_elapsed(remaining)}"
             else:
-                text = f"⏳ Still thinking… ({elapsed}s)"
+                text = f"⏳ Still thinking… ({_format_elapsed(elapsed)})"
         else:
-            text = f"⏳ Still thinking… ({elapsed}s)"
+            text = f"⏳ Still thinking… ({_format_elapsed(elapsed)})"
         await edit_fn(text)
         await asyncio.sleep(update_interval)
 
@@ -48,8 +59,11 @@ async def build_prompt(
     """Build the AI prompt, injecting conversation history for stateless backends."""
     if backend.is_stateful:
         return text
+    turns = settings.bot.history_turns
     hist = (
-        await history.get_history(chat_id) if settings.bot.history_enabled else []
+        await history.get_history(chat_id, limit=turns)
+        if settings.bot.history_enabled and turns > 0
+        else []
     )
     return history.build_context(hist, text)
 
