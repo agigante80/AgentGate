@@ -2,6 +2,8 @@
 
 This guide shows how to run multiple AgentGate instances as specialised AI agents in a single Slack workspace. We use the AgentGate project itself as the working example.
 
+See also: docs/features/slack-final-response-new-message.md, docs/features/slack-agent-delegation.md, docs/features/slack-thread-replies.md
+
 ## What you'll set up
 
 Three agents, one `#agentgate` Slack channel:

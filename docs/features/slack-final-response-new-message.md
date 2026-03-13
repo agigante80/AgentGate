@@ -2,6 +2,8 @@
 
 > Status: **Planned** | Priority: **High** | Last reviewed: 2026-01-01
 
+Docs update: README.md and .env.example were updated to document `SLACK_DELETE_THINKING` and `SLACK_THREAD_REPLIES`.
+
 When streaming or waiting for an AI response, the bot posts a ⏳ "thinking" placeholder and then
 **edits** that same message with the final content. Because other Slack bots ignore edited
 messages, agent-to-agent responses are silently lost. This feature changes the delivery model so

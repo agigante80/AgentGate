@@ -2,6 +2,8 @@
 
 > Status: **Planned** | Priority: **High** | Last reviewed: 2026-01-01
 
+Docs update: README.md and .env.example were updated to document `SLACK_DELETE_THINKING` and `SLACK_THREAD_REPLIES`.
+
 All bot responses currently go to the channel root level. In multi-agent conversations,
 this quickly becomes noisy and hard to follow. This feature introduces an opt-in thread
 reply mode: when enabled, the bot always replies inside a thread anchored to the message

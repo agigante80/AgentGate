@@ -2,6 +2,8 @@
 
 > Status: **Planned** | Priority: **High** | Last reviewed: 2026-01-01
 
+Docs update: README.md and .env.example were updated to document `SLACK_DELETE_THINKING` and `SLACK_THREAD_REPLIES`.
+
 When an AI agent wants to delegate work to a peer agent, it embeds the delegation request
 inline in its response. Other agents only react to messages that start with their command
 prefix, so buried delegation text is silently ignored. This feature introduces a structured
