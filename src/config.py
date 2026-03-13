@@ -19,6 +19,8 @@ class SlackConfig(BaseSettings):
     slack_channel_id: str = ""  # SLACK_CHANNEL_ID — restrict to one channel (optional)
     allowed_users: list[str] = Field(default=[], alias="SLACK_ALLOWED_USERS")  # Slack user IDs (e.g. U0123456)
     trusted_agent_bot_ids: list[str] = Field(default=[], alias="TRUSTED_AGENT_BOT_IDS")  # Bot IDs of trusted AgentGate agents (e.g. B0123456) for agent-to-agent messaging
+    slack_delete_thinking: bool = Field(True, alias="SLACK_DELETE_THINKING")  # Delete ⏳ placeholder after posting final AI response
+    slack_thread_replies: bool = Field(False, alias="SLACK_THREAD_REPLIES")   # Reply in a thread anchored to the triggering message
 
 
 class GitHubConfig(BaseSettings):
@@ -49,7 +51,7 @@ class BotConfig(BaseSettings):
     image_tag: str = ""  # IMAGE_TAG — set by docker-compose to show "latest" or "development" in ready msg
     prefix_only: bool = False  # PREFIX_ONLY=true: ignore messages that don't start with the bot prefix (for multi-agent Slack)
     system_prompt: str = ""  # SYSTEM_PROMPT: optional text prepended to every AI prompt (team context is auto-generated separately)
-    ai_timeout_secs: int = 360              # Hard timeout for any AI backend (0 = no timeout); env: AI_TIMEOUT_SECS
+    ai_timeout_secs: int = 720              # Hard timeout for any AI backend (0 = no timeout); env: AI_TIMEOUT_SECS
     thinking_slow_threshold_secs: int = 15  # Seconds of silence before first "Still thinking…" update; env: THINKING_SLOW_THRESHOLD_SECS
     thinking_update_secs: int = 30          # Seconds between subsequent elapsed-time updates; env: THINKING_UPDATE_SECS
     ai_timeout_warn_secs: int = 60          # Seconds before hard timeout to include a cancellation warning; env: AI_TIMEOUT_WARN_SECS

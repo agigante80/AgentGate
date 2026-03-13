@@ -22,6 +22,7 @@ Voice/audio file uploads are transcribed and forwarded to the AI.
 """
 import asyncio
 import logging
+import re
 import time
 from contextlib import suppress
 
@@ -37,6 +38,40 @@ logger = logging.getLogger(__name__)
 
 # Sent as a placeholder while streaming — updated chunk by chunk
 _THINKING = "🤖 Thinking…"
+
+# ── Agent-to-agent delegation sentinel ────────────────────────────────────────
+
+_DELEGATE_RE = re.compile(r"\[DELEGATE:\s*(\w+)\s+(.*?)\]", re.DOTALL)
+
+# Sub-commands that delegated messages must NOT start with (RCE prevention)
+_BLOCKED_DELEGATION_SUBS = {
+    "run", "sync", "git", "diff", "log", "restart", "clear", "confirm",
+}
+
+# Commands intentionally allowed through delegation (safe / read-only)
+_SAFE_DELEGATION_SUBS = {"status", "info", "help"}
+
+# Strip Slack special mentions that could @-notify entire channels
+_SLACK_SPECIAL_MENTION_RE = re.compile(r"<!(channel|here|everyone)>")
+
+# Maximum number of delegation blocks processed per AI response (DoS prevention)
+_MAX_DELEGATIONS = 3
+
+
+def _extract_delegations(text: str) -> tuple[str, list[tuple[str, str]]]:
+    """Strip [DELEGATE: prefix message] sentinels from *text*.
+
+    Returns ``(cleaned_text, [(prefix, message), ...])``.  Malformed or
+    unmatched brackets are left in the text unchanged.
+    """
+    delegations: list[tuple[str, str]] = []
+
+    def _replace(m: re.Match) -> str:
+        delegations.append((m.group(1).lower(), m.group(2).strip()))
+        return ""
+
+    cleaned = _DELEGATE_RE.sub(_replace, text).strip()
+    return cleaned, delegations
 
 
 def _prefix(settings: Settings) -> str:
@@ -114,10 +149,19 @@ class SlackBot:
         except Exception:
             logger.debug("Slack edit skipped")
 
+    async def _reply(
+        self, client, channel: str, text: str, thread_ts: str | None
+    ) -> dict:
+        """Post a new message; thread it if thread_ts is set."""
+        kwargs: dict = {"channel": channel, "text": text}
+        if thread_ts:
+            kwargs["thread_ts"] = thread_ts
+        return await client.chat_postMessage(**kwargs)
+
     async def _stream_to_slack(
-        self, say, client, channel: str, prompt: str
+        self, say, client, channel: str, prompt: str, *, thread_ts: str | None = None
     ) -> str:
-        resp = await say(_THINKING)
+        resp = await self._reply(client, channel, _THINKING, thread_ts)
         ts = resp["ts"]
         accumulated = ""
         last_edit = time.monotonic()
@@ -159,10 +203,16 @@ class SlackBot:
             else:
                 await _stream_body()
         except asyncio.TimeoutError:
-            await self._edit(
-                client, channel, ts,
-                f"⚠️ Stream cancelled after {cfg.ai_timeout_secs}s."
+            await self._reply(
+                client, channel,
+                f"⚠️ Stream cancelled after {cfg.ai_timeout_secs}s.",
+                thread_ts,
             )
+            if self._settings.slack.slack_delete_thinking:
+                try:
+                    await client.chat_delete(channel=channel, ts=ts)
+                except Exception:
+                    logger.debug("Could not delete thinking placeholder (ts=%s)", ts)
             return ""
         finally:
             ticker.cancel()
@@ -174,11 +224,62 @@ class SlackBot:
             if len(accumulated) > max_chars
             else accumulated
         )
-        await self._edit(client, channel, ts, final or "_(empty response)_")
+        final, delegations = _extract_delegations(final)
+        await self._reply(client, channel, final or "_(empty response)_", thread_ts)
+        if self._settings.slack.slack_delete_thinking:
+            try:
+                await client.chat_delete(channel=channel, ts=ts)
+            except Exception:
+                logger.debug("Could not delete thinking placeholder (ts=%s)", ts)
+        await self._post_delegations(client, channel, delegations, thread_ts=thread_ts)
         return final
 
+    async def _post_delegations(
+        self,
+        client,
+        channel: str,
+        delegations: list[tuple[str, str]],
+        *,
+        thread_ts: str | None = None,
+    ) -> None:
+        """Post delegation messages extracted from an AI response.
+
+        Applies a blocklist (prevents RCE via ``dev run …``) and a cap of
+        ``_MAX_DELEGATIONS`` messages per response (prevents flood).
+        """
+        if not delegations:
+            return
+        if len(delegations) > _MAX_DELEGATIONS:
+            logger.warning(
+                "Delegation cap exceeded: %d found, only posting %d",
+                len(delegations),
+                _MAX_DELEGATIONS,
+            )
+            delegations = delegations[:_MAX_DELEGATIONS]
+        for prefix, msg in delegations:
+            # Strip Slack special mentions to prevent @channel/@here/@everyone spam
+            msg = _SLACK_SPECIAL_MENTION_RE.sub("", msg).strip()
+            if not msg:
+                logger.warning("Delegation to prefix=%s empty after sanitization", prefix)
+                continue
+            first_word = msg.split()[0].lower() if msg.split() else ""
+            if first_word in _BLOCKED_DELEGATION_SUBS:
+                logger.warning(
+                    "Blocked delegation with dangerous sub-command: prefix=%s sub=%s",
+                    prefix,
+                    first_word,
+                )
+                continue
+            try:
+                await self._reply(client, channel, f"{prefix} {msg}", thread_ts)
+                logger.info(
+                    "Delegation posted: %s → %s", self._bot_display_name, prefix
+                )
+            except Exception:
+                logger.warning("Failed to post delegation to prefix=%s", prefix)
+
     async def _run_ai_pipeline(
-        self, say, client, text: str, channel: str
+        self, say, client, text: str, channel: str, *, thread_ts: str | None = None
     ) -> None:
         key = text[:60]
         self._active_ai[key] = time.time()
@@ -196,9 +297,11 @@ class SlackBot:
             if context_parts:
                 prompt = "\n\n".join(context_parts) + "\n\n" + prompt
             if self._settings.bot.stream_responses:
-                response = await self._stream_to_slack(say, client, channel, prompt)
+                response = await self._stream_to_slack(
+                    say, client, channel, prompt, thread_ts=thread_ts
+                )
             else:
-                resp = await say(_THINKING)
+                resp = await self._reply(client, channel, _THINKING, thread_ts)
                 ts = resp["ts"]
                 cfg = self._settings.bot
                 ticker = asyncio.create_task(
@@ -218,10 +321,16 @@ class SlackBot:
                     else:
                         response = await self._backend.send(prompt)
                 except asyncio.TimeoutError:
-                    await self._edit(
-                        client, channel, ts,
-                        f"⚠️ Request cancelled after {cfg.ai_timeout_secs}s."
+                    await self._reply(
+                        client, channel,
+                        f"⚠️ Request cancelled after {cfg.ai_timeout_secs}s.",
+                        thread_ts,
                     )
+                    if self._settings.slack.slack_delete_thinking:
+                        try:
+                            await client.chat_delete(channel=channel, ts=ts)
+                        except Exception:
+                            logger.debug("Could not delete thinking placeholder (ts=%s)", ts)
                     return
                 finally:
                     ticker.cancel()
@@ -230,13 +339,18 @@ class SlackBot:
                 response = await executor.summarize_if_long(
                     response, self._settings.bot.max_output_chars, self._backend
                 )
-                await self._edit(
-                    client, channel, ts, response or "_(empty response)_"
-                )
+                response, delegations = _extract_delegations(response)
+                await self._reply(client, channel, response or "_(empty response)_", thread_ts)
+                if self._settings.slack.slack_delete_thinking:
+                    try:
+                        await client.chat_delete(channel=channel, ts=ts)
+                    except Exception:
+                        logger.debug("Could not delete thinking placeholder (ts=%s)", ts)
+                await self._post_delegations(client, channel, delegations, thread_ts=thread_ts)
             await common.save_to_history(channel, text, response, self._settings)
         except Exception as exc:
             logger.exception("AI backend error")
-            await say(f"⚠️ Error: {exc}")
+            await self._reply(client, channel, f"⚠️ Error: {exc}", thread_ts)
         finally:
             self._active_ai.pop(key, None)
 
@@ -253,6 +367,12 @@ class SlackBot:
         user = event.get("user", "")
         text = (event.get("text") or "").strip()
         bot_id = event.get("bot_id", "")
+        # Extract thread context for thread reply mode (opt-in via SLACK_THREAD_REPLIES)
+        thread_ts = (
+            (event.get("thread_ts") or event.get("ts"))
+            if self._settings.slack.slack_thread_replies
+            else None
+        )
 
         # Ignore message edits
         if event.get("subtype"):
@@ -262,6 +382,13 @@ class SlackBot:
         if bot_id:
             if bot_id not in self._trusted_bot_ids:
                 return
+            # Enforce channel restriction even for trusted bots
+            cfg = self._settings.slack
+            if cfg.slack_channel_id and channel != cfg.slack_channel_id:
+                logger.warning(
+                    "Trusted bot %s blocked: channel %s not allowed", bot_id, channel
+                )
+                return
             p = self._p
             lower = text.lower()
             if lower.startswith(f"{p} ") or lower == p:
@@ -269,7 +396,7 @@ class SlackBot:
                 sub = parts[1].lower() if len(parts) > 1 else ""
                 args_str = parts[2] if len(parts) > 2 else ""
                 args = args_str.split() if args_str else []
-                await self._dispatch(sub, args, say, client, channel)
+                await self._dispatch(sub, args, say, client, channel, thread_ts=thread_ts)
             return
 
         if not self._is_allowed(channel, user):
@@ -277,7 +404,7 @@ class SlackBot:
 
         # Voice/audio file uploads → transcribe and forward to AI
         if event.get("files"):
-            await self._handle_files(event, say, client, channel)
+            await self._handle_files(event, say, client, channel, thread_ts=thread_ts)
             return
 
         if not text:
@@ -286,7 +413,9 @@ class SlackBot:
         # @mention trigger: "<@UXXXXXXX> …" bypasses prefix and PREFIX_ONLY restrictions
         if self._bot_user_id and f"<@{self._bot_user_id}>" in text:
             mention_text = text.replace(f"<@{self._bot_user_id}>", "").strip()
-            await self._run_ai_pipeline(say, client, mention_text or text, channel)
+            await self._run_ai_pipeline(
+                say, client, mention_text or text, channel, thread_ts=thread_ts
+            )
             return
 
         p = self._p
@@ -299,14 +428,16 @@ class SlackBot:
             args = args_str.split() if args_str else []
             # Route known utility commands to dispatcher; everything else goes to AI
             if sub in {"run", "sync", "git", "diff", "log", "status", "clear", "restart", "confirm", "info", "help"} or not sub:
-                await self._dispatch(sub, args, say, client, channel)
+                await self._dispatch(sub, args, say, client, channel, thread_ts=thread_ts)
             else:
                 # Prefix was used as an addressing token — forward remainder to AI
-                await self._run_ai_pipeline(say, client, text[len(p):].strip(), channel)
+                await self._run_ai_pipeline(
+                    say, client, text[len(p):].strip(), channel, thread_ts=thread_ts
+                )
         elif self._settings.bot.prefix_only:
             return  # Silently ignore unprefixed messages (PREFIX_ONLY=true)
         else:
-            await self._run_ai_pipeline(say, client, text, channel)
+            await self._run_ai_pipeline(say, client, text, channel, thread_ts=thread_ts)
 
     async def _dispatch(
         self,
@@ -315,6 +446,8 @@ class SlackBot:
         say,
         client,
         channel: str,
+        *,
+        thread_ts: str | None = None,
     ) -> None:
         table = {
             "run": self._cmd_run,
@@ -332,19 +465,19 @@ class SlackBot:
         handler = table.get(sub)
         if handler is None:
             if sub:
-                await say(f"❓ Unknown command: `{sub}`")
-            await self._cmd_help([], say, client, channel)
+                await self._reply(client, channel, f"❓ Unknown command: `{sub}`", thread_ts)
+            await self._cmd_help([], say, client, channel, thread_ts=thread_ts)
             return
-        await handler(args, say, client, channel)
+        await handler(args, say, client, channel, thread_ts=thread_ts)
 
     # ── Utility commands ──────────────────────────────────────────────────
 
     async def _cmd_run(
-        self, args: list[str], say, client, channel: str
+        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None
     ) -> None:
         cmd = " ".join(args)
         if not cmd:
-            await say(f"Usage: `{self._p} run <shell command>`")
+            await self._reply(client, channel, f"Usage: `{self._p} run <shell command>`", thread_ts)
             return
         needs_confirm = (
             self._confirm_destructive
@@ -383,27 +516,27 @@ class SlackBot:
             )
             self._pending_cmds[(channel, resp["ts"])] = cmd
         else:
-            await say("⏳ Running…")
+            await self._reply(client, channel, "⏳ Running…", thread_ts)
             result = await executor.run_shell(
                 cmd, self._settings.bot.max_output_chars
             )
-            await say(f"```\n{result}\n```")
+            await self._reply(client, channel, f"```\n{result}\n```", thread_ts)
 
     async def _cmd_sync(
-        self, args: list[str], say, client, channel: str
+        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None
     ) -> None:
-        await say("⏳ Pulling latest changes…")
+        await self._reply(client, channel, "⏳ Pulling latest changes…", thread_ts)
         result = await repo.pull()
-        await say(f"✅ Synced\n{result}")
+        await self._reply(client, channel, f"✅ Synced\n{result}", thread_ts)
 
     async def _cmd_git(
-        self, args: list[str], say, client, channel: str
+        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None
     ) -> None:
         result = await repo.status()
-        await say(f"```\n{result}\n```")
+        await self._reply(client, channel, f"```\n{result}\n```", thread_ts)
 
     async def _cmd_diff(
-        self, args: list[str], say, client, channel: str
+        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None
     ) -> None:
         arg = args[0] if args else ""
         if not arg:
@@ -416,16 +549,20 @@ class SlackBot:
             f"git diff {ref} --stat && echo '---' && git diff {ref}",
             self._settings.bot.max_output_chars,
         )
-        await say(f"```\n{result or '(no changes)'}\n```")
+        await self._reply(client, channel, f"```\n{result or '(no changes)'}\n```", thread_ts)
 
     async def _cmd_log(
-        self, args: list[str], say, client, channel: str
+        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None
     ) -> None:
         try:
             n = int(args[0]) if args else 20
             n = max(1, min(n, 200))
         except ValueError:
-            await say(f"Usage: `{self._p} log [lines]` — e.g. `{self._p} log 50`")
+            await self._reply(
+                client, channel,
+                f"Usage: `{self._p} log [lines]` — e.g. `{self._p} log 50`",
+                thread_ts,
+            )
             return
         result = await executor.run_shell(
             (
@@ -435,33 +572,35 @@ class SlackBot:
             ),
             self._settings.bot.max_output_chars,
         )
-        await say(f"```\n{result}\n```")
+        await self._reply(client, channel, f"```\n{result}\n```", thread_ts)
 
     async def _cmd_status(
-        self, args: list[str], say, client, channel: str
+        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None
     ) -> None:
         if self._active_ai:
             lines = ["🔄 AI is currently processing:\n"]
             for prompt, ts in self._active_ai.items():
                 elapsed = int(time.time() - ts)
                 lines.append(f"  • {prompt[:60]}… ({elapsed}s ago)")
-            await say("\n".join(lines))
+            await self._reply(client, channel, "\n".join(lines), thread_ts)
         else:
-            await say("✅ AI is idle — ready for your next message.")
+            await self._reply(client, channel, "✅ AI is idle — ready for your next message.", thread_ts)
 
     async def _cmd_confirm(
-        self, args: list[str], say, client, channel: str
+        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None
     ) -> None:
         arg = (args[0].lower() if args else "").strip()
         if arg == "off":
             self._confirm_destructive = False
-            await say(
+            await self._reply(
+                client, channel,
                 "⚡ Confirmation prompts *disabled* for this session.\n"
-                "Destructive commands will run immediately."
+                "Destructive commands will run immediately.",
+                thread_ts,
             )
         elif arg == "on":
             self._confirm_destructive = True
-            await say("🛡 Confirmation prompts *enabled* for this session.")
+            await self._reply(client, channel, "🛡 Confirmation prompts *enabled* for this session.", thread_ts)
         else:
             state = "enabled 🛡" if self._confirm_destructive else "disabled ⚡"
             source = (
@@ -475,32 +614,32 @@ class SlackBot:
                 if self._settings.bot.skip_confirm_keywords
                 else ""
             )
-            await say(f"Confirmation prompts: *{state}* ({source}){skipped}")
+            await self._reply(client, channel, f"Confirmation prompts: *{state}* ({source}){skipped}", thread_ts)
 
     async def _cmd_clear(
-        self, args: list[str], say, client, channel: str
+        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None
     ) -> None:
         if self._settings.bot.history_enabled:
             await __import__("src.history", fromlist=["clear_history"]).clear_history(
                 channel
             )
         self._backend.clear_history()
-        await say("🗑 Conversation history cleared.")
+        await self._reply(client, channel, "🗑 Conversation history cleared.", thread_ts)
 
     async def _cmd_restart(
-        self, args: list[str], say, client, channel: str
+        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None
     ) -> None:
-        await say("🔄 Restarting AI backend…")
+        await self._reply(client, channel, "🔄 Restarting AI backend…", thread_ts)
         try:
             self._backend.close()
             self._backend = ai_factory.create_backend(self._settings.ai)
-            await say(f"✅ AI backend restarted ({self._settings.ai.ai_cli})")
+            await self._reply(client, channel, f"✅ AI backend restarted ({self._settings.ai.ai_cli})", thread_ts)
         except Exception as exc:
             logger.exception("Backend restart failed")
-            await say(f"⚠️ Restart failed: {exc}")
+            await self._reply(client, channel, f"⚠️ Restart failed: {exc}", thread_ts)
 
     async def _cmd_help(
-        self, args: list[str], say, client, channel: str
+        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None
     ) -> None:
         p = self._p
         text = (
@@ -523,10 +662,10 @@ class SlackBot:
             f"Upload an audio file to transcribe and forward to the AI.\n"
             f"Requires `WHISPER_PROVIDER=openai`."
         )
-        await say(text)
+        await self._reply(client, channel, text, thread_ts)
 
     async def _cmd_info(
-        self, args: list[str], say, client, channel: str
+        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None
     ) -> None:
         uptime_s = int(time.time() - self._start_time)
         h, remainder = divmod(uptime_s, 3600)
@@ -552,7 +691,7 @@ class SlackBot:
             f"🛡 Confirmations: `{confirm_state}`\n"
             f"🎙️ Voice: `{voice_state}`"
         )
-        await say(text)
+        await self._reply(client, channel, text, thread_ts)
 
     # ── Block Kit action handlers ─────────────────────────────────────────
 
@@ -588,12 +727,13 @@ class SlackBot:
     # ── Voice/audio file handling ─────────────────────────────────────────
 
     async def _handle_files(
-        self, event: dict, say, client, channel: str
+        self, event: dict, say, client, channel: str, *, thread_ts: str | None = None
     ) -> None:
         if self._transcriber is None:
-            await say(
-                "🎙️ Voice messages are disabled."
-                " Set WHISPER_PROVIDER=openai to enable."
+            await self._reply(
+                client, channel,
+                "🎙️ Voice messages are disabled. Set WHISPER_PROVIDER=openai to enable.",
+                thread_ts,
             )
             return
 
@@ -610,7 +750,7 @@ class SlackBot:
         if audio_file is None:
             return
 
-        resp = await say("🎙️ Transcribing…")
+        resp = await self._reply(client, channel, "🎙️ Transcribing…", thread_ts)
         ts = resp["ts"]
         try:
             url = audio_file.get("url_private") or audio_file.get("url_private_download")
@@ -630,7 +770,7 @@ class SlackBot:
             return
 
         await self._edit(client, channel, ts, f"🎙️ I heard: _{text}_")
-        await self._run_ai_pipeline(say, client, text, channel)
+        await self._run_ai_pipeline(say, client, text, channel, thread_ts=thread_ts)
 
     # ── Startup ───────────────────────────────────────────────────────────
 
@@ -702,6 +842,14 @@ class SlackBot:
         lines.append(
             "Formatting (Slack mrkdwn): *bold* (NOT **bold**), _italic_, "
             "`inline code`, ```code blocks```, >blockquote, - bullet list"
+        )
+        lines.append(
+            "\nDelegation protocol (Slack): To request action from a team member, append a "
+            "DELEGATE block at the END of your response:\n"
+            "  [DELEGATE: <prefix> <full message to send>]\n"
+            "The bot will strip the block from your displayed response and post it as a new "
+            "channel message so the target agent can pick it up.\n"
+            "Example: [DELEGATE: sec Please review auth.py for SQL injection vulnerabilities.]"
         )
         self._team_context = "\n".join(lines)
         logger.info("Team context: %s", self._team_context.replace("\n", " | "))
