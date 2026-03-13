@@ -308,6 +308,61 @@ Expected bump: `0.8.x` → `0.9.0`
 
 ---
 
+## Security Considerations
+
+### 🔴 Pre-existing bug: Slack stores unredacted responses
+
+In `src/bot.py` (Telegram), line 216 redacts `response` in-place before line 220 stores it:
+```python
+response = self._redactor.redact(response)  # line 216
+await history.add_exchange(chat_id, text, response)  # line 220 — redacted ✅
+```
+
+In `src/platform/slack.py`, `_reply()` (line 163) redacts for *display* only — it does not mutate the `response` variable. Line 357 then stores the **unredacted** response:
+```python
+await self._reply(client, channel, response, thread_ts)  # redacts for display only
+await common.save_to_history(channel, text, response, self._settings)  # line 357 — UNREDACTED ❌
+```
+
+**This must be fixed in the implementing PR**: either redact `response` in-place before storage (matching the Telegram pattern), or have `save_to_history()` accept and apply a `SecretRedactor`.
+
+### Redaction ordering contract
+
+The ABC's `add_exchange()` docstring must state: *"Callers MUST redact text before calling this method. The storage layer does not perform redaction."*
+
+Rationale: pushing redaction into the ABC would couple storage to `SecretRedactor`, violating separation of concerns. But the contract must be explicit so future callers don't repeat the Slack bug.
+
+### Threat model — volume access
+
+| Threat | Current | After ABC |
+|--------|---------|-----------|
+| Docker volume access (host compromise, shared volume, backup leak) | `history.db` is plaintext SQLite — full conversation history readable by anyone with file access | Unchanged with `SQLiteStorage` default. Mitigated by `EncryptedSQLiteStorage` adapter (see below). |
+| Pre-redaction data at rest | Slack path stores raw AI responses including secrets the redactor would have scrubbed from output | Fixed by redaction ordering fix above |
+| Retention compliance (GDPR Art. 17, right to erasure) | `clear_history()` deletes rows but SQLite doesn't zero freed pages — data recoverable with forensic tools | Mitigated by `VACUUM` after delete, or `ZeroRetentionStorage` adapter |
+| Backup exfiltration | Volume backups contain full plaintext history | Mitigated by encryption-at-rest adapters |
+
+### Recommended future adapters (security-motivated)
+
+These should be documented as future extension points in the ABC design:
+
+1. *`EncryptedSQLiteStorage`* — Uses SQLCipher (`pysqlcipher3`) for AES-256-CBC encryption at rest. Same file-local model as `SQLiteStorage` but unreadable without the key. Simplest upgrade for single-replica deployments.
+
+2. *`ZeroRetentionStorage`* — In-memory only (`collections.deque` capped at `HISTORY_LIMIT`). History exists for context injection during the session but is never persisted to disk. For compliance-sensitive deployments. Set `history_turns > 0` for runtime context, but nothing survives a container restart.
+
+3. *`KMSWrappedStorage`* — Wraps any persistent adapter with envelope encryption. Data encryption key (DEK) encrypted by a KMS master key (AWS KMS, GCP Cloud KMS, Azure Key Vault). DEK rotated per chat_id or per session.
+
+### KMS key management recommendations
+
+If a KMS adapter is implemented:
+
+- **Never store the master key in env vars or config** — use IAM-based KMS access (instance profiles, workload identity).
+- **Envelope encryption** — generate a per-session DEK, encrypt it with the KMS master key, store the encrypted DEK alongside the ciphertext. Decrypt at read time.
+- **Key rotation** — support re-encrypting existing data when the master key is rotated. The ABC should expose an optional `async def rotate_key(self) -> None` method (default no-op).
+- **Audit logging** — KMS calls should be logged (most cloud KMS providers do this automatically via CloudTrail / Cloud Audit Logs).
+- **Minimum key size** — AES-256 for symmetric, RSA-2048+ for asymmetric wrapping.
+
+---
+
 ## Edge Cases and Open Questions
 
 1. **Exception swallowing** — Current module-level functions swallow all exceptions. `SQLiteStorage` must preserve this behaviour to avoid breaking the non-streaming pipeline when the DB is temporarily unavailable.
@@ -315,6 +370,7 @@ Expected bump: `0.8.x` → `0.9.0`
 3. **`gate restart` interaction** — If `SQLiteStorage` holds no persistent connection (per-call pattern), `gate restart` requires no extra cleanup.
 4. **`history_enabled=False`** — Callers must still skip `storage.get_history()` and `storage.add_exchange()` when this flag is `False`. The ABC does not enforce this — the caller guard must remain.
 5. **Shim deprecation timeline** — The module-level shim functions (Step 1) can be removed as soon as all callers are updated in the same PR. Do not leave shims beyond the implementing PR.
+6. **SQLite VACUUM after clear** — `clear()` should run `VACUUM` to zero freed pages, preventing forensic recovery of deleted history. This is a performance trade-off; document it as optional but recommended.
 
 ---
 

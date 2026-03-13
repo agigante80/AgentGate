@@ -354,6 +354,7 @@ class SlackBot:
                     except Exception:
                         logger.debug("Could not delete thinking placeholder (ts=%s)", ts)
                 await self._post_delegations(client, channel, delegations, thread_ts=thread_ts)
+            response = self._redactor.redact(response)
             await common.save_to_history(channel, text, response, self._settings)
         except Exception as exc:
             logger.exception("AI backend error")
