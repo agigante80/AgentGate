@@ -50,6 +50,7 @@ def _make_settings(
     bot.thinking_slow_threshold_secs = 15
     bot.thinking_update_secs = 30
     bot.ai_timeout_warn_secs = 60
+    bot.allow_secrets = False
     slack = MagicMock(spec=SlackConfig)
     slack.slack_bot_token = slack_bot_token
     slack.slack_app_token = slack_app_token
@@ -61,6 +62,7 @@ def _make_settings(
     gh = MagicMock(spec=GitHubConfig)
     gh.github_repo = "owner/repo"
     gh.branch = "main"
+    gh.github_repo_token = ""
     ai_cfg = MagicMock(spec=AIConfig)
     ai_cfg.ai_cli = "api"
     ai_cfg.ai_api_key = "sk-test"
@@ -68,7 +70,9 @@ def _make_settings(
     ai_cfg.ai_provider = ""
     voice = MagicMock(spec=VoiceConfig)
     voice.whisper_provider = "none"
+    voice.whisper_api_key = ""
     tg = MagicMock(spec=TelegramConfig)
+    tg.bot_token = ""
     settings = MagicMock(spec=Settings)
     settings.platform = "slack"
     settings.bot = bot
@@ -235,6 +239,37 @@ class TestCommandRouting:
         event["bot_id"] = "BTRUSTED"
         await bot._on_message(event, say, client)
         backend.send.assert_not_awaited()
+
+    async def test_trusted_agent_ai_delegation_forwarded_to_ai(self):
+        """Trusted bot sends 'gate Please review...' — unknown sub → forwarded to AI, not 'Unknown command'."""
+        backend = _make_backend(response="AI response")
+        bot = _make_bot(backend=backend, settings=_make_settings(trusted_agent_bot_ids=["BTRUSTED"]))
+        say = _make_say()
+        client = _make_client()
+        # Simulate GateCode delegating to this bot: "gate Please review the docs..."
+        event = _make_event(text="gate Please review the docs for security issues")
+        event["bot_id"] = "BTRUSTED"
+        await bot._on_message(event, say, client)
+        # Should forward to AI, not reply with "Unknown command"
+        backend.send.assert_awaited_once()
+        unknown_cmd_replies = [
+            str(call) for call in client.chat_postMessage.call_args_list
+            if "Unknown command" in str(call)
+        ]
+        assert unknown_cmd_replies == [], "Should not reply 'Unknown command' for AI-addressed delegations"
+
+    async def test_trusted_agent_pull_delegation_forwarded_to_ai(self):
+        """Regression: 'gate Pull latest develop...' from trusted bot must not return Unknown command: pull."""
+        backend = _make_backend(response="Pulled latest develop.")
+        bot = _make_bot(backend=backend, settings=_make_settings(trusted_agent_bot_ids=["BTRUSTED"]))
+        say = _make_say()
+        client = _make_client()
+        event = _make_event(text="gate Pull latest `develop` and review for security")
+        event["bot_id"] = "BTRUSTED"
+        await bot._on_message(event, say, client)
+        backend.send.assert_awaited_once()
+        for call in client.chat_postMessage.call_args_list:
+            assert "Unknown command" not in str(call)
 
     async def test_untrusted_bot_messages_still_ignored(self):
         backend = _make_backend(response="AI response")
@@ -753,3 +788,31 @@ class TestThreadReplies:
         assert delegation_calls, "Delegation message must be posted"
         assert delegation_calls[0][1].get("thread_ts") == "T600", \
             "Delegation must carry the same thread_ts"
+
+
+class TestCmdDiffSanitization:
+    """_cmd_diff must reject malicious git refs before calling run_shell."""
+
+    async def test_malicious_ref_rejected(self):
+        bot = _make_bot(_make_settings())
+        say = _make_say()
+        client = _make_client()
+        event = _make_event(text="gate diff ; rm -rf /")
+        with patch("src.executor.run_shell", AsyncMock(return_value="")) as mock_run:
+            await bot._on_message(event, say, client)
+        mock_run.assert_not_called()
+        posted_texts = [
+            c[1].get("text", "") for c in client.chat_postMessage.call_args_list
+        ]
+        assert any("Invalid git ref" in t for t in posted_texts)
+
+    async def test_valid_ref_calls_run_shell(self):
+        bot = _make_bot(_make_settings())
+        say = _make_say()
+        client = _make_client()
+        event = _make_event(text="gate diff main")
+        with patch("src.executor.run_shell", AsyncMock(return_value="some diff")) as mock_run:
+            await bot._on_message(event, say, client)
+        mock_run.assert_called_once()
+        call_cmd = mock_run.call_args[0][0]
+        assert "main" in call_cmd

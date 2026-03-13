@@ -162,3 +162,124 @@ class TestStreamToTelegramTicker:
 
         assert result == ""
         assert any("cancelled" in t.lower() or "cancelled" in t.lower() for t in edit_texts)
+
+
+# ── sanitize_git_ref via cmd_diff ────────────────────────────────────────────
+
+class TestCmdDiffSanitization:
+    """cmd_diff must reject malicious git refs before calling run_shell."""
+
+    async def test_malicious_ref_rejected(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from src.bot import build_app
+        from src.config import Settings, TelegramConfig, BotConfig, AIConfig, GitHubConfig, VoiceConfig, SlackConfig
+
+        settings = MagicMock(spec=Settings)
+        tg = MagicMock(spec=TelegramConfig)
+        tg.chat_id = "99999"
+        tg.allowed_users = []
+        bot_cfg = MagicMock(spec=BotConfig)
+        bot_cfg.bot_cmd_prefix = "gate"
+        bot_cfg.max_output_chars = 3000
+        bot_cfg.stream_responses = False
+        bot_cfg.history_enabled = False
+        bot_cfg.stream_throttle_secs = 1.0
+        bot_cfg.confirm_destructive = False
+        bot_cfg.skip_confirm_keywords = []
+        bot_cfg.prefix_only = False
+        bot_cfg.system_prompt = ""
+        bot_cfg.ai_timeout_secs = 0
+        bot_cfg.thinking_slow_threshold_secs = 15
+        bot_cfg.thinking_update_secs = 30
+        bot_cfg.ai_timeout_warn_secs = 60
+        bot_cfg.allow_secrets = False
+        settings.telegram = tg
+        settings.bot = bot_cfg
+        settings.platform = "telegram"
+        settings.slack = MagicMock(spec=SlackConfig)
+        settings.slack.slack_bot_token = ""
+        settings.slack.slack_app_token = ""
+        settings.ai = MagicMock(spec=AIConfig)
+        settings.ai.ai_cli = "api"
+        settings.ai.ai_api_key = "sk-test"
+        settings.github = MagicMock(spec=GitHubConfig)
+        settings.github.github_repo_token = ""
+        settings.voice = MagicMock(spec=VoiceConfig)
+        settings.voice.whisper_provider = "none"
+        settings.voice.whisper_api_key = ""
+
+        from src.bot import _BotHandlers
+        backend = MagicMock()
+        backend.is_stateful = False
+        handlers = _BotHandlers(settings, backend, start_time=0.0)
+
+        update = MagicMock()
+        update.effective_chat.id = 99999
+        update.effective_user = None
+        reply_texts = []
+        update.effective_message.reply_text = AsyncMock(side_effect=lambda t, **kw: reply_texts.append(t))
+        ctx = MagicMock()
+        ctx.args = ["; rm -rf /"]
+
+        with patch("src.executor.run_shell", AsyncMock(return_value="")) as mock_run:
+            await handlers.cmd_diff(update, ctx)
+
+        mock_run.assert_not_called()
+        assert any("Invalid git ref" in t for t in reply_texts)
+
+    async def test_valid_ref_calls_run_shell(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from src.config import Settings, TelegramConfig, BotConfig, AIConfig, GitHubConfig, VoiceConfig, SlackConfig
+        from src.bot import _BotHandlers
+
+        settings = MagicMock(spec=Settings)
+        tg = MagicMock(spec=TelegramConfig)
+        tg.chat_id = "99999"
+        tg.allowed_users = []
+        bot_cfg = MagicMock(spec=BotConfig)
+        bot_cfg.bot_cmd_prefix = "gate"
+        bot_cfg.max_output_chars = 3000
+        bot_cfg.stream_responses = False
+        bot_cfg.history_enabled = False
+        bot_cfg.stream_throttle_secs = 1.0
+        bot_cfg.confirm_destructive = False
+        bot_cfg.skip_confirm_keywords = []
+        bot_cfg.prefix_only = False
+        bot_cfg.system_prompt = ""
+        bot_cfg.ai_timeout_secs = 0
+        bot_cfg.thinking_slow_threshold_secs = 15
+        bot_cfg.thinking_update_secs = 30
+        bot_cfg.ai_timeout_warn_secs = 60
+        bot_cfg.allow_secrets = False
+        settings.telegram = tg
+        settings.bot = bot_cfg
+        settings.platform = "telegram"
+        settings.slack = MagicMock(spec=SlackConfig)
+        settings.slack.slack_bot_token = ""
+        settings.slack.slack_app_token = ""
+        settings.ai = MagicMock(spec=AIConfig)
+        settings.ai.ai_cli = "api"
+        settings.ai.ai_api_key = "sk-test"
+        settings.github = MagicMock(spec=GitHubConfig)
+        settings.github.github_repo_token = ""
+        settings.voice = MagicMock(spec=VoiceConfig)
+        settings.voice.whisper_provider = "none"
+        settings.voice.whisper_api_key = ""
+
+        backend = MagicMock()
+        backend.is_stateful = False
+        handlers = _BotHandlers(settings, backend, start_time=0.0)
+
+        update = MagicMock()
+        update.effective_chat.id = 99999
+        update.effective_user = None
+        update.effective_message.reply_text = AsyncMock(return_value=None)
+        ctx = MagicMock()
+        ctx.args = ["main"]
+
+        with patch("src.executor.run_shell", AsyncMock(return_value="some diff")) as mock_run:
+            await handlers.cmd_diff(update, ctx)
+
+        mock_run.assert_called_once()
+        call_cmd = mock_run.call_args[0][0]
+        assert "'main'" in call_cmd or "main" in call_cmd

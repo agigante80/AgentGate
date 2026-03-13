@@ -11,7 +11,8 @@ from src.config import Settings, TelegramConfig, SlackConfig, BotConfig, AIConfi
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 def _make_settings(platform="telegram", bot_token="abc:token", chat_id="99999",
-                   slack_bot_token="xoxb-test", slack_app_token="xapp-test"):
+                   slack_bot_token="xoxb-test", slack_app_token="xapp-test",
+                   slack_channel_id="C12345TEST"):
     s = MagicMock(spec=Settings)
     s.platform = platform
     tg = MagicMock(spec=TelegramConfig)
@@ -20,6 +21,7 @@ def _make_settings(platform="telegram", bot_token="abc:token", chat_id="99999",
     slack = MagicMock(spec=SlackConfig)
     slack.slack_bot_token = slack_bot_token
     slack.slack_app_token = slack_app_token
+    slack.slack_channel_id = slack_channel_id
     bot = MagicMock(spec=BotConfig)
     bot.bot_cmd_prefix = "gate"
     ai = MagicMock(spec=AIConfig)
@@ -93,6 +95,11 @@ class TestValidateConfig:
     def test_slack_valid_no_exception(self):
         s = _make_settings(platform="slack", slack_bot_token="xoxb-test", slack_app_token="xapp-test")
         _validate_config(s)  # must not raise
+
+    def test_slack_missing_channel_id_raises(self):
+        s = _make_settings(platform="slack", slack_channel_id="")
+        with pytest.raises(ValueError, match="SLACK_CHANNEL_ID"):
+            _validate_config(s)
 
 
 # ── main() error path ─────────────────────────────────────────────────────────

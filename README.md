@@ -179,6 +179,7 @@ Copy `.env.example` — it documents every variable with examples.
 | `SLACK_MAX_DELEGATIONS` | `3` | Max number of delegation messages posted per AI response (defence-in-depth). |
 | `SLACK_DELEGATION_BLOCKLIST` | `run,sync,git,diff,log,restart,clear,confirm` | Comma-separated list of dangerous sub-commands that are blocked when delegating. |
 | `AI_TIMEOUT_SECS` | `720` | Hard timeout for any AI backend in seconds (0 = no timeout) |
+| `ALLOW_SECRETS` | `false` | When `false` (default), secrets are redacted from outgoing messages and git commit messages. Set `true` to allow secrets (dangerous). |
 | `THINKING_SLOW_THRESHOLD_SECS` | `15` | Seconds of silence before first "Still thinking…" update |
 | `THINKING_UPDATE_SECS` | `30` | Seconds between subsequent elapsed-time updates |
 | `AI_TIMEOUT_WARN_SECS` | `60` | Seconds before hard timeout to include a cancellation warning |
