@@ -84,22 +84,53 @@ Leave it empty (default) to rely entirely on the skills files.
 
 You can configure agents to delegate work to each other. For example, after `@GateCode` writes a fix, it can automatically ask `@GateSec` to review it.
 
-**How it works:**
+### Delegation sentinel protocol (v0.10+)
 
-1. You add each agent's `bot_id` to the other agents' `TRUSTED_AGENT_BOT_IDS` list
-2. A trusted agent's message that starts with the receiving bot's prefix is processed as a command
-3. The sending agent's skills file instructs the AI when and how to format a delegation request
+Each agent's AI is automatically instructed (via the team context injected into every prompt) to use a structured delegation sentinel:
 
-**Finding a bot's `bot_id`**: You don't need to. Use the bot's **display name and prefix** (e.g. `"GateCode:dev"`) directly in `TRUSTED_AGENT_BOT_IDS` — AgentGate resolves the name to the internal `bot_id` automatically at startup via the Slack API. The `:prefix` suffix tells each agent how to address its teammates in the auto-generated team context. This works even when each agent runs in its own independent container, since `users.list` is workspace-scoped.
+```
+[DELEGATE: <prefix> <full message to send>]
+```
+
+The bot:
+1. Strips the sentinel from the displayed response (it never appears in chat)
+2. Posts `<prefix> <message>` as a new standalone channel message
+3. The target agent's bot sees the message, recognises its prefix, and routes it to its AI pipeline
+
+**Example end-to-end flow:**
+
+```
+Human: dev analyse the auth module for security issues
+
+GateCode AI responds (displayed):
+  "I've reviewed auth.py. The token generation looks weak."
+
+Behind the scenes, GateCode also emitted:
+  [DELEGATE: sec Please review auth.py — generate_token() uses random.random() instead of secrets.token_bytes()]
+
+GateSec sees: "sec Please review auth.py — generate_token() uses …"
+GateSec AI responds (new message):
+  "⚠️ Confirmed: random.random() is not cryptographically secure. Use secrets.token_bytes(32)."
+```
+
+**No skills file changes needed** — delegation instructions are injected automatically via `_build_team_context()`. Both agents must have each other in `TRUSTED_AGENT_BOT_IDS`.
+
+**Security guardrails (built-in):**
+- Delegations starting with dangerous sub-commands (`run`, `sync`, `git`, `diff`, `log`, `restart`, `clear`, `confirm`) are *silently blocked* and logged — this prevents the AI from triggering arbitrary shell execution on a peer agent.
+- At most 3 delegation blocks are processed per AI response (flood prevention).
+
+**Loop prevention**: Trusted agent messages are *never* forwarded to the AI pipeline — they only trigger named prefix commands via `_dispatch()`. Delegation chains are at most one hop: human → agent A → agent B. Agent B cannot further delegate back to A.
+
+**How the routing works:**
+
+1. Each agent's `TRUSTED_AGENT_BOT_IDS` lists its teammates by display name and prefix (e.g. `"GateCode:dev"`)
+2. AgentGate resolves each name to an internal Slack `bot_id` at startup via `users.list`
+3. When a message arrives from a trusted bot, it is dispatched via `_dispatch()` — only known prefix sub-commands are accepted
+4. The AI pipeline is **never** reached for trusted bot messages
+
+**Finding a bot's `bot_id`**: You don't need to. Use the bot's **display name and prefix** (e.g. `"GateCode:dev"`) directly in `TRUSTED_AGENT_BOT_IDS` — AgentGate resolves the name to the internal `bot_id` automatically at startup via the Slack API. The `:prefix` suffix tells each agent how to address its teammates in the auto-generated team context.
 
 **Format**: `"DisplayName:prefix"` (e.g. `"GateSec:sec"`). The `:prefix` part is optional but strongly recommended — without it the team context won't include how to address that agent.
-
-**Skills file delegation example** (from `skills/dev-agent.md`):
-> "When your response involves security-sensitive changes, append at the end: `sec review: <description>`"
-
-This results in @GateCode posting `sec review: auth bypass fix in src/bot.py line 42` in the channel — which @GateSec picks up and processes.
-
-**Loop prevention**: Trusted agent messages can ONLY trigger named prefix commands (`sec review`, `sec scan`, etc.). They are never forwarded to the AI pipeline, so there are no runaway chains.
 
 ---
 

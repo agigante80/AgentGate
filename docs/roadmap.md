@@ -24,7 +24,7 @@ Items ordered by priority. Each item links to a feature doc with full design det
 | # | Item | Detail |
 |---|------|--------|
 | 2.1 | ✅ **[HIGH]** Post final AI response as new message so other agents can react to it (`SLACK_DELETE_THINKING`) | [→ features/slack-final-response-new-message.md](features/slack-final-response-new-message.md) |
-| 2.2 | **[HIGH]** Agent-to-agent delegation via `[DELEGATE: prefix message]` sentinel blocks | [→ features/slack-agent-delegation.md](features/slack-agent-delegation.md) |
+| 2.2 | ✅ **[HIGH]** Agent-to-agent delegation via `[DELEGATE: prefix message]` sentinel blocks | [→ features/slack-agent-delegation.md](features/slack-agent-delegation.md) |
 | 2.3 | **[HIGH]** Thread reply mode — opt-in per-agent via `SLACK_THREAD_REPLIES=true` | [→ features/slack-thread-replies.md](features/slack-thread-replies.md) |
 | 2.4 | `/gate schedule` — run shell commands or AI prompts on a recurring schedule | [→ features/schedule.md](features/schedule.md) |
 | 2.5 | Gemini CLI backend — `AI_CLI=gemini` backed by Google's official Gemini CLI | [→ features/gemini-cli-backend.md](features/gemini-cli-backend.md) |

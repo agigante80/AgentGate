@@ -22,6 +22,7 @@ Voice/audio file uploads are transcribed and forwarded to the AI.
 """
 import asyncio
 import logging
+import re
 import time
 from contextlib import suppress
 
@@ -37,6 +38,34 @@ logger = logging.getLogger(__name__)
 
 # Sent as a placeholder while streaming — updated chunk by chunk
 _THINKING = "🤖 Thinking…"
+
+# ── Agent-to-agent delegation sentinel ────────────────────────────────────────
+
+_DELEGATE_RE = re.compile(r"\[DELEGATE:\s*(\w+)\s+(.*?)\]", re.DOTALL)
+
+# Sub-commands that delegated messages must NOT start with (RCE prevention)
+_BLOCKED_DELEGATION_SUBS = {
+    "run", "sync", "git", "diff", "log", "restart", "clear", "confirm",
+}
+
+# Maximum number of delegation blocks processed per AI response (DoS prevention)
+_MAX_DELEGATIONS = 3
+
+
+def _extract_delegations(text: str) -> tuple[str, list[tuple[str, str]]]:
+    """Strip [DELEGATE: prefix message] sentinels from *text*.
+
+    Returns ``(cleaned_text, [(prefix, message), ...])``.  Malformed or
+    unmatched brackets are left in the text unchanged.
+    """
+    delegations: list[tuple[str, str]] = []
+
+    def _replace(m: re.Match) -> str:
+        delegations.append((m.group(1).lower(), m.group(2).strip()))
+        return ""
+
+    cleaned = _DELEGATE_RE.sub(_replace, text).strip()
+    return cleaned, delegations
 
 
 def _prefix(settings: Settings) -> str:
@@ -179,13 +208,54 @@ class SlackBot:
             if len(accumulated) > max_chars
             else accumulated
         )
+        final, delegations = _extract_delegations(final)
         await client.chat_postMessage(channel=channel, text=final or "_(empty response)_")
         if self._settings.slack.slack_delete_thinking:
             try:
                 await client.chat_delete(channel=channel, ts=ts)
             except Exception:
                 logger.debug("Could not delete thinking placeholder (ts=%s)", ts)
+        await self._post_delegations(client, channel, delegations)
         return final
+
+    async def _post_delegations(
+        self,
+        client,
+        channel: str,
+        delegations: list[tuple[str, str]],
+    ) -> None:
+        """Post delegation messages extracted from an AI response.
+
+        Applies a blocklist (prevents RCE via ``dev run …``) and a cap of
+        ``_MAX_DELEGATIONS`` messages per response (prevents flood).
+        """
+        if not delegations:
+            return
+        if len(delegations) > _MAX_DELEGATIONS:
+            logger.warning(
+                "Delegation cap exceeded: %d found, only posting %d",
+                len(delegations),
+                _MAX_DELEGATIONS,
+            )
+            delegations = delegations[:_MAX_DELEGATIONS]
+        for prefix, msg in delegations:
+            first_word = msg.split()[0].lower() if msg.split() else ""
+            if first_word in _BLOCKED_DELEGATION_SUBS:
+                logger.warning(
+                    "Blocked delegation with dangerous sub-command: prefix=%s sub=%s",
+                    prefix,
+                    first_word,
+                )
+                continue
+            try:
+                await client.chat_postMessage(
+                    channel=channel, text=f"{prefix} {msg}"
+                )
+                logger.info(
+                    "Delegation posted: %s → %s", self._bot_display_name, prefix
+                )
+            except Exception:
+                logger.warning("Failed to post delegation to prefix=%s", prefix)
 
     async def _run_ai_pipeline(
         self, say, client, text: str, channel: str
@@ -245,6 +315,7 @@ class SlackBot:
                 response = await executor.summarize_if_long(
                     response, self._settings.bot.max_output_chars, self._backend
                 )
+                response, delegations = _extract_delegations(response)
                 await client.chat_postMessage(
                     channel=channel, text=response or "_(empty response)_"
                 )
@@ -253,6 +324,7 @@ class SlackBot:
                         await client.chat_delete(channel=channel, ts=ts)
                     except Exception:
                         logger.debug("Could not delete thinking placeholder (ts=%s)", ts)
+                await self._post_delegations(client, channel, delegations)
             await common.save_to_history(channel, text, response, self._settings)
         except Exception as exc:
             logger.exception("AI backend error")
@@ -722,6 +794,14 @@ class SlackBot:
         lines.append(
             "Formatting (Slack mrkdwn): *bold* (NOT **bold**), _italic_, "
             "`inline code`, ```code blocks```, >blockquote, - bullet list"
+        )
+        lines.append(
+            "\nDelegation protocol (Slack): To request action from a team member, append a "
+            "DELEGATE block at the END of your response:\n"
+            "  [DELEGATE: <prefix> <full message to send>]\n"
+            "The bot will strip the block from your displayed response and post it as a new "
+            "channel message so the target agent can pick it up.\n"
+            "Example: [DELEGATE: sec Please review auth.py for SQL injection vulnerabilities.]"
         )
         self._team_context = "\n".join(lines)
         logger.info("Team context: %s", self._team_context.replace("\n", " | "))

@@ -509,3 +509,130 @@ class TestStreaming:
         client.chat_postMessage.assert_awaited()
         call_kwargs = client.chat_postMessage.call_args[1]
         assert "non-streamed!" in call_kwargs["text"]
+
+
+# ── Delegation (feature 2.2) ──────────────────────────────────────────────────
+
+class TestDelegation:
+    async def test_delegation_posts_new_message(self):
+        """When AI response contains a sentinel, chat_postMessage is called for the delegation."""
+        response_with_sentinel = (
+            "I reviewed the code.[DELEGATE: sec Please check auth.py for injection.]"
+        )
+        backend = _make_backend(is_stateful=True, response=response_with_sentinel)
+        bot = _make_bot(_make_settings(stream=False), backend=backend)
+        say = _make_say()
+        client = _make_client()
+        with patch("src.platform.common.history.add_exchange", AsyncMock()), \
+             patch("src.platform.common.history.get_history", AsyncMock(return_value=[])), \
+             patch("src.platform.common.history.build_context", return_value=response_with_sentinel), \
+             patch("src.executor.summarize_if_long", AsyncMock(return_value=response_with_sentinel)):
+            await bot._run_ai_pipeline(say, client, "query", "C12345")
+        # Two chat_postMessage calls: main response + delegation
+        assert client.chat_postMessage.await_count == 2
+        texts = [c[1]["text"] for c in client.chat_postMessage.call_args_list]
+        assert any("sec" in t and "auth.py" in t for t in texts)
+
+    async def test_delegation_stripped_from_display(self):
+        """The main response message must NOT contain the sentinel block."""
+        sentinel = "[DELEGATE: sec Check this.]"
+        response_with_sentinel = f"Clean response.{sentinel}"
+        backend = _make_backend(is_stateful=True, response=response_with_sentinel)
+        bot = _make_bot(_make_settings(stream=False), backend=backend)
+        say = _make_say()
+        client = _make_client()
+        with patch("src.platform.common.history.add_exchange", AsyncMock()), \
+             patch("src.platform.common.history.get_history", AsyncMock(return_value=[])), \
+             patch("src.platform.common.history.build_context", return_value=response_with_sentinel), \
+             patch("src.executor.summarize_if_long", AsyncMock(return_value=response_with_sentinel)):
+            await bot._run_ai_pipeline(say, client, "query", "C12345")
+        # First postMessage call is the main response
+        first_call_text = client.chat_postMessage.call_args_list[0][1]["text"]
+        assert "[DELEGATE" not in first_call_text
+        assert "Clean response." in first_call_text
+
+    async def test_delegation_stripped_from_history(self):
+        """save_to_history receives the cleaned text (sentinel removed), not the raw AI output."""
+        sentinel = "[DELEGATE: sec Review this.]"
+        response_with_sentinel = f"Main answer.{sentinel}"
+        backend = _make_backend(is_stateful=True, response=response_with_sentinel)
+        bot = _make_bot(_make_settings(stream=False), backend=backend)
+        say = _make_say()
+        client = _make_client()
+        saved_texts: list[str] = []
+        async def _capture_save(channel, user_text, ai_text, settings):
+            saved_texts.append(ai_text)
+        with patch("src.platform.common.history.add_exchange", AsyncMock()), \
+             patch("src.platform.common.history.get_history", AsyncMock(return_value=[])), \
+             patch("src.platform.common.history.build_context", return_value=response_with_sentinel), \
+             patch("src.executor.summarize_if_long", AsyncMock(return_value=response_with_sentinel)), \
+             patch("src.platform.common.save_to_history", _capture_save):
+            await bot._run_ai_pipeline(say, client, "query", "C12345")
+        assert saved_texts, "save_to_history was not called"
+        assert "[DELEGATE" not in saved_texts[0]
+
+    async def test_delegation_failure_is_silent(self):
+        """If chat_postMessage raises for delegation, the main response is still delivered."""
+        response_with_sentinel = "Answer.[DELEGATE: sec Check this.]"
+        backend = _make_backend(is_stateful=True, response=response_with_sentinel)
+        bot = _make_bot(_make_settings(stream=False), backend=backend)
+        say = _make_say()
+        client = _make_client()
+        call_count = 0
+        async def _sometimes_fail(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:  # second call is the delegation
+                raise Exception("channel not found")
+            return {"ts": "1001.000"}
+        client.chat_postMessage.side_effect = _sometimes_fail
+        with patch("src.platform.common.history.add_exchange", AsyncMock()), \
+             patch("src.platform.common.history.get_history", AsyncMock(return_value=[])), \
+             patch("src.platform.common.history.build_context", return_value=response_with_sentinel), \
+             patch("src.executor.summarize_if_long", AsyncMock(return_value=response_with_sentinel)):
+            await bot._run_ai_pipeline(say, client, "query", "C12345")
+        # Main response was posted (first call)
+        assert call_count >= 1
+
+    async def test_trusted_bot_no_delegation(self):
+        """Messages from trusted bots do not trigger _run_ai_pipeline() (loop prevention)."""
+        bot = _make_bot(_make_settings(trusted_agent_bot_ids=["B_TRUSTED_ID"]))
+        bot._trusted_bot_ids = {"B_TRUSTED_ID"}
+        say = _make_say()
+        client = _make_client()
+        event = {
+            "channel": "C12345",
+            "user": "",
+            "text": "unrecognised command",
+            "bot_id": "B_TRUSTED_ID",
+        }
+        pipeline_called = False
+        original = bot._run_ai_pipeline
+        async def _spy(*args, **kwargs):
+            nonlocal pipeline_called
+            pipeline_called = True
+            return await original(*args, **kwargs)
+        bot._run_ai_pipeline = _spy
+        await bot._on_message(event, say, client)
+        assert not pipeline_called, "_run_ai_pipeline must NOT be called for trusted bot messages"
+
+    async def test_stream_delegation_posted(self):
+        """Streaming path also extracts and posts delegation sentinels."""
+        response_with_sentinel = "Streamed answer.[DELEGATE: docs Update the README.]"
+        backend = _make_backend(is_stateful=True, response=response_with_sentinel)
+
+        async def _fake_stream(prompt):
+            yield response_with_sentinel
+
+        backend.stream = _fake_stream
+        bot = _make_bot(_make_settings(stream=True, stream_throttle=0.0), backend=backend)
+        say = _make_say()
+        client = _make_client()
+        with patch("src.platform.common.history.add_exchange", AsyncMock()), \
+             patch("src.platform.common.history.get_history", AsyncMock(return_value=[])), \
+             patch("src.platform.common.history.build_context", return_value=response_with_sentinel):
+            await bot._run_ai_pipeline(say, client, "query", "C12345")
+        texts = [c[1]["text"] for c in client.chat_postMessage.call_args_list]
+        assert any("docs" in t and "README" in t for t in texts)
+        # Main message must not contain the sentinel
+        assert "[DELEGATE" not in texts[0]
