@@ -104,20 +104,42 @@ The AI is instructed to emit a special sentinel at the **end** of its response:
 The bot uses a regex to detect `[DELEGATE: <prefix> <message>]`, strips the sentinel from the
 displayed response, and posts `<prefix> <message>` as a new standalone message.
 
+Notes on prefixes and normalization:
+- Prefixes are normalized by the runtime: they are lowercased and stripped of `-` and `_` characters. For example, `gate-docs` and `gate_docs` both normalize to `gatedocs`.
+- The sentinel matcher accepts only word characters by default (letters, digits, underscore). If your workspace uses hyphenated prefixes, update the runtime regex (`_DELEGATE_RE`) in `src/platform/slack.py` to accept `-`.
+
+Security guardrails (defaults):
+- Blocked sub-commands: `run`, `sync`, `git`, `diff`, `log`, `restart`, `clear`, `confirm` (see `src/platform/slack.py`)
+- Max delegations per response: 3 (`_MAX_DELEGATIONS = 3`)
+
+Loop prevention guarantee:
+- Delegation chains are at most one hop in v1: human → agent A → agent B. Trusted-bot messages are dispatched via `_dispatch()` only and do not reach the AI pipeline, so agent B cannot further delegate back to A.
+
+Cross-references:
+- `docs/features/slack-final-response-new-message.md` — ensures delegated replies are posted as new messages rather than edits.
+- `docs/features/slack-thread-replies.md` — if `SLACK_THREAD_REPLIES=true`, delegation posts should include `thread_ts` to keep the conversation threaded.
+
 ```python
+# Note: agent prefixes are normalised by the runtime: lowercased and with `-` and `_` removed
+# (see `src/platform/slack.py::_prefix()`). Use the normalised prefix in sentinels.
+
 import re
 
-_DELEGATE_RE = re.compile(r'\[DELEGATE:\s*(\w+)\s+(.*?)\]', re.DOTALL)
+# The regex accepts alphanumerics and underscore (the runtime strips other characters):
+_DELEGATE_RE = re.compile(r'\[DELEGATE:\s*([A-Za-z0-9_]+)\s+(.*?)\]', re.DOTALL)
 
 def extract_delegations(text: str) -> tuple[str, list[tuple[str, str]]]:
     """Return (cleaned_text, [(prefix, message), ...])."""
     delegations = []
     def _replace(m: re.Match) -> str:
+        # store the normalized prefix (lowercased)
         delegations.append((m.group(1).lower(), m.group(2).strip()))
         return ""
     cleaned = _DELEGATE_RE.sub(_replace, text).strip()
     return cleaned, delegations
 ```
+
+If your team uses hyphenated prefixes (e.g. `gate-docs`), note the runtime normalisation removes `-` and `_` when resolving prefixes. To accept hyphens in the sentinel verbatim, change the runtime `_DELEGATE_RE` and `_prefix()` behaviour in `src/platform/slack.py` (advanced change).
 
 **Pros:**
 - Unambiguous: sentinel is always stripped before display.
@@ -338,11 +360,17 @@ if len(all_delegations) > _MAX_DELEGATIONS:
 
 ## Config Variables
 
-No new env vars for v1. The sentinel format is fixed.
+No new env vars are required for v1 — safe defaults are hard-coded in the runtime. Defaults (see `src/platform/slack.py`):
 
-Optional future extension:
+- `_BLOCKED_DELEGATION_SUBS` (blocklist): `run, sync, git, diff, log, restart, clear, confirm`
+- `_MAX_DELEGATIONS`: `3`
+
+Optional future extension (configurable env vars / suggested names):
+
 | Env var | Type | Default | Description |
 |---------|------|---------|-------------|
+| `SLACK_MAX_DELEGATIONS` | `int` | `3` | Max number of delegation messages posted per AI response (defence-in-depth) |
+| `SLACK_DELEGATION_BLOCKLIST` | `csv` | `run,sync,git,diff,log,restart,clear,confirm` | Comma-separated list of sub-commands that must be blocked when delegating. |
 | `SLACK_MAX_DELEGATION_DEPTH` | `int` | `1` | Max hops for agent-to-agent delegation chains. Reserved for future use. |
 
 ---

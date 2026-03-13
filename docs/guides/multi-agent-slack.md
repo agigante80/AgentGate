@@ -4,6 +4,8 @@ This guide shows how to run multiple AgentGate instances as specialised AI agent
 
 See also: docs/features/slack-final-response-new-message.md, docs/features/slack-agent-delegation.md, docs/features/slack-thread-replies.md
 
+Note: SLACK_DELETE_THINKING and SLACK_THREAD_REPLIES are documented in README and .env.example. Delegation sentinel format and guardrails are described in docs/features/slack-agent-delegation.md.
+
 ## What you'll set up
 
 Three agents, one `#agentgate` Slack channel:
@@ -118,6 +120,7 @@ GateSec AI responds (new message):
 **Security guardrails (built-in):**
 - Delegations starting with dangerous sub-commands (`run`, `sync`, `git`, `diff`, `log`, `restart`, `clear`, `confirm`) are *silently blocked* and logged — this prevents the AI from triggering arbitrary shell execution on a peer agent.
 - At most 3 delegation blocks are processed per AI response (flood prevention).
+- Prefixes are normalised by the runtime: they are lowercased and `-`/`_` are removed; use the normalised prefix in sentinels (see `src/platform/slack.py::_prefix()`).
 
 **Loop prevention**: Trusted agent messages are *never* forwarded to the AI pipeline — they only trigger named prefix commands via `_dispatch()`. Delegation chains are at most one hop: human → agent A → agent B. Agent B cannot further delegate back to A.
 
