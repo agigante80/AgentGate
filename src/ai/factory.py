@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 def create_backend(ai: AIConfig) -> AICLIBackend:
     if ai.ai_cli == "copilot":
         from src.ai.copilot import CopilotBackend
-        return CopilotBackend(model=ai.ai_model, opts=ai.ai_cli_opts)
+        return CopilotBackend(model=ai.ai_model, opts=ai.ai_cli_opts, skills_dirs=ai.copilot_skills_dirs)
 
     if ai.ai_cli == "codex":
         from src.ai.codex import CodexBackend

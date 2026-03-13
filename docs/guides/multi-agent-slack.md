@@ -59,9 +59,12 @@ Your team in this Slack workspace:
   - GateSec (prefix: sec) — users address them with: sec <message>
   - GateDocs (prefix: docs) — users address them with: docs <message>
 Repo: agigante80/AgentGate | Branch: develop
+Formatting (Slack mrkdwn): *bold* (NOT **bold**), _italic_, `inline code`, ```code blocks```, >blockquote, - bullet list
 ```
 
 This context is derived automatically from `BOT_CMD_PREFIX`, `TRUSTED_AGENT_BOT_IDS` (including their prefixes), and `GITHUB_REPO`/`BRANCH`. No additional env var is needed.
+
+> **Why team context and not skills files?** Skills files (`COPILOT_SKILLS_DIRS`) are loaded by **both Slack and Telegram** deployments. Platform-specific instructions (like Slack mrkdwn syntax) must go in the team context, which is Slack-only code. This keeps skills files platform-neutral and reusable.
 
 ### Optional `SYSTEM_PROMPT`
 

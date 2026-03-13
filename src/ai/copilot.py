@@ -8,12 +8,14 @@ logger = logging.getLogger(__name__)
 
 class CopilotBackend(AICLIBackend):
     is_stateful = False  # subprocess -p mode; bot provides history via context
-    def __init__(self, model: str = "", opts: str = "") -> None:
+    def __init__(self, model: str = "", opts: str = "", skills_dirs: str = "") -> None:
         self._model = model
         self._opts = opts
         self._env = {**os.environ}
         if model:
             self._env["COPILOT_MODEL"] = model
+        if skills_dirs:
+            self._env["COPILOT_SKILLS_DIRS"] = skills_dirs
         self._session = CopilotSession(model=model, env=self._env, opts=opts)
 
     async def send(self, prompt: str) -> str:

@@ -699,6 +699,10 @@ class SlackBot:
         branch = self._settings.github.branch
         if repo:
             lines.append(f"Repo: {repo} | Branch: {branch}")
+        lines.append(
+            "Formatting (Slack mrkdwn): *bold* (NOT **bold**), _italic_, "
+            "`inline code`, ```code blocks```, >blockquote, - bullet list"
+        )
         self._team_context = "\n".join(lines)
         logger.info("Team context: %s", self._team_context.replace("\n", " | "))
 
