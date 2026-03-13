@@ -259,12 +259,78 @@ Human: "dev analyse the auth module for security issues"
 - **Trusted bot guard** — `_on_message()` line 262–273: messages from trusted bots only
   dispatch prefix commands, never `_run_ai_pipeline()`. This is the loop-prevention mechanism
   for v1. Do NOT change this guard.
+- **Trusted bot guard vs AI-to-AI delegation** — The end-to-end flow above shows "GateSec AI
+  responds" to a delegation, but that only works because the delegation message is posted as a
+  *new channel message starting with the target prefix*. This message arrives with the
+  *sending bot's* `bot_id`, hits the trusted bot guard, and is dispatched via `_dispatch()`.
+  If the delegated sub-command is a known prefix command (e.g. `run`, `sync`), `_dispatch()`
+  handles it. If it is *not* a known command, `_dispatch()` replies with `❓ Unknown command`
+  and the AI pipeline is **never** reached. In v1, delegation only triggers prefix commands
+  on the target agent. For full AI-to-AI delegation, a future version would need a dedicated
+  `delegate` subcommand in `_dispatch()` that explicitly calls `_run_ai_pipeline()` with a
+  depth counter.
 - **Sentinel stripping before history** — `common.save_to_history()` must receive the cleaned
   text (sentinel removed), not the raw AI output. This keeps conversation history clean.
 - **Platform symmetry** — delegation is Slack-only; no change to `src/bot.py`.
 - **`asyncio_mode = auto`** — tests remain `async def test_*` without decorator.
 - **Skills files** — must stay platform-neutral. Do NOT add Slack-specific delegation
   instructions to skills files.
+
+---
+
+## Security Notes (added 2026-03-13)
+
+### 🔴 RCE via delegation command injection
+
+The AI can craft a delegation like `[DELEGATE: dev run rm -rf /]`. The bot posts
+`dev run rm -rf /` as a new message → the target agent's trusted bot guard routes it to
+`_dispatch()` → `sub = "run"` → `run_shell("rm -rf /")` executes in `REPO_DIR`. This is
+**remote code execution**: anyone who can influence the AI's output (via prompt injection in
+repo content, PR diffs, or direct conversation) can execute arbitrary shell commands on a
+peer agent.
+
+**Required mitigation — delegation command blocklist:**
+
+Delegation messages from the AI must *never* start with an executable command sub-command.
+Add a blocklist check before posting each delegation message:
+
+```python
+_BLOCKED_DELEGATION_SUBS = {
+    "run", "sync", "git", "diff", "log", "restart", "clear", "confirm",
+}
+
+for prefix, msg in delegations:
+    first_word = msg.split()[0].lower() if msg.split() else ""
+    if first_word in _BLOCKED_DELEGATION_SUBS:
+        logger.warning(
+            "Blocked delegation with dangerous sub-command: prefix=%s sub=%s",
+            prefix, first_word,
+        )
+        continue
+    await client.chat_postMessage(channel=channel, text=f"{prefix} {msg}")
+```
+
+Alternatively (defence-in-depth): strip the target prefix before posting and only post the
+*message body*, so the receiving agent's trusted bot path falls through to the unknown-command
+handler (which just shows help). This is safer but changes the delegation protocol semantics.
+
+### 🟡 No cap on delegation count per response
+
+If the AI emits 50 `[DELEGATE: ...]` blocks (due to a prompt injection attack or model
+hallucination), all 50 are posted. This could flood the channel and trigger rate limits.
+
+**Required mitigation — `MAX_DELEGATIONS_PER_RESPONSE`:**
+
+```python
+_MAX_DELEGATIONS = 3
+
+delegations = delegations[:_MAX_DELEGATIONS]
+if len(all_delegations) > _MAX_DELEGATIONS:
+    logger.warning(
+        "Delegation cap exceeded: %d found, only posting %d",
+        len(all_delegations), _MAX_DELEGATIONS,
+    )
+```
 
 ---
 
@@ -308,12 +374,34 @@ Also remove the `import re` from inside `SlackBot.__init__` (line 83) since it w
 
 ### Step 2 — `src/platform/slack.py`: post delegation messages in `_run_ai_pipeline()`
 
-After obtaining the final AI response (and before `save_to_history`), extract and post delegations:
+After obtaining the final AI response (and before `save_to_history`), extract and post delegations.
+
+> ⚠️ **Security**: apply the command blocklist and delegation cap (see *Security Notes*).
 
 ```python
+_BLOCKED_DELEGATION_SUBS = {
+    "run", "sync", "git", "diff", "log", "restart", "clear", "confirm",
+}
+_MAX_DELEGATIONS = 3
+
 # After response is obtained (line ~230):
 response, delegations = _extract_delegations(response)
+
+if len(delegations) > _MAX_DELEGATIONS:
+    logger.warning(
+        "Delegation cap exceeded: %d found, only posting %d",
+        len(delegations), _MAX_DELEGATIONS,
+    )
+    delegations = delegations[:_MAX_DELEGATIONS]
+
 for prefix, msg in delegations:
+    first_word = msg.split()[0].lower() if msg.split() else ""
+    if first_word in _BLOCKED_DELEGATION_SUBS:
+        logger.warning(
+            "Blocked delegation with dangerous sub-command: prefix=%s sub=%s",
+            prefix, first_word,
+        )
+        continue
     delegation_text = f"{prefix} {msg}"
     try:
         await client.chat_postMessage(channel=channel, text=delegation_text)
@@ -393,6 +481,17 @@ return final
 | `test_extract_delegations_multiline` | Multiline delegation message is captured correctly |
 | `test_extract_delegations_malformed` | `[DELEGATE: ]` (no prefix/msg) → ignored, text unchanged |
 
+### `tests/unit/test_slack_delegation_security.py` (new file — security)
+
+| Test | What it checks |
+|------|----------------|
+| `test_blocked_sub_run` | `[DELEGATE: dev run rm -rf /]` → delegation is *not* posted |
+| `test_blocked_sub_sync` | `[DELEGATE: dev sync]` → delegation is *not* posted |
+| `test_blocked_sub_git` | `[DELEGATE: dev git push --force]` → delegation is *not* posted |
+| `test_allowed_sub_review` | `[DELEGATE: sec review auth.py]` → delegation *is* posted (not in blocklist) |
+| `test_cap_exceeded` | 5 delegations emitted → only first 3 posted, warning logged |
+| `test_cap_not_exceeded` | 2 delegations emitted → both posted, no warning |
+
 ### `tests/unit/test_slack_bot.py` additions
 
 | Test | What it checks |
@@ -470,3 +569,6 @@ existing responses without a sentinel are unchanged).
 - [ ] Delegation message starts with the target prefix and is posted as a new channel message.
 - [ ] Sentinel is stripped from both displayed response and saved history.
 - [ ] Trusted bot messages cannot trigger delegation (loop prevention verified by test).
+- [ ] **(Security)** Delegations with blocked sub-commands (`run`, `sync`, `git`, `diff`, etc.) are rejected and logged.
+- [ ] **(Security)** At most `_MAX_DELEGATIONS` (3) delegation messages are posted per response.
+- [ ] **(Security)** Security tests in `test_slack_delegation_security.py` pass.
