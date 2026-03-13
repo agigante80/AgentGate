@@ -726,9 +726,7 @@ class SlackBot:
         result = await executor.run_shell(
             cmd, self._settings.bot.max_output_chars, self._redactor
         )
-        await client.chat_postMessage(
-            channel=channel, text=f"```\n{result}\n```"
-        )
+        await self._reply(client, channel, f"```\n{result}\n```", None)
 
     async def _on_cancel_run(self, ack, action, client, body) -> None:
         await ack()
