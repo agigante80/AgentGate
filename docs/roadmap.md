@@ -12,9 +12,6 @@ If adding a new item, create a feature document using `docs/features/_template.m
 
 | # | Item | Detail |
 |---|------|--------|
-| 1.5 | Input sanitization — block shell-injection in command handlers (e.g., `gate diff`) | [→ features/input-sanitization.md](features/input-sanitization.md) |
-| 1.6 | Prompt injection hardening — frame untrusted content; restrict system-prompt paths | [→ features/prompt-injection.md](features/prompt-injection.md) |
-| 1.7 | Secret redaction — redact tokens/keys from AI responses and git commits (`ALLOW_SECRETS`) | [→ features/secret-redaction.md](features/secret-redaction.md) |
 | 1.3 | Conversation storage — introduce `ConversationStorage` ABC to replace hardcoded SQLite | [→ features/history-storage.md](features/history-storage.md) |
 | 1.4 | Split AI config — separate Copilot / Codex / Direct API fields in `AIConfig` | [→ features/aiconfig-split.md](features/aiconfig-split.md) |
 

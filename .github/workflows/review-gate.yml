@@ -1,0 +1,30 @@
+name: Review gate
+
+on:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  pull-requests: write
+  issues: write
+
+jobs:
+  check-labels:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for required review labels
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request.number;
+            const { data: prData } = await github.pulls.get({owner: context.repo.owner, repo: context.repo.repo, pull_number: pr});
+            const labels = prData.labels.map(l=>l.name);
+            const required = ['docs-reviewed','sec-reviewed','dev-reviewed'];
+            const missing = required.filter(r => !labels.includes(r));
+            if (missing.length === 0) {
+              // Mark ready
+              await github.issues.addLabels({owner: context.repo.owner, repo: context.repo.repo, issue_number: pr, labels: ['ready-for-implementation']});
+              await github.issues.createComment({owner: context.repo.owner, repo: context.repo.repo, issue_number: pr, body: 'All reviews present — marking `ready-for-implementation`. You may proceed.'});
+            } else {
+              await github.issues.createComment({owner: context.repo.owner, repo: context.repo.repo, issue_number: pr, body: `Waiting for reviews: ${missing.join(', ')}`});
+            }

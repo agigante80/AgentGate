@@ -19,6 +19,7 @@ Chat with your AI coding assistant (GitHub Copilot, Codex, OpenAI, Anthropic) vi
 - 🔀 **Multi-turn sessions** — SQLite history injected for stateless backends; Direct API maintains native state
 - 🐳 **One container per project** — fully isolated, all config via env vars
 - 🔒 **Secure** — non-root container, allowlist by chat/user ID, confirmation for destructive shell commands
+- 📢 **Broadcast** (Slack) — prefix any message with `<!here>` to send it to all active agents simultaneously; each responds independently
 
 ---
 
