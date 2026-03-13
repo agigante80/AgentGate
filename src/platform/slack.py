@@ -58,6 +58,11 @@ _SLACK_SPECIAL_MENTION_RE = re.compile(r"<!(channel|here|everyone)>")
 # Maximum number of delegation blocks processed per AI response (DoS prevention)
 _MAX_DELEGATIONS = 3
 
+# Known utility subcommands — shared by trusted-bot routing, broadcast routing, and _dispatch
+_KNOWN_SUBS = {
+    "run", "sync", "git", "diff", "log", "status", "clear", "restart", "confirm", "info", "help",
+}
+
 
 def _extract_delegations(text: str) -> tuple[str, list[tuple[str, str]]]:
     """Strip [DELEGATE: prefix message] sentinels from *text*.
@@ -400,7 +405,7 @@ class SlackBot:
                 args = args_str.split() if args_str else []
                 # Same routing as human messages: only known utility commands go to
                 # _dispatch; anything else is an AI-addressed delegation → AI pipeline
-                if sub in {"run", "sync", "git", "diff", "log", "status", "clear", "restart", "confirm", "info", "help"} or not sub:
+                if sub in _KNOWN_SUBS or not sub:
                     await self._dispatch(sub, args, say, client, channel, thread_ts=thread_ts)
                 else:
                     await self._run_ai_pipeline(
@@ -417,6 +422,31 @@ class SlackBot:
             return
 
         if not text:
+            return
+
+        # Broadcast trigger: <!here>, <!channel>, or <!everyone> → strip and re-route.
+        # Each bot instance runs this independently; all active bots respond in parallel.
+        # Bypasses PREFIX_ONLY intentionally (same semantic as @mention).
+        if _SLACK_SPECIAL_MENTION_RE.search(text):
+            broadcast_text = _SLACK_SPECIAL_MENTION_RE.sub("", text).strip()
+            if not broadcast_text:
+                return
+            p = self._p
+            lower_b = broadcast_text.lower()
+            if lower_b.startswith(f"{p} ") or lower_b == p:
+                parts_b = broadcast_text.split(maxsplit=2)
+                sub_b = parts_b[1].lower() if len(parts_b) > 1 else ""
+                args_b = parts_b[2].split() if len(parts_b) > 2 else []
+                if sub_b in _KNOWN_SUBS or not sub_b:
+                    await self._dispatch(sub_b, args_b, say, client, channel, thread_ts=thread_ts)
+                else:
+                    await self._run_ai_pipeline(
+                        say, client, broadcast_text[len(p):].strip(), channel, thread_ts=thread_ts
+                    )
+            else:
+                await self._run_ai_pipeline(
+                    say, client, broadcast_text, channel, thread_ts=thread_ts
+                )
             return
 
         # @mention trigger: "<@UXXXXXXX> …" bypasses prefix and PREFIX_ONLY restrictions
@@ -436,7 +466,7 @@ class SlackBot:
             args_str = parts[2] if len(parts) > 2 else ""
             args = args_str.split() if args_str else []
             # Route known utility commands to dispatcher; everything else goes to AI
-            if sub in {"run", "sync", "git", "diff", "log", "status", "clear", "restart", "confirm", "info", "help"} or not sub:
+            if sub in _KNOWN_SUBS or not sub:
                 await self._dispatch(sub, args, say, client, channel, thread_ts=thread_ts)
             else:
                 # Prefix was used as an addressing token — forward remainder to AI

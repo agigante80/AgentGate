@@ -817,3 +817,105 @@ class TestCmdDiffSanitization:
         mock_run.assert_called_once()
         call_cmd = mock_run.call_args[0][0]
         assert "main" in call_cmd
+
+
+class TestBroadcast:
+    """Broadcast detection via <!here>, <!channel>, <!everyone>."""
+
+    async def test_broadcast_ai_prompt_goes_to_pipeline(self):
+        """<!here> + unprefixed text → all bots run their AI pipeline."""
+        bot = _make_bot()
+        say = _make_say()
+        client = _make_client()
+        event = _make_event(text="<!here> pull latest and review it")
+        with patch.object(bot, "_run_ai_pipeline", AsyncMock()) as mock_ai:
+            await bot._on_message(event, say, client)
+        mock_ai.assert_called_once()
+        call_args = mock_ai.call_args[0]
+        assert "pull latest and review it" in call_args[2]
+
+    async def test_broadcast_own_prefix_command_dispatches(self):
+        """<!here> gate sync → bot with prefix 'gate' dispatches sync."""
+        bot = _make_bot()
+        say = _make_say()
+        client = _make_client()
+        event = _make_event(text="<!here> gate sync")
+        with patch.object(bot, "_dispatch", AsyncMock()) as mock_dispatch:
+            await bot._on_message(event, say, client)
+        mock_dispatch.assert_called_once()
+        args = mock_dispatch.call_args[0]
+        assert args[0] == "sync"
+
+    async def test_broadcast_other_prefix_goes_to_ai(self):
+        """<!here> dev sync → bot with different prefix treats as AI prompt."""
+        bot = _make_bot(_make_settings(prefix="sec"))
+        say = _make_say()
+        client = _make_client()
+        event = _make_event(text="<!here> dev sync")
+        with patch.object(bot, "_run_ai_pipeline", AsyncMock()) as mock_ai, \
+             patch.object(bot, "_dispatch", AsyncMock()) as mock_dispatch:
+            await bot._on_message(event, say, client)
+        mock_ai.assert_called_once()
+        mock_dispatch.assert_not_called()
+
+    async def test_broadcast_empty_after_strip_is_noop(self):
+        """<!here> with no payload → bot silently ignores."""
+        bot = _make_bot()
+        say = _make_say()
+        client = _make_client()
+        event = _make_event(text="<!here>")
+        with patch.object(bot, "_run_ai_pipeline", AsyncMock()) as mock_ai, \
+             patch.object(bot, "_dispatch", AsyncMock()) as mock_dispatch:
+            await bot._on_message(event, say, client)
+        mock_ai.assert_not_called()
+        mock_dispatch.assert_not_called()
+
+    async def test_broadcast_channel_trigger(self):
+        """<!channel> also triggers broadcast."""
+        bot = _make_bot()
+        say = _make_say()
+        client = _make_client()
+        event = _make_event(text="<!channel> tell me the status")
+        with patch.object(bot, "_run_ai_pipeline", AsyncMock()) as mock_ai:
+            await bot._on_message(event, say, client)
+        mock_ai.assert_called_once()
+
+    async def test_broadcast_everyone_trigger(self):
+        """<!everyone> also triggers broadcast."""
+        bot = _make_bot()
+        say = _make_say()
+        client = _make_client()
+        event = _make_event(text="<!everyone> who are you?")
+        with patch.object(bot, "_run_ai_pipeline", AsyncMock()) as mock_ai:
+            await bot._on_message(event, say, client)
+        mock_ai.assert_called_once()
+
+    async def test_broadcast_blocked_for_unauthorized_user(self):
+        """Broadcast from unauthorized user is rejected before routing."""
+        bot = _make_bot(_make_settings(channel_id="C123", allowed_users=["U111"]))
+        say = _make_say()
+        client = _make_client()
+        event = _make_event(text="<!here> do something", channel="C123", user="U999")
+        with patch.object(bot, "_run_ai_pipeline", AsyncMock()) as mock_ai, \
+             patch.object(bot, "_dispatch", AsyncMock()) as mock_dispatch:
+            await bot._on_message(event, say, client)
+        mock_ai.assert_not_called()
+        mock_dispatch.assert_not_called()
+
+    async def test_outgoing_delegation_still_sanitised(self):
+        """<!here> in a delegation message is still stripped before posting (regression guard)."""
+        response_with_here = "Here is info.[DELEGATE: docs <!here> please update docs]"
+        backend = _make_backend(is_stateful=True, response=response_with_here)
+        bot = _make_bot(backend=backend)
+        say = _make_say()
+        client = _make_client()
+        event = _make_event(text="gate review this")
+        with patch("src.platform.common.history.get_history", AsyncMock(return_value=[])), \
+             patch("src.platform.common.history.build_context", return_value="review this"), \
+             patch("src.platform.common.history.add_exchange", AsyncMock()):
+            await bot._on_message(event, say, client)
+        delegation_texts = [
+            c[1].get("text", "") for c in client.chat_postMessage.call_args_list
+        ]
+        assert all("<!here>" not in t for t in delegation_texts), \
+            "<!here> must be stripped from outgoing delegation messages"

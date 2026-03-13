@@ -22,14 +22,18 @@ def main(argv=None):
         return 2
 
     text = p.read_text(encoding="utf-8")
-    # Minimal checks
+    # Sections required by the AgentGate feature doc template
+    required_sections = [
+        "## Problem Statement",
+        "## Implementation Steps",
+        "## Test Plan",
+        "## Acceptance Criteria",
+    ]
     ok = True
-    if "# Summary" not in text:
-        print("Missing '# Summary' section")
-        ok = False
-    if "# Motivation" not in text:
-        print("Missing '# Motivation' section")
-        ok = False
+    for section in required_sections:
+        if section not in text:
+            print(f"Missing '{section}' section")
+            ok = False
 
     if ok:
         print("Validation passed")

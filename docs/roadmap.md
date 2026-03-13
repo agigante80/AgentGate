@@ -30,7 +30,6 @@ If adding a new item, create a feature document using `docs/features/_template.m
 | 2.11 | Voice transcription — local Whisper provider | [→ features/whisper-local.md](features/whisper-local.md) |
 | 2.12 | Voice transcription — Google Speech-to-Text provider | [→ features/whisper-google.md](features/whisper-google.md) |
 | 2.13 | Lightweight web dashboard — read-only HTTP status page in the container | [→ features/web-dashboard.md](features/web-dashboard.md) |
-| 2.16 | Broadcast via `<!here>` — prefix any message with `<!here>` to send to all active agents simultaneously | [→ features/broadcast-here.md](features/broadcast-here.md) |
 
 ---
 

@@ -7,7 +7,6 @@ It's intentionally minimal and intended to be extended for project needs.
 """
 
 import sys
-from pathlib import Path
 
 
 def main(argv=None):

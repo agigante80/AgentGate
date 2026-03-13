@@ -1,6 +1,6 @@
 # Broadcast via `<!here>` (`<!here> <prompt or command>`)
 
-> Status: **Planned** | Priority: Medium | Last reviewed: 2026-03-13
+> Status: **Implemented in v0.12.0** | Priority: Medium | Last reviewed: 2026-03-13
 
 Slack users can prefix any message with `<!here>` to broadcast it to all active AgentGate bots simultaneously — each bot receives the message independently and responds with its own perspective. Works for both AI prompts and utility subcommands (`sync`, `status`, etc.).
 
