@@ -342,24 +342,41 @@ def build_context(history: list[tuple[str, str]], current: str) -> str:
 
 ### Step 3 — `src/ai/factory.py`: validate `SYSTEM_PROMPT_FILE` path
 
-Before reading the file, verify it does not resolve inside `REPO_DIR`:
+First, add the import at the top of `src/ai/factory.py` (it is not currently imported there):
 
 ```python
 import os
 from src.config import REPO_DIR
-
-if ai.system_prompt_file:
-    resolved = os.path.realpath(ai.system_prompt_file)
-    if resolved.startswith(os.path.realpath(REPO_DIR)):
-        raise ValueError(
-            f"SYSTEM_PROMPT_FILE must not point inside the cloned repo ({REPO_DIR}). "
-            "Mount it via a separate Docker volume (e.g. /config/system-prompt.md)."
-        )
-    try:
-        system_prompt = Path(resolved).read_text()
-    except OSError as exc:
-        logger.warning("Could not read SYSTEM_PROMPT_FILE %r: %s", ai.system_prompt_file, exc)
 ```
+
+Then replace the existing `system_prompt_file` block (current lines 26-30):
+
+```python
+        # Before:
+        if ai.system_prompt_file:
+            try:
+                system_prompt = Path(ai.system_prompt_file).read_text()
+            except OSError as exc:
+                logger.warning("Could not read SYSTEM_PROMPT_FILE %r: %s", ai.system_prompt_file, exc)
+```
+
+with:
+
+```python
+        if ai.system_prompt_file:
+            resolved = os.path.realpath(ai.system_prompt_file)
+            if resolved.startswith(os.path.realpath(str(REPO_DIR))):
+                raise ValueError(
+                    f"SYSTEM_PROMPT_FILE must not point inside the cloned repo ({REPO_DIR}). "
+                    "Mount it via a separate Docker volume (e.g. /config/system-prompt.md)."
+                )
+            try:
+                system_prompt = Path(resolved).read_text()
+            except OSError as exc:
+                logger.warning("Could not read SYSTEM_PROMPT_FILE %r: %s", ai.system_prompt_file, exc)
+```
+
+> **Note**: `REPO_DIR` is a `pathlib.Path` in `src/config.py`, so `str(REPO_DIR)` is needed for `os.path.realpath()` comparison. Alternatively, use `Path(resolved).is_relative_to(REPO_DIR.resolve())` (Python 3.9+) for a cleaner check.
 
 ---
 
@@ -430,7 +447,7 @@ Add unit tests for each mitigation. See Test Plan below.
 | `tests/unit/test_executor.py` | **Edit** | Add tests for framed summarization prompt |
 | `tests/unit/test_history.py` | **Edit** | Add tests for framed `build_context()` output (file already exists) |
 | `tests/unit/test_bot.py` | **Edit** | Add test for voice transcription framing (Telegram) |
-| `tests/unit/test_slack.py` | **Edit** | Add test for voice transcription framing (Slack) |
+| `tests/unit/test_slack_bot.py` | **Edit** | Add test for voice transcription framing (Slack) |
 | `tests/integration/test_factory.py` | **Edit** | Test `SYSTEM_PROMPT_FILE` path validation |
 | `src/bot.py` | **Edit** | Frame transcribed voice text before passing to `_run_ai_pipeline()` |
 | `src/platform/slack.py` | **Edit** | Frame transcribed voice text before passing to `_run_ai_pipeline()` |
@@ -469,7 +486,7 @@ No new packages required.
 | `test_build_context_reference_only_instruction` | Output contains "reference only" meta-instruction |
 | `test_build_context_current_message_outside_tags` | Current user message appears after `</HISTORY>`, not inside tags |
 
-### `tests/unit/test_bot.py` and `tests/unit/test_slack.py` additions (voice framing)
+### `tests/unit/test_bot.py` and `tests/unit/test_slack_bot.py` additions (voice framing)
 
 | Test | What it checks |
 |------|----------------|

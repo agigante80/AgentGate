@@ -186,9 +186,9 @@ No new env vars introduced. Existing vars affected:
 
 ## Implementation Steps
 
-### Step 1 — `src/bot.py` + `src/platform/slack.py`: add `_sanitize_git_ref()` and apply to `cmd_diff`
+### Step 1 — `src/executor.py`: add `sanitize_git_ref()` helper
 
-Create a shared validation helper (can live in `src/executor.py` or inline in both files):
+Add the shared validation helper to `src/executor.py` (both `src/bot.py` and `src/platform/slack.py` already import `executor`, so callers use `executor.sanitize_git_ref()`):
 
 ```python
 import re
@@ -204,25 +204,53 @@ def sanitize_git_ref(ref: str) -> str | None:
     return shlex.quote(ref)
 ```
 
-In `cmd_diff` (both platforms), replace:
+> **Import note**: `re` and `shlex` are stdlib — add them to the imports at the top of `src/executor.py`.
+
+### Step 2 — `src/bot.py`: apply to `cmd_diff` (Telegram)
+
+In `cmd_diff` (`src/bot.py:259`), in the `else` branch that handles non-digit, non-empty args, replace:
 
 ```python
-ref = f"{arg} HEAD"
+else:
+    ref = f"{arg} HEAD"
 ```
 
 with:
 
 ```python
-safe = sanitize_git_ref(arg)
-if safe is None:
-    await _reply(update, "❌ Invalid git ref — use a branch name, tag, or commit SHA.")
-    return
-ref = f"{safe} HEAD"
+else:
+    safe = executor.sanitize_git_ref(arg)
+    if safe is None:
+        await _reply(update, "❌ Invalid git ref — use a branch name, tag, or commit SHA.")
+        return
+    ref = f"{safe} HEAD"
 ```
+
+### Step 3 — `src/platform/slack.py`: apply to `_cmd_diff` (Slack)
+
+In `_cmd_diff` (`src/platform/slack.py:538`), same `else` branch, replace:
+
+```python
+else:
+    ref = f"{arg} HEAD"
+```
+
+with:
+
+```python
+else:
+    safe = executor.sanitize_git_ref(arg)
+    if safe is None:
+        await self._reply(client, channel, "❌ Invalid git ref — use a branch name, tag, or commit SHA.", thread_ts)
+        return
+    ref = f"{safe} HEAD"
+```
+
+> **Note**: Slack uses `self._reply(client, channel, text, thread_ts)` — different signature from Telegram's module-level `_reply(update, text)`.
 
 ---
 
-### Step 2 — `src/main.py`: require `SLACK_CHANNEL_ID`
+### Step 4 — `src/main.py`: require `SLACK_CHANNEL_ID`
 
 In `_validate_config()`, add after the existing Slack token checks:
 
@@ -236,7 +264,7 @@ if not settings.slack.slack_channel_id:
 
 ---
 
-### Step 3 — Tests
+### Step 5 — Tests
 
 Add unit tests covering:
 
@@ -251,12 +279,13 @@ Add unit tests covering:
 
 | File | Action | Summary of change |
 |------|--------|-------------------|
-| `src/executor.py` | **Edit** | Add `sanitize_git_ref()` helper (shared by both platforms) |
-| `src/bot.py` | **Edit** | Use `sanitize_git_ref()` in `cmd_diff`; reject invalid refs |
-| `src/platform/slack.py` | **Edit** | Use `sanitize_git_ref()` in `_cmd_diff`; reject invalid refs |
+| `src/executor.py` | **Edit** | Add `sanitize_git_ref()` helper; add `import re, shlex` at top |
+| `src/bot.py` | **Edit** | Use `executor.sanitize_git_ref()` in `cmd_diff`; reject invalid refs with module-level `_reply()` |
+| `src/platform/slack.py` | **Edit** | Use `executor.sanitize_git_ref()` in `_cmd_diff`; reject invalid refs with `self._reply(client, channel, msg, thread_ts)` |
 | `src/main.py` | **Edit** | Require `SLACK_CHANNEL_ID` in `_validate_config()` |
 | `tests/unit/test_executor.py` | **Edit** | Add tests for `sanitize_git_ref()` |
-| `tests/unit/test_bot.py` | **Edit** | Add test for `cmd_diff` with malicious input |
+| `tests/unit/test_bot.py` | **Edit** | Add test for Telegram `cmd_diff` with malicious input |
+| `tests/unit/test_slack_bot.py` | **Edit** | Add test for Slack `_cmd_diff` with malicious input (uses `self._reply` with `thread_ts`) |
 | `tests/unit/test_main.py` | **Edit** | Add test for Slack missing `SLACK_CHANNEL_ID` |
 | `docs/features/input-sanitization.md` | **Edit** | Mark status as `Implemented` after merge |
 | `docs/roadmap.md` | **Edit** | Add item 1.5; mark done after merge |
@@ -290,12 +319,19 @@ No new packages required.
 | `test_sanitize_git_ref_dollar` | `sanitize_git_ref("main$(id)")` returns `None` |
 | `test_sanitize_git_ref_empty` | `sanitize_git_ref("")` returns `None` |
 
-### `tests/unit/test_bot.py` additions
+### `tests/unit/test_bot.py` additions (Telegram)
 
 | Test | What it checks |
 |------|----------------|
-| `test_cmd_diff_malicious_ref_rejected` | `cmd_diff` with `"; rm -rf /"` replies with error and never calls `run_shell()` |
+| `test_cmd_diff_malicious_ref_rejected` | `cmd_diff` with `"; rm -rf /"` calls module-level `_reply(update, …)` with error and never calls `run_shell()` |
 | `test_cmd_diff_valid_ref_allowed` | `cmd_diff` with `"main"` calls `run_shell()` normally |
+
+### `tests/unit/test_slack_bot.py` additions (Slack)
+
+| Test | What it checks |
+|------|----------------|
+| `test_cmd_diff_malicious_ref_rejected_slack` | `_cmd_diff` with `"; rm -rf /"` calls `self._reply(client, channel, …, thread_ts)` with error and never calls `run_shell()` |
+| `test_cmd_diff_valid_ref_allowed_slack` | `_cmd_diff` with `"main"` calls `run_shell()` normally |
 
 ### `tests/unit/test_main.py` additions
 

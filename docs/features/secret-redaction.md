@@ -312,12 +312,16 @@ class SecretRedactor:
 
 ### Step 3 — `src/bot.py`: apply redaction to Telegram output
 
-Inject the `SecretRedactor` and apply `redact()` before posting:
+> **Architecture note**: `_reply()` in `bot.py` is a *module-level function* (`async def _reply(update, text)`), not a method on `_BotHandlers`. It has no access to `self` or the redactor. Apply redaction in each handler method *before* calling `_reply()` or `msg.edit_text()`, using `self._redactor.redact(text)`.
+
+Concrete changes:
 
 1. In `_BotHandlers.__init__`, create `self._redactor = SecretRedactor(settings)`.
-2. Wrap `_reply()` to call `self._redactor.redact(text)`.
-3. In `_stream_to_telegram()`, redact the `display` variable before each `msg.edit_text()`.
-4. In `_run_ai_pipeline()`, redact the `response` before `msg.edit_text()`.
+2. In `_stream_to_telegram()` (`src/bot.py:49`), before each `msg.edit_text()` call, wrap the `display` variable: `display = self._redactor.redact(display)`.
+3. In `_run_ai_pipeline()` (`src/bot.py:155`), before the final `msg.edit_text(response, …)` call, wrap: `response = self._redactor.redact(response)`.
+4. In every handler that calls `_reply(update, text)` with AI or shell output, wrap: `text = self._redactor.redact(text)`.
+
+> Do **not** redact inside the module-level `_reply()` function itself — it would require threading the redactor through all callers including those that post safe bot messages (e.g. help text).
 
 ---
 
@@ -343,6 +347,21 @@ async def run_shell(cmd: str, max_chars: int, redactor: SecretRedactor | None = 
     proc = await asyncio.create_subprocess_shell(...)
 ```
 
+> **All call sites of `run_shell()` that should pass the redactor** (requires updating these lines in both `src/bot.py` and `src/platform/slack.py`):
+>
+> | File | Approx. line | Context |
+> |------|-------------|---------|
+> | `src/bot.py` | 244 | `cmd_run` handler |
+> | `src/bot.py` | 268 | `cmd_diff` handler |
+> | `src/bot.py` | 285 | `cmd_diff` handler (log variant) |
+> | `src/bot.py` | 434 | `cmd_log` handler |
+> | `src/platform/slack.py` | 520 | `_cmd_run` |
+> | `src/platform/slack.py` | 548 | `_cmd_diff` |
+> | `src/platform/slack.py` | 567 | `_cmd_diff` (log variant) |
+> | `src/platform/slack.py` | 711 | `_cmd_log` |
+>
+> Since `SecretRedactor` is instantiated on `self`, pass `self._redactor` at each call site. The `redactor` parameter is optional (`None` default) so any unmodified call sites (e.g. in unit tests) continue to work without change.
+
 ---
 
 ### Step 6 — `src/main.py`: install git commit-msg hook
@@ -353,9 +372,11 @@ redacts secrets from commit messages. This covers commits made by the AI subproc
 
 ```python
 async def _install_commit_msg_hook(settings: Settings) -> None:
-    """Install a git commit-msg hook that strips secrets from commit messages."""
-    if settings.bot.allow_secrets:
-        return
+    """Install a git commit-msg hook that strips secrets from commit messages.
+
+    Installed unconditionally (even when ALLOW_SECRETS=true) because git history
+    is permanent — a secret written to a commit message cannot be easily removed.
+    """
     hook_path = REPO_DIR / ".git" / "hooks" / "commit-msg"
     secrets = SecretRedactor._collect_secrets(settings)
     if not secrets:
@@ -437,7 +458,7 @@ msg_file.write_text(text)
 | `test_ai_response_redacted` | AI response containing a secret is redacted before `edit_text()` |
 | `test_allow_secrets_bypasses_redaction` | `ALLOW_SECRETS=true` lets secrets through |
 
-### `tests/unit/test_slack.py` additions
+### `tests/unit/test_slack_bot.py` additions
 
 | Test | What it checks |
 |------|----------------|
@@ -527,8 +548,9 @@ that hardens security without breaking existing deployments.
       common secret patterns replaced with `[REDACTED]`.
 - [ ] `ALLOW_SECRETS=true`: secrets pass through unredacted.
 - [ ] Git commit messages authored inside the container have secrets redacted via
-      `commit-msg` hook (regardless of `ALLOW_SECRETS` setting — commit history is
-      permanent and should never contain secrets).
+      `commit-msg` hook. The hook is installed even when `ALLOW_SECRETS=true`, because
+      git history is permanent and leaking secrets there is irreversible. (Step 6 code
+      installs unconditionally — only the *output* redaction is gated on `allow_secrets`.)
 - [ ] Streaming responses redact each intermediate edit and the final message.
 - [ ] Both Telegram and Slack platforms apply redaction.
 - [ ] `pytest tests/ -v --tb=short` passes with no failures or errors.
