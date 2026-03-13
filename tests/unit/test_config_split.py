@@ -224,3 +224,26 @@ class TestFactoryPaths:
         cfg = AIConfig()
         backend = create_backend(cfg)
         assert backend._api_key == "shared-openai-key"
+
+
+# ── SecretRedactor coverage ────────────────────────────────────────────────────
+
+class TestRedactorCoverage:
+    def test_redactor_collects_codex_api_key(self):
+        """CODEX_API_KEY must be in the redactor's known-values list."""
+        from src.redact import SecretRedactor
+
+        s = MagicMock()
+        s.bot.allow_secrets = False
+        s.telegram.bot_token = ""
+        s.slack.slack_bot_token = ""
+        s.slack.slack_app_token = ""
+        s.github.github_repo_token = ""
+        s.ai.ai_api_key = "shared-key-value-long"
+        s.ai.codex.codex_api_key = "codex-only-secret-key"
+        s.voice.whisper_api_key = ""
+
+        redactor = SecretRedactor(s)
+        assert "codex-only-secret-key" not in redactor.redact(
+            "The key is codex-only-secret-key"
+        )
