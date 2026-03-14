@@ -52,12 +52,23 @@ class TestBackendFactory:
     def test_copilot_model_passed_through(self, monkeypatch):
         monkeypatch.setenv("AI_CLI", "copilot")
         monkeypatch.setenv("AI_MODEL", "gpt-4o")
+        monkeypatch.delenv("COPILOT_MODEL", raising=False)
         cfg = AIConfig()
         # Patch where CopilotSession is used, not where it's defined
         with patch("src.ai.copilot.CopilotSession") as MockSession:
             backend = create_backend(cfg)
         MockSession.assert_called_once_with(model="gpt-4o", env=MockSession.call_args[1]["env"], opts="")
         assert cfg.ai_model == "gpt-4o"
+
+    def test_copilot_model_overrides_ai_model(self, monkeypatch):
+        """COPILOT_MODEL takes precedence over AI_MODEL for the Copilot backend."""
+        monkeypatch.setenv("AI_CLI", "copilot")
+        monkeypatch.setenv("COPILOT_MODEL", "claude-3-5-sonnet")
+        monkeypatch.setenv("AI_MODEL", "gpt-4o")
+        cfg = AIConfig()
+        with patch("src.ai.copilot.CopilotSession") as MockSession:
+            backend = create_backend(cfg)
+        MockSession.assert_called_once_with(model="claude-3-5-sonnet", env=MockSession.call_args[1]["env"], opts="")
 
     def test_codex_model_passed_through(self, monkeypatch):
         monkeypatch.setenv("AI_CLI", "codex")

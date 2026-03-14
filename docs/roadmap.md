@@ -12,7 +12,6 @@ If adding a new item, create a feature document using `docs/features/_template.m
 
 | # | Item | Detail |
 |---|------|--------|
-| 1.4 | Split AI config — separate Copilot / Codex / Direct API fields in `AIConfig` | [→ features/aiconfig-split.md](features/aiconfig-split.md) |
 
 ---
 

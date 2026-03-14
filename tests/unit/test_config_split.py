@@ -14,6 +14,16 @@ class TestSubConfigEnvReading:
         cfg = CopilotAIConfig()
         assert cfg.copilot_skills_dirs == "/skills/dev,/skills/shared"
 
+    def test_copilot_sub_config_reads_model(self, monkeypatch):
+        monkeypatch.setenv("COPILOT_MODEL", "claude-3-5-sonnet")
+        cfg = CopilotAIConfig()
+        assert cfg.copilot_model == "claude-3-5-sonnet"
+
+    def test_copilot_sub_config_model_defaults_empty(self, monkeypatch):
+        monkeypatch.delenv("COPILOT_MODEL", raising=False)
+        cfg = CopilotAIConfig()
+        assert cfg.copilot_model == ""
+
     def test_codex_sub_config_reads_api_key(self, monkeypatch):
         monkeypatch.setenv("CODEX_API_KEY", "codex-secret-key")
         cfg = CodexAIConfig()

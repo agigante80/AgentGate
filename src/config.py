@@ -66,6 +66,7 @@ class CopilotAIConfig(BaseSettings):
 
     model_config = SettingsConfigDict(extra="ignore")
 
+    copilot_model: str = ""        # COPILOT_MODEL — overrides AI_MODEL for the Copilot CLI; empty = use AI_MODEL
     copilot_skills_dirs: str = ""  # COPILOT_SKILLS_DIRS
 
 
