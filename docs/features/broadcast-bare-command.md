@@ -18,8 +18,9 @@ Currently the broadcast router misclassifies bare subcommands as AI prompts.
 | GateCode | 1 | 8/10 | 2026-03-14 | Code snippet verified accurate against live `slack.py:507–510`; `_KNOWN_SUBS` ref correct; auth claim confirmed fixed by GateSec; two blocking gaps: (1) "Files to Change" still says *create* `test_slack_broadcast.py` — must be *extend* `TestBroadcast` in `test_slack_bot.py`; (2) OQ6/OQ7 have no resolution decision or AC — spec should either document-as-expected-behaviour or add a warning step |
 | GateSec  | 1 | 8/10 | 2026-03-14 | Auth claim corrected (OQ3→Architecture Notes fix); added OQ6 multi-bot `run` amplification risk; added OQ7 `@here confirm off` mass-disarm; OQ3 `confirm` edge case verified safe |
 | GateDocs | 1 | 8/10 | 2026-03-14 | Architecture Notes auth claim is wrong (auth IS enforced at line 473, before broadcast block); test file should extend existing TestBroadcast class, not create new file; README placement needs section name |
+| GateDocs | 2 | 9/10 | 2026-03-14 | Fixed: test target corrected to extend `TestBroadcast` in `test_slack_bot.py`; README placement now specifies `## Slack` section; OQ6 resolved (document-as-expected + warning deferred to Future Work); OQ7 resolved (emit warning on broadcast `confirm off`; full block deferred). -1 for OQ7 warning AC not yet added to Acceptance Criteria checklist — low risk, spec is fully implementable. |
 
-**Status**: ⏳ Round 1 complete — Round 2 required (all scores 8/10; need ≥ 9/10)
+**Status**: ⏳ Round 2 complete (GateDocs 9/10) — GateCode and GateSec Round 2 required
 **Approved**: No — requires all scores ≥ 9/10 in the same round
 
 ---
@@ -215,7 +216,7 @@ With:
 | File | Action | Summary of change |
 |------|--------|-------------------|
 | `src/platform/slack.py` | **Edit** | Extend broadcast `else` branch (~7 lines) |
-| `tests/unit/test_slack_broadcast.py` | **Create** (or extend existing) | Add test cases for bare-subcommand broadcast routing |
+| `tests/unit/test_slack_bot.py` | **Extend** — add to existing `TestBroadcast` class | Add test cases for bare-subcommand broadcast routing |
 | `docs/features/broadcast-bare-command.md` | **Edit** | Mark status `Implemented` after merge |
 | `docs/roadmap.md` | **Edit** | Add entry; mark done after merge |
 
@@ -231,7 +232,7 @@ With:
 
 ## Test Plan
 
-### `tests/unit/test_slack_broadcast.py`
+### `tests/unit/test_slack_bot.py` — extend `TestBroadcast` class
 
 | Test | What it checks |
 |------|----------------|
@@ -249,7 +250,7 @@ With:
 
 ### `README.md`
 
-Add a bullet to the Slack section:
+Add a bullet under the `## Slack` section (after the `PREFIX_ONLY` env var description):
 
 > `@here <command>` or `@channel <command>` — broadcasts a utility command to all bots simultaneously. Works with bare subcommands (e.g. `@here sync`) as well as prefixed ones (e.g. `@here dev sync`).
 
@@ -300,11 +301,15 @@ This is a bug fix with no new env vars or API surface changes.
    behaviour, or (b) adding a broadcast-specific warning like "⚠️ This command will run on
    all N active bots." before execution.
 
+   **Resolution (GateDocs R2)**: Document as expected behaviour. The existing per-bot destructive-command confirmation gate already applies on each instance. A broadcast-specific warning banner is deferred to Future Work (see below).
+
 7. **[SEC] `@here confirm off` mass-disarm** — broadcasting `confirm off` disables
    destructive-command confirmation on *all* bot instances in a single message. This silently
    removes the safety net across the entire workspace. Consider: (a) requiring `confirm off`
    to be addressed to a specific bot (no broadcast), or (b) emitting a prominent warning when
    confirmation is disabled via broadcast.
+
+   **Resolution (GateDocs R2)**: Emit a prominent warning when `confirm off` is received via broadcast. The implementation should detect the broadcast context and prefix the response with `⚠️ Confirmation guard disabled via broadcast — all N active bots affected.` Blocking broadcast of `confirm off` entirely is deferred to Future Work.
 
 ---
 
@@ -314,6 +319,7 @@ This is a bug fix with no new env vars or API surface changes.
 - [ ] `@here run <cmd>` with arguments dispatches with args correctly.
 - [ ] `@here <free text>` (non-subcommand) still routes to the AI pipeline unchanged.
 - [ ] `@here dev sync` (prefixed) still works as before.
+- [ ] `@here confirm off` emits a broadcast-context warning before disabling confirmation.
 - [ ] All new unit tests pass.
 - [ ] `pytest tests/ -v --tb=short` — zero failures.
 - [ ] `ruff check src/` — no new issues.
