@@ -299,7 +299,7 @@ add the Gemini CLI global install, alongside the existing Copilot and Codex line
 ```dockerfile
 # Before (existing lines):
 # GitHub Copilot CLI — pinned version (update via Dependabot)
-RUN npm install -g @github/copilot@0.0.423
+RUN npm install -g @github/copilot@1.0.5
 
 # OpenAI Codex CLI — pinned version (update via Dependabot)
 RUN npm install -g @openai/codex@0.111.0
