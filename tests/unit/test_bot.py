@@ -295,3 +295,61 @@ class TestCmdDiffSanitization:
         mock_run.assert_called_once()
         call_cmd = mock_run.call_args[0][0]
         assert "'main'" in call_cmd or "main" in call_cmd
+
+
+# ── _deliver_telegram ─────────────────────────────────────────────────────────
+
+class TestDeliverTelegram:
+    """Branch-routing tests for _deliver_telegram."""
+
+    async def _run(self, text: str, *, reply_text_side=None, edit_side=None):
+        from unittest.mock import AsyncMock, MagicMock
+        from src.bot import _deliver_telegram
+
+        streaming_msg = MagicMock()
+        streaming_msg.edit_text = AsyncMock(side_effect=edit_side)
+        update = MagicMock()
+        update.effective_message.reply_text = AsyncMock(side_effect=reply_text_side)
+        update.effective_message.reply_document = AsyncMock()
+        return update, streaming_msg, await _deliver_telegram(update, streaming_msg, text)
+
+    async def test_short_response_edits_streaming_msg(self):
+        """≤ 4096 chars → edits the streaming placeholder."""
+        text = "hello"
+        update, msg, _ = await self._run(text)
+        msg.edit_text.assert_awaited_once_with(text)
+        update.effective_message.reply_text.assert_not_awaited()
+
+    async def test_multi_chunk_edits_first_replies_rest(self):
+        """4097–16384 chars → first chunk edits placeholder, rest are new replies."""
+        from src.bot import _TG_MAX_CHARS
+        chunk = "x" * _TG_MAX_CHARS
+        text = chunk + chunk  # 2 chunks
+        update, msg, _ = await self._run(text)
+        msg.edit_text.assert_awaited_once()
+        assert update.effective_message.reply_text.await_count == 1
+
+    async def test_over_limit_sends_file(self):
+        """> 4 chunks → sends note + reply_document."""
+        from src.bot import _TG_MAX_CHARS, _TG_MAX_CHUNKS
+        text = "y" * (_TG_MAX_CHARS * (_TG_MAX_CHUNKS + 1))
+        update, msg, _ = await self._run(text)
+        msg.edit_text.assert_awaited_once()  # note
+        update.effective_message.reply_document.assert_awaited_once()
+
+    async def test_empty_text_falls_back_to_placeholder(self):
+        """Empty text → '_(empty response)_' edited into streaming msg."""
+        update, msg, _ = await self._run("")
+        msg.edit_text.assert_awaited_once_with("_(empty response)_")
+
+    async def test_edit_failure_does_not_raise(self):
+        """edit_text() failure on chunk 1 is swallowed gracefully."""
+        from src.bot import _deliver_telegram
+        from unittest.mock import AsyncMock, MagicMock
+        msg = MagicMock()
+        msg.edit_text = AsyncMock(side_effect=Exception("Telegram error"))
+        update = MagicMock()
+        update.effective_message.reply_text = AsyncMock()
+        update.effective_message.reply_document = AsyncMock()
+        # Should not raise
+        await _deliver_telegram(update, msg, "short text")

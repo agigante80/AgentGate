@@ -474,7 +474,13 @@ class SlackBot:
                         elapsed,
                         self._settings.bot.thinking_show_elapsed,
                     )
-                await self._reply(client, channel, response or "_(empty response)_", thread_ts)
+                await self._deliver_slack(
+                    client,
+                    channel,
+                    None if self._settings.slack.slack_delete_thinking else ts,
+                    response,
+                    thread_ts,
+                )
                 await self._post_delegations(client, channel, delegations, thread_ts=thread_ts)
             response = self._redactor.redact(response)
             await common.save_to_history(channel, text, response, self._settings, self._history)

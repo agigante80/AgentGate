@@ -307,7 +307,7 @@ class _BotHandlers:
                 response = self._redactor.redact(response)
                 elapsed = int(time.monotonic() - t_start)
                 await finalize_thinking(msg.edit_text, elapsed, cfg.thinking_show_elapsed)
-                await update.effective_message.reply_text(response or "_(empty response)_")
+                await _deliver_telegram(update, msg, response)
 
             if self._settings.bot.history_enabled:
                 await self._history.add_exchange(chat_id, text, response)

@@ -77,6 +77,14 @@ def split_text(text: str, chunk_size: int) -> list[str]: ...
 - [ ] `split_text()` never drops characters; `"".join(split_text(t, n)) == t` for all inputs.
 - [ ] Streaming preview window unchanged (still clips to `MAX_OUTPUT_CHARS`).
 - [ ] All 8 `TestSplitText` unit tests pass.
+- [ ] `_deliver_telegram` single-message branch: edit streaming placeholder (5 `TestDeliverTelegram` cases).
+- [ ] `_deliver_telegram` multi-chunk branch: first chunk edits placeholder, subsequent chunks are new replies.
+- [ ] `_deliver_telegram` file-upload branch: note edits placeholder, `reply_document()` called.
+- [ ] `_deliver_telegram` edit failure does not raise (graceful degradation).
+- [ ] `_deliver_slack` single-message branch: edits existing `ts` or posts new message (6 `TestDeliverSlack` cases).
+- [ ] `_deliver_slack` multi-block branch: `chat_update`/`chat_postMessage` called with `blocks` payload.
+- [ ] `_deliver_slack` file-upload branch: `files_upload_v2` called.
+- [ ] `_deliver_slack` multi-block API error falls back to plain text without raising.
 
 ## Files Changed
 
@@ -86,14 +94,19 @@ def split_text(text: str, chunk_size: int) -> list[str]: ...
 | `src/bot.py` | Added `_deliver_telegram()`; import `io` for `BytesIO` file fallback |
 | `src/platform/slack.py` | Added `_deliver_slack()`; constants `_SLACK_BLOCK_LIMIT`, `_SLACK_SNIPPET_THRESHOLD` |
 | `tests/unit/test_platform_common.py` | 8 new `TestSplitText` test cases |
+| `tests/unit/test_bot.py` | 5 new `TestDeliverTelegram` test cases (branch routing + error handling) |
+| `tests/unit/test_slack_bot.py` | 6 new `TestDeliverSlack` test cases (branch routing + fallback) |
 
 ## Implementation Notes
 
 - The fix is intentionally asymmetric: Telegram uses sequential messages, Slack uses
   Block Kit blocks.  The delivery model matches each platform's native affordances.
-- The streaming placeholder (`▌`) is updated from the same message handle as the typing
+- The fix applies to both streaming and non-streaming paths on both platforms.  The
+  streaming placeholder (`▌`) is updated from the same message handle as the typing
   preview throughout.  On completion, `_deliver_telegram` / `_deliver_slack` takes over
-  and may replace, extend, or file-upload as appropriate.
+  and may replace, extend, or file-upload as appropriate.  Non-streaming paths pass the
+  "🤖 Thinking…" placeholder as `streaming_msg` / `existing_ts` so the same functions
+  handle both paths identically — no separate non-streaming delivery code path exists.
 - `files_upload_v2` is the current Slack Files API endpoint (v1 deprecated).
 
 ## Open Questions
@@ -103,7 +116,7 @@ def split_text(text: str, chunk_size: int) -> list[str]: ...
 | OQ1 | Should `_TG_MAX_CHUNKS` and `_SLACK_SNIPPET_THRESHOLD` be configurable via env vars? | Open |
 | OQ2 | Should the streaming preview truncate from the *head* instead of the tail (show the latest content, which is current behaviour)? | Accepted — tail is correct UX for streaming |
 | OQ3 | *Security* — `_deliver_slack()` Block Kit multi-block path (3 001–12 000 chars) sends chunks via `client.chat_postMessage(**kwargs)` directly, bypassing `_reply()`/`_edit()` which apply `self._redactor.redact()`. Secrets in AI responses could leak in multi-section Slack messages. Fix: apply `self._redactor.redact(text)` before splitting so all chunks and the fallback notification text are redacted. | Fixed — `redacted = self._redactor.redact(text)` applied before `split_text()` in `_deliver_slack()` |
-| OQ4 | *Security* — Non-streaming paths bypass delivery functions entirely. `_run_ai_pipeline` (Telegram) sends via `reply_text()` and the Slack non-streaming branch sends via `_reply()` — neither uses `_deliver_telegram()`/`_deliver_slack()`. If `summarize_if_long()` produces output > 4 096 chars (e.g. the AI ignores the length instruction), Telegram will reject the API call. Consider routing non-streaming final delivery through the same functions. | Open |
+| OQ4 | *Security* — Non-streaming paths bypass delivery functions entirely. `_run_ai_pipeline` (Telegram) sends via `reply_text()` and the Slack non-streaming branch sends via `_reply()` — neither uses `_deliver_telegram()`/`_deliver_slack()`. If `summarize_if_long()` produces output > 4 096 chars (e.g. the AI ignores the length instruction), Telegram will reject the API call. | Fixed — non-streaming Telegram path now calls `_deliver_telegram(update, msg, response)` using the thinking placeholder as `streaming_msg`; non-streaming Slack path now calls `_deliver_slack(client, channel, ts_or_None, response, thread_ts)` where `ts_or_None` is `None` when `slack_delete_thinking=True` (placeholder already deleted) or `ts` otherwise (edits placeholder in-place). |
 | OQ5 | *Spec accuracy* — AC 9 says "All 10 `TestSplitText` unit tests pass" but only 8 tests exist: `test_short_text_returned_as_single_chunk`, `test_exact_chunk_size_not_split`, `test_splits_at_paragraph_boundary`, `test_splits_at_sentence_boundary`, `test_splits_at_newline`, `test_hard_cuts_when_no_boundary`, `test_no_data_loss`, `test_empty_string`. Corrected to 8 in this review. | Fixed |
 | OQ6 | *Resilience* — Both delivery functions catch all exceptions with bare `except Exception` and log at WARNING/DEBUG. If `reply_document()` or `files_upload_v2` fails after the "Response is too long" note is sent, the user sees the note but never receives the file, and the full response is silently lost. Consider a fallback (e.g. re-try, or append first N chars inline). | Open |
 
@@ -114,3 +127,4 @@ def split_text(text: str, chunk_size: int) -> list[str]: ...
 | GateCode | R1 | 8/10 | OQ3 confirmed and fixed (redact before split — single-call fix). OQ4 valid concern (non-streaming bypasses delivery functions — OQ open). OQ5 confirmed (file header corrected to 8 tests). OQ6 valid resilience gap (open). CI fixed: spec status line updated to required format. |
 | GateSec | R1 | 8/10 | Redaction bypass in Slack multi-block path (OQ3), non-streaming paths skip delivery functions (OQ4), test count corrected 10→8 (OQ5), silent file-upload failure (OQ6). Streaming redaction and file-upload redaction verified correct. `split_text` is sound — no injection or data-loss vectors. |
 | GateDocs | R1 | 8/10 | Design/AC/Implementation Notes are accurate and asymmetric Telegram/Slack behaviour is well-described. Three gaps: (1) OQ4 must have an explicit disposition (fix now OR defer-with-issue) — "Open" with no decision is a blocker for approval; (2) test plan covers only `split_text` — `_deliver_telegram` and `_deliver_slack` each have 3-branch routing + error paths that have no spec-level test cases; (3) Implementation Notes claim delivery functions are called "on completion" — this is only true for the streaming path; non-streaming path (the OQ4 bug) calls `reply_text()`/`_reply()` directly, subtly contradicting the narrative. OQ6 (silent file-upload failure) is acceptable as deferred. |
+| GateCode | R2 | 9/10 | OQ4 fixed: non-streaming Telegram routed through `_deliver_telegram(update, msg, response)`; non-streaming Slack routed through `_deliver_slack` with `ts_or_None` depending on `slack_delete_thinking`. 11 new delivery routing tests added (5 `TestDeliverTelegram` + 6 `TestDeliverSlack`), all pass. Implementation Notes updated to remove contradictory narrative. OQ6 (silent file-upload failure) remains open and acceptable as deferred. Shared -1: OQ6 deferred without a tracked issue number — should link a GitHub issue before final approval. |

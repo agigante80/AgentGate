@@ -894,3 +894,69 @@ class TestBroadcast:
         ]
         assert all("<!here>" not in t for t in delegation_texts), \
             "<!here> must be stripped from outgoing delegation messages"
+
+
+# ── _deliver_slack ────────────────────────────────────────────────────────────
+
+class TestDeliverSlack:
+    """Branch-routing tests for _deliver_slack."""
+
+    def _make_deliver_bot(self, delete_thinking=False):
+        return _make_bot(_make_settings(slack_delete_thinking=delete_thinking))
+
+    async def test_short_response_edits_existing_ts(self):
+        """≤ 3000 chars with existing_ts → edits the placeholder."""
+        bot = self._make_deliver_bot()
+        client = _make_client()
+        await bot._deliver_slack(client, "C1", "T100", "short text", None)
+        client.chat_update.assert_awaited_once()
+        client.chat_postMessage.assert_not_awaited()
+
+    async def test_short_response_no_ts_posts_new(self):
+        """≤ 3000 chars with existing_ts=None → posts a new message."""
+        bot = self._make_deliver_bot()
+        client = _make_client()
+        await bot._deliver_slack(client, "C1", None, "short text", None)
+        client.chat_postMessage.assert_awaited_once()
+
+    async def test_multi_block_uses_blocks_payload(self):
+        """3001–12000 chars → chat_update with blocks list."""
+        from src.platform.slack import _SLACK_BLOCK_LIMIT
+        bot = self._make_deliver_bot()
+        client = _make_client()
+        text = "z" * (_SLACK_BLOCK_LIMIT + 1)
+        await bot._deliver_slack(client, "C1", "T100", text, None)
+        call_kwargs = client.chat_update.call_args[1]
+        assert "blocks" in call_kwargs
+
+    async def test_large_response_uploads_file(self):
+        """> 12000 chars → files_upload_v2 called."""
+        from src.platform.slack import _SLACK_SNIPPET_THRESHOLD
+        bot = self._make_deliver_bot()
+        client = _make_client()
+        text = "w" * (_SLACK_SNIPPET_THRESHOLD + 1)
+        client.files_upload_v2 = AsyncMock()
+        await bot._deliver_slack(client, "C1", "T100", text, None)
+        client.files_upload_v2.assert_awaited_once()
+
+    async def test_empty_text_posts_placeholder(self):
+        """Empty text → '_(empty response)_' message."""
+        bot = self._make_deliver_bot()
+        client = _make_client()
+        await bot._deliver_slack(client, "C1", None, "", None)
+        client.chat_postMessage.assert_awaited_once()
+        call_text = client.chat_postMessage.call_args[1].get("text", "")
+        assert "empty" in call_text
+
+    async def test_multi_block_fallback_on_api_error(self):
+        """chat_update failure in multi-block path falls back to plain text."""
+        from src.platform.slack import _SLACK_BLOCK_LIMIT
+        bot = self._make_deliver_bot()
+        client = _make_client()
+        client.chat_update = AsyncMock(side_effect=Exception("API error"))
+        text = "z" * (_SLACK_BLOCK_LIMIT + 1)
+        # Should not raise; fallback via _edit which calls chat_update again
+        try:
+            await bot._deliver_slack(client, "C1", "T100", text, None)
+        except Exception:
+            pytest.fail("_deliver_slack should not propagate API errors")
