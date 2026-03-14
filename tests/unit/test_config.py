@@ -106,6 +106,17 @@ class TestBotConfig:
         cfg = BotConfig()
         assert cfg.ai_timeout_secs == 720
 
+    def test_thinking_show_elapsed_default(self):
+        """THINKING_SHOW_ELAPSED defaults to True."""
+        cfg = BotConfig()
+        assert cfg.thinking_show_elapsed is True
+
+    def test_thinking_show_elapsed_disabled(self, monkeypatch):
+        """THINKING_SHOW_ELAPSED=false disables elapsed-time edit."""
+        monkeypatch.setenv("THINKING_SHOW_ELAPSED", "false")
+        cfg = BotConfig()
+        assert cfg.thinking_show_elapsed is False
+
 
 class TestAIConfig:
     def test_default_backend(self):

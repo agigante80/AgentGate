@@ -23,7 +23,7 @@ from src.history import ConversationStorage, build_context as _build_context
 from src.redact import SecretRedactor
 from src.ai import factory as ai_factory
 from src import transcriber as transcriber_mod
-from src.platform.common import thinking_ticker
+from src.platform.common import thinking_ticker, finalize_thinking
 from src.ready_msg import ai_label as _ai_label
 
 logger = logging.getLogger(__name__)
@@ -60,8 +60,10 @@ async def _stream_to_telegram(
     update_interval: int = 30,
     warn_before_secs: int = 60,
     redactor: SecretRedactor | None = None,
+    show_elapsed: bool = True,
 ) -> str:
     """Stream AI response into a Telegram message, editing it as chunks arrive."""
+    t_start = time.monotonic()
     msg = await update.effective_message.reply_text("🤖 Thinking…")
     accumulated = ""
     last_edit = time.monotonic()
@@ -115,7 +117,12 @@ async def _stream_to_telegram(
     if redactor:
         final = redactor.redact(final)
     try:
-        await msg.edit_text(final or "_(empty response)_")
+        elapsed = int(time.monotonic() - t_start)
+        await finalize_thinking(msg.edit_text, elapsed, show_elapsed)
+    except Exception:
+        logger.debug("Telegram thinking-elapsed edit skipped")
+    try:
+        await update.effective_message.reply_text(final or "_(empty response)_")
     except Exception:
         logger.debug("Telegram final edit skipped")
     return final
@@ -193,8 +200,10 @@ class _BotHandlers:
                     update_interval=self._settings.bot.thinking_update_secs,
                     warn_before_secs=self._settings.bot.ai_timeout_warn_secs,
                     redactor=self._redactor,
+                    show_elapsed=self._settings.bot.thinking_show_elapsed,
                 )
             else:
+                t_start = time.monotonic()
                 msg = await update.effective_message.reply_text("🤖 Thinking…")
                 cfg = self._settings.bot
                 ticker = asyncio.create_task(
@@ -227,7 +236,9 @@ class _BotHandlers:
                     response, self._settings.bot.max_output_chars, self._backend
                 )
                 response = self._redactor.redact(response)
-                await msg.edit_text(response or "_(empty response)_")
+                elapsed = int(time.monotonic() - t_start)
+                await finalize_thinking(msg.edit_text, elapsed, cfg.thinking_show_elapsed)
+                await update.effective_message.reply_text(response or "_(empty response)_")
 
             if self._settings.bot.history_enabled:
                 await self._history.add_exchange(chat_id, text, response)

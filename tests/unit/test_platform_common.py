@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.platform.common import build_prompt, is_allowed_slack, save_to_history
+from src.platform.common import build_prompt, is_allowed_slack, save_to_history, finalize_thinking
 from src.config import BotConfig, SlackConfig, Settings
 from src.history import ConversationStorage
 
@@ -126,3 +126,37 @@ class TestIsAllowedSlack:
         assert is_allowed_slack("C123", "U111", settings) is True
         assert is_allowed_slack("C999", "U111", settings) is False
         assert is_allowed_slack("C123", "U999", settings) is False
+
+
+# ── finalize_thinking ─────────────────────────────────────────────────────────
+
+class TestFinalizeThinking:
+    async def test_edits_with_elapsed_seconds(self):
+        """finalize_thinking calls edit_fn with '🤖 Thought for Xs' when enabled."""
+        calls = []
+
+        async def edit_fn(text):
+            calls.append(text)
+
+        await finalize_thinking(edit_fn, elapsed_secs=12, show_elapsed=True)
+        assert calls == ["🤖 Thought for 12s"]
+
+    async def test_formats_minutes_and_seconds(self):
+        """Elapsed >= 60s formats as 'Xm Ys'."""
+        calls = []
+
+        async def edit_fn(text):
+            calls.append(text)
+
+        await finalize_thinking(edit_fn, elapsed_secs=75, show_elapsed=True)
+        assert calls == ["🤖 Thought for 1m 15s"]
+
+    async def test_noop_when_disabled(self):
+        """show_elapsed=False → edit_fn never called."""
+        calls = []
+
+        async def edit_fn(text):
+            calls.append(text)
+
+        await finalize_thinking(edit_fn, elapsed_secs=5, show_elapsed=False)
+        assert calls == []

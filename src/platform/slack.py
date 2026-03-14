@@ -172,6 +172,7 @@ class SlackBot:
     async def _stream_to_slack(
         self, say, client, channel: str, prompt: str, *, thread_ts: str | None = None
     ) -> str:
+        t_start = time.monotonic()
         resp = await self._reply(client, channel, _THINKING, thread_ts)
         ts = resp["ts"]
         accumulated = ""
@@ -230,18 +231,25 @@ class SlackBot:
             with suppress(asyncio.CancelledError):
                 await ticker
 
+        elapsed = int(time.monotonic() - t_start)
         final = (
             accumulated[-max_chars:]
             if len(accumulated) > max_chars
             else accumulated
         )
         final, delegations = _extract_delegations(final)
-        await self._reply(client, channel, final or "_(empty response)_", thread_ts)
         if self._settings.slack.slack_delete_thinking:
             try:
                 await client.chat_delete(channel=channel, ts=ts)
             except Exception:
                 logger.debug("Could not delete thinking placeholder (ts=%s)", ts)
+        else:
+            await common.finalize_thinking(
+                lambda text: self._edit(client, channel, ts, text),
+                elapsed,
+                self._settings.bot.thinking_show_elapsed,
+            )
+        await self._reply(client, channel, final or "_(empty response)_", thread_ts)
         await self._post_delegations(client, channel, delegations, thread_ts=thread_ts)
         return final
 
@@ -318,6 +326,7 @@ class SlackBot:
                     say, client, channel, prompt, thread_ts=thread_ts
                 )
             else:
+                t_start = time.monotonic()
                 resp = await self._reply(client, channel, _THINKING, thread_ts)
                 ts = resp["ts"]
                 cfg = self._settings.bot
@@ -353,16 +362,23 @@ class SlackBot:
                     ticker.cancel()
                     with suppress(asyncio.CancelledError):
                         await ticker
+                elapsed = int(time.monotonic() - t_start)
                 response = await executor.summarize_if_long(
                     response, self._settings.bot.max_output_chars, self._backend
                 )
                 response, delegations = _extract_delegations(response)
-                await self._reply(client, channel, response or "_(empty response)_", thread_ts)
                 if self._settings.slack.slack_delete_thinking:
                     try:
                         await client.chat_delete(channel=channel, ts=ts)
                     except Exception:
                         logger.debug("Could not delete thinking placeholder (ts=%s)", ts)
+                else:
+                    await common.finalize_thinking(
+                        lambda text: self._edit(client, channel, ts, text),
+                        elapsed,
+                        self._settings.bot.thinking_show_elapsed,
+                    )
+                await self._reply(client, channel, response or "_(empty response)_", thread_ts)
                 await self._post_delegations(client, channel, delegations, thread_ts=thread_ts)
             response = self._redactor.redact(response)
             await common.save_to_history(channel, text, response, self._settings, self._history)

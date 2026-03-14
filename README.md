@@ -16,6 +16,7 @@ Chat with your AI coding assistant (GitHub Copilot, Codex, OpenAI, Anthropic) vi
 - 🖊️ **Full CLI pass-through** — send any message (or `/command` like `/init`, `/plan`, `/fix`) and it goes straight to the AI
 - 💬 **Conversation history** — per-chat SQLite store, injected as context
 - ⚡ **Streaming responses** — message updates as the AI types (configurable)
+- 🧠 **Thinking duration** — "🤖 Thought for Xs" shown after every AI response; final answer posted as a new message
 - 🔀 **Multi-turn sessions** — SQLite history injected for stateless backends; Direct API maintains native state
 - 🐳 **One container per project** — fully isolated, all config via env vars
 - 🔒 **Secure** — non-root container, allowlist by chat/user ID, confirmation for destructive shell commands
@@ -186,6 +187,7 @@ Copy `.env.example` — it documents every variable with examples.
 | `THINKING_SLOW_THRESHOLD_SECS` | `15` | Seconds of silence before first "Still thinking…" update |
 | `THINKING_UPDATE_SECS` | `30` | Seconds between subsequent elapsed-time updates |
 | `AI_TIMEOUT_WARN_SECS` | `60` | Seconds before hard timeout to include a cancellation warning |
+| `THINKING_SHOW_ELAPSED` | `true` | When `true`, update the "🤖 Thinking…" placeholder to "🤖 Thought for Xs" after AI responds; final response posted as a new message |
 
 ### Logging
 
@@ -343,6 +345,7 @@ Chat with your AI coding assistant (GitHub Copilot, Codex, OpenAI, Anthropic) vi
 - 📁 **Repo-aware** — clones your project on startup; AI runs in that directory
 - 💬 **Conversation history** — per-chat SQLite store, injected as context
 - ⚡ **Streaming responses** — message updates as the AI types (configurable)
+- 🧠 **Thinking duration** — "🤖 Thought for Xs" shown after every AI response; final answer posted as a new message
 - 🔀 **Multi-turn sessions** — SQLite history injected for stateless backends; Direct API maintains native state
 - 🐳 **One container per project** — fully isolated, all config via env vars
 - 🔒 **Secure** — non-root container, allowlist by chat/user ID, confirmation for destructive shell commands
@@ -483,6 +486,7 @@ Copy `.env.example` — it documents every variable with examples.
 | `THINKING_SLOW_THRESHOLD_SECS` | `15` | Seconds of silence before first "Still thinking…" update |
 | `THINKING_UPDATE_SECS` | `30` | Seconds between subsequent elapsed-time updates |
 | `AI_TIMEOUT_WARN_SECS` | `60` | Seconds before hard timeout to include a cancellation warning |
+| `THINKING_SHOW_ELAPSED` | `true` | When `true`, update the "🤖 Thinking…" placeholder to "🤖 Thought for Xs" after AI responds; final response posted as a new message |
 
 ### Logging
 

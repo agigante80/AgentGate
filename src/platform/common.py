@@ -54,6 +54,20 @@ async def thinking_ticker(
         await asyncio.sleep(update_interval)
 
 
+async def finalize_thinking(
+    edit_fn: Callable[[str], Awaitable[None]],
+    elapsed_secs: int,
+    show_elapsed: bool,
+) -> None:
+    """Edit the thinking placeholder to show total elapsed time (if enabled).
+
+    When show_elapsed is False this is a no-op, leaving the placeholder as-is.
+    """
+    if show_elapsed:
+        label = _format_elapsed(elapsed_secs)
+        await edit_fn(f"🤖 Thought for {label}")
+
+
 async def build_prompt(
     text: str, chat_id: str, settings: Settings, backend: AICLIBackend, storage: ConversationStorage
 ) -> str:

@@ -40,6 +40,7 @@ def _make_settings(
     bot.thinking_slow_threshold_secs = 15
     bot.thinking_update_secs = 30
     bot.ai_timeout_warn_secs = 60
+    bot.thinking_show_elapsed = True
     bot.allow_secrets = False
     gh = MagicMock(spec=GitHubConfig)
     gh.github_repo = "owner/repo"
