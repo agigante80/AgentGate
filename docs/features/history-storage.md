@@ -1,6 +1,6 @@
 # Pluggable History Storage
 
-> Status: **Planned** | Priority: Low | Last reviewed: 2026-03-12
+> Status: **Implemented** | Priority: Low | Last reviewed: 2026-03-12
 
 Introduce a `ConversationStorage` ABC so that the history backend (currently hard-coded to SQLite) can be swapped for Redis, Postgres, or any other store without touching bot logic.
 

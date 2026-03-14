@@ -141,7 +141,7 @@ async def test_startup_calls_slack_branch():
     with patch("src.main.repo.clone", new=AsyncMock()), \
          patch("src.main.repo.configure_git_auth", new=AsyncMock()), \
          patch("src.main.runtime.install_deps", new=AsyncMock(return_value="ok")), \
-         patch("src.main.history.init_db", new=AsyncMock()), \
+         patch("src.main.SQLiteStorage", return_value=MagicMock(init=AsyncMock())), \
          patch("src.main.create_backend", return_value=MagicMock()), \
          patch("src.main._startup_slack", new=AsyncMock()) as mock_slack, \
          patch("src.main._startup_telegram", new=AsyncMock()) as mock_tg:
@@ -166,7 +166,7 @@ async def test_startup_calls_telegram_branch():
     with patch("src.main.repo.clone", new=AsyncMock()), \
          patch("src.main.repo.configure_git_auth", new=AsyncMock()), \
          patch("src.main.runtime.install_deps", new=AsyncMock(return_value="ok")), \
-         patch("src.main.history.init_db", new=AsyncMock()), \
+         patch("src.main.SQLiteStorage", return_value=MagicMock(init=AsyncMock())), \
          patch("src.main.create_backend", return_value=MagicMock()), \
          patch("src.main._startup_slack", new=AsyncMock()) as mock_slack, \
          patch("src.main._startup_telegram", new=AsyncMock()) as mock_tg:

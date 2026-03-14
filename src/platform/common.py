@@ -4,6 +4,7 @@ import time
 from collections.abc import Awaitable, Callable
 
 from src import history
+from src.history import ConversationStorage
 from src.ai.adapter import AICLIBackend
 from src.config import Settings
 
@@ -54,14 +55,14 @@ async def thinking_ticker(
 
 
 async def build_prompt(
-    text: str, chat_id: str, settings: Settings, backend: AICLIBackend
+    text: str, chat_id: str, settings: Settings, backend: AICLIBackend, storage: ConversationStorage
 ) -> str:
     """Build the AI prompt, injecting conversation history for stateless backends."""
     if backend.is_stateful:
         return text
     turns = settings.bot.history_turns
     hist = (
-        await history.get_history(chat_id, limit=turns)
+        await storage.get_history(chat_id, limit=turns)
         if settings.bot.history_enabled and turns > 0
         else []
     )
@@ -69,11 +70,14 @@ async def build_prompt(
 
 
 async def save_to_history(
-    chat_id: str, user_msg: str, response: str, settings: Settings
+    chat_id: str, user_msg: str, response: str, settings: Settings, storage: ConversationStorage
 ) -> None:
-    """Persist an exchange to conversation history (if enabled)."""
+    """Persist an exchange to conversation history (if enabled).
+
+    Callers MUST redact *response* and *user_msg* before calling this method.
+    """
     if settings.bot.history_enabled:
-        await history.add_exchange(chat_id, user_msg, response)
+        await storage.add_exchange(chat_id, user_msg, response)
 
 
 def is_allowed_slack(channel_id: str, user_id: str, settings: Settings) -> bool:

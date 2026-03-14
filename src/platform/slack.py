@@ -30,6 +30,7 @@ from src import executor, repo, transcriber as transcriber_mod
 from src.ai import factory as ai_factory
 from src.ai.adapter import AICLIBackend
 from src.config import Settings, VERSION
+from src.history import ConversationStorage
 from src.platform import common
 from src.platform.common import thinking_ticker
 from src.ready_msg import build_ready_message, ai_label as _ai_label
@@ -105,12 +106,13 @@ class SlackBot:
     """
 
     def __init__(
-        self, settings: Settings, backend: AICLIBackend, start_time: float
+        self, settings: Settings, backend: AICLIBackend, storage: ConversationStorage, start_time: float
     ) -> None:
         from slack_bolt.async_app import AsyncApp
 
         self._settings = settings
         self._backend = backend
+        self._history = storage
         self._start_time = start_time
         self._p = _prefix(settings)
         # (channel, ts) -> pending shell command awaiting confirmation
@@ -292,7 +294,7 @@ class SlackBot:
         self._active_ai[key] = time.time()
         try:
             prompt = await common.build_prompt(
-                text, channel, self._settings, self._backend
+                text, channel, self._settings, self._backend, self._history
             )
             # Prepend auto-generated team context and optional SYSTEM_PROMPT
             context_parts: list[str] = []
@@ -355,7 +357,7 @@ class SlackBot:
                         logger.debug("Could not delete thinking placeholder (ts=%s)", ts)
                 await self._post_delegations(client, channel, delegations, thread_ts=thread_ts)
             response = self._redactor.redact(response)
-            await common.save_to_history(channel, text, response, self._settings)
+            await common.save_to_history(channel, text, response, self._settings, self._history)
         except Exception as exc:
             logger.exception("AI backend error")
             await self._reply(client, channel, f"⚠️ Error: {exc}", thread_ts)
@@ -666,9 +668,7 @@ class SlackBot:
         self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None
     ) -> None:
         if self._settings.bot.history_enabled:
-            await __import__("src.history", fromlist=["clear_history"]).clear_history(
-                channel
-            )
+            await self._history.clear(channel)
         self._backend.clear_history()
         await self._reply(client, channel, "🗑 Conversation history cleared.", thread_ts)
 

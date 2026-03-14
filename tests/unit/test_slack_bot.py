@@ -15,6 +15,7 @@ from src.config import (
     VoiceConfig,
 )
 from src.ai.adapter import AICLIBackend
+from src.history import ConversationStorage
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -123,12 +124,21 @@ def _make_client():
     return client
 
 
-def _make_bot(settings=None, backend=None):
+def _make_storage():
+    storage = MagicMock(spec=ConversationStorage)
+    storage.get_history = AsyncMock(return_value=[])
+    storage.add_exchange = AsyncMock()
+    storage.clear = AsyncMock()
+    return storage
+
+
+def _make_bot(settings=None, backend=None, storage=None):
     settings = settings or _make_settings()
     backend = backend or _make_backend()
+    storage = storage or _make_storage()
     with patch("slack_bolt.async_app.AsyncApp"):
         from src.platform.slack import SlackBot
-        bot = SlackBot(settings, backend, start_time=0.0)
+        bot = SlackBot(settings, backend, storage, start_time=0.0)
     return bot
 
 
@@ -178,9 +188,7 @@ class TestCommandRouting:
         bot = _make_bot(backend=backend)
         say = _make_say()
         client = _make_client()
-        with patch("src.platform.common.history.get_history", AsyncMock(return_value=[])), \
-             patch("src.platform.common.history.build_context", return_value="unknowncmd arg1"), \
-             patch("src.platform.common.history.add_exchange", AsyncMock()):
+        with patch("src.platform.common.history.build_context", return_value="unknowncmd arg1"):
             await bot._on_message(_make_event(text="gate unknowncmd arg1"), say, client)
         # Unknown subcommand should be forwarded to AI, not show "Unknown command"
         backend.send.assert_awaited_once()
@@ -190,9 +198,7 @@ class TestCommandRouting:
         bot = _make_bot(backend=backend)
         say = _make_say()
         client = _make_client()
-        with patch("src.platform.common.history.get_history", AsyncMock(return_value=[])), \
-             patch("src.platform.common.history.build_context", return_value="hello"), \
-             patch("src.platform.common.history.add_exchange", AsyncMock()):
+        with patch("src.platform.common.history.build_context", return_value="hello"):
             await bot._on_message(_make_event(text="what is 2+2?"), say, client)
         backend.send.assert_awaited_once()
 
@@ -469,9 +475,7 @@ class TestStreaming:
         bot._settings.bot.stream_throttle_secs = 0.0  # no throttle in test
         say = _make_say()
         client = _make_client()
-        with patch("src.platform.common.history.add_exchange", AsyncMock()), \
-             patch("src.platform.common.history.get_history", AsyncMock(return_value=[])), \
-             patch("src.platform.common.history.build_context", return_value="streamed!"):
+        with patch("src.platform.common.history.build_context", return_value="streamed!"):
             await bot._run_ai_pipeline(say, client, "query", "C12345")
         # final response and thinking placeholder both go through chat_postMessage
         client.chat_postMessage.assert_awaited()
@@ -493,9 +497,7 @@ class TestStreaming:
         client = _make_client()
         # The thinking placeholder ts comes from the first chat_postMessage call
         client.chat_postMessage.return_value = {"ts": "111.000"}
-        with patch("src.platform.common.history.add_exchange", AsyncMock()), \
-             patch("src.platform.common.history.get_history", AsyncMock(return_value=[])), \
-             patch("src.platform.common.history.build_context", return_value="hello!"):
+        with patch("src.platform.common.history.build_context", return_value="hello!"):
             await bot._run_ai_pipeline(say, client, "hi", "C12345")
         client.chat_delete.assert_awaited_once()
         assert client.chat_delete.call_args[1]["ts"] == "111.000"
@@ -513,9 +515,7 @@ class TestStreaming:
         bot._settings.bot.stream_throttle_secs = 0.0
         say = _make_say()
         client = _make_client()
-        with patch("src.platform.common.history.add_exchange", AsyncMock()), \
-             patch("src.platform.common.history.get_history", AsyncMock(return_value=[])), \
-             patch("src.platform.common.history.build_context", return_value="hello!"):
+        with patch("src.platform.common.history.build_context", return_value="hello!"):
             await bot._run_ai_pipeline(say, client, "hi", "C12345")
         client.chat_delete.assert_not_awaited()
 
@@ -533,9 +533,7 @@ class TestStreaming:
         say = _make_say()
         client = _make_client()
         client.chat_delete.side_effect = Exception("delete forbidden")
-        with patch("src.platform.common.history.add_exchange", AsyncMock()), \
-             patch("src.platform.common.history.get_history", AsyncMock(return_value=[])), \
-             patch("src.platform.common.history.build_context", return_value="hello!"):
+        with patch("src.platform.common.history.build_context", return_value="hello!"):
             # Must not raise
             await bot._run_ai_pipeline(say, client, "hi", "C12345")
         # Response still posted despite delete failure
@@ -547,9 +545,7 @@ class TestStreaming:
         bot = _make_bot(_make_settings(stream=False), backend=backend)
         say = _make_say()
         client = _make_client()
-        with patch("src.platform.common.history.add_exchange", AsyncMock()), \
-             patch("src.platform.common.history.get_history", AsyncMock(return_value=[])), \
-             patch("src.platform.common.history.build_context", return_value="non-streamed!"), \
+        with patch("src.platform.common.history.build_context", return_value="non-streamed!"), \
              patch("src.executor.summarize_if_long", AsyncMock(return_value="non-streamed!")):
             await bot._run_ai_pipeline(say, client, "query", "C12345")
         client.chat_postMessage.assert_awaited()
@@ -569,9 +565,7 @@ class TestDelegation:
         bot = _make_bot(_make_settings(stream=False), backend=backend)
         say = _make_say()
         client = _make_client()
-        with patch("src.platform.common.history.add_exchange", AsyncMock()), \
-             patch("src.platform.common.history.get_history", AsyncMock(return_value=[])), \
-             patch("src.platform.common.history.build_context", return_value=response_with_sentinel), \
+        with patch("src.platform.common.history.build_context", return_value=response_with_sentinel), \
              patch("src.executor.summarize_if_long", AsyncMock(return_value=response_with_sentinel)):
             await bot._run_ai_pipeline(say, client, "query", "C12345")
         # Three chat_postMessage calls: thinking placeholder + main response + delegation
@@ -587,9 +581,7 @@ class TestDelegation:
         bot = _make_bot(_make_settings(stream=False), backend=backend)
         say = _make_say()
         client = _make_client()
-        with patch("src.platform.common.history.add_exchange", AsyncMock()), \
-             patch("src.platform.common.history.get_history", AsyncMock(return_value=[])), \
-             patch("src.platform.common.history.build_context", return_value=response_with_sentinel), \
+        with patch("src.platform.common.history.build_context", return_value=response_with_sentinel), \
              patch("src.executor.summarize_if_long", AsyncMock(return_value=response_with_sentinel)):
             await bot._run_ai_pipeline(say, client, "query", "C12345")
         # Second postMessage call is the main response (first is thinking placeholder)
@@ -606,11 +598,9 @@ class TestDelegation:
         say = _make_say()
         client = _make_client()
         saved_texts: list[str] = []
-        async def _capture_save(channel, user_text, ai_text, settings):
+        async def _capture_save(channel, user_text, ai_text, settings, storage):
             saved_texts.append(ai_text)
-        with patch("src.platform.common.history.add_exchange", AsyncMock()), \
-             patch("src.platform.common.history.get_history", AsyncMock(return_value=[])), \
-             patch("src.platform.common.history.build_context", return_value=response_with_sentinel), \
+        with patch("src.platform.common.history.build_context", return_value=response_with_sentinel), \
              patch("src.executor.summarize_if_long", AsyncMock(return_value=response_with_sentinel)), \
              patch("src.platform.common.save_to_history", _capture_save):
             await bot._run_ai_pipeline(say, client, "query", "C12345")
@@ -632,9 +622,7 @@ class TestDelegation:
                 raise Exception("channel not found")
             return {"ts": "1001.000"}
         client.chat_postMessage.side_effect = _sometimes_fail
-        with patch("src.platform.common.history.add_exchange", AsyncMock()), \
-             patch("src.platform.common.history.get_history", AsyncMock(return_value=[])), \
-             patch("src.platform.common.history.build_context", return_value=response_with_sentinel), \
+        with patch("src.platform.common.history.build_context", return_value=response_with_sentinel), \
              patch("src.executor.summarize_if_long", AsyncMock(return_value=response_with_sentinel)):
             await bot._run_ai_pipeline(say, client, "query", "C12345")
         # Main response was posted (first call)
@@ -674,9 +662,7 @@ class TestDelegation:
         bot = _make_bot(_make_settings(stream=True, stream_throttle=0.0), backend=backend)
         say = _make_say()
         client = _make_client()
-        with patch("src.platform.common.history.add_exchange", AsyncMock()), \
-             patch("src.platform.common.history.get_history", AsyncMock(return_value=[])), \
-             patch("src.platform.common.history.build_context", return_value=response_with_sentinel):
+        with patch("src.platform.common.history.build_context", return_value=response_with_sentinel):
             await bot._run_ai_pipeline(say, client, "query", "C12345")
         texts = [c[1]["text"] for c in client.chat_postMessage.call_args_list]
         assert any("docs" in t and "README" in t for t in texts)
@@ -694,9 +680,7 @@ class TestThreadReplies:
         say = _make_say()
         client = _make_client()
         event = _make_event(text="hello", ts="T100")
-        with patch("src.platform.common.history.get_history", AsyncMock(return_value=[])), \
-             patch("src.platform.common.history.build_context", return_value="hello"), \
-             patch("src.platform.common.history.add_exchange", AsyncMock()):
+        with patch("src.platform.common.history.build_context", return_value="hello"):
             await bot._on_message(event, say, client)
         for call in client.chat_postMessage.call_args_list:
             assert "thread_ts" not in call[1], "thread_ts must not be set when disabled"
@@ -709,9 +693,7 @@ class TestThreadReplies:
         client = _make_client()
         # Root-level message: has ts but no thread_ts
         event = _make_event(text="hello", ts="T200")
-        with patch("src.platform.common.history.get_history", AsyncMock(return_value=[])), \
-             patch("src.platform.common.history.build_context", return_value="hello"), \
-             patch("src.platform.common.history.add_exchange", AsyncMock()):
+        with patch("src.platform.common.history.build_context", return_value="hello"):
             await bot._on_message(event, say, client)
         # At least one postMessage should carry thread_ts=T200
         thread_ts_values = [
@@ -727,9 +709,7 @@ class TestThreadReplies:
         client = _make_client()
         # Message inside a thread: has both ts (reply ts) and thread_ts (root ts)
         event = _make_event(text="follow-up", ts="T300", thread_ts="T100")
-        with patch("src.platform.common.history.get_history", AsyncMock(return_value=[])), \
-             patch("src.platform.common.history.build_context", return_value="follow-up"), \
-             patch("src.platform.common.history.add_exchange", AsyncMock()):
+        with patch("src.platform.common.history.build_context", return_value="follow-up"):
             await bot._on_message(event, say, client)
         thread_ts_values = [
             c[1].get("thread_ts") for c in client.chat_postMessage.call_args_list
@@ -748,9 +728,7 @@ class TestThreadReplies:
         say = _make_say()
         client = _make_client()
         event = _make_event(text="hi", ts="T400")
-        with patch("src.platform.common.history.get_history", AsyncMock(return_value=[])), \
-             patch("src.platform.common.history.build_context", return_value="hi"), \
-             patch("src.platform.common.history.add_exchange", AsyncMock()):
+        with patch("src.platform.common.history.build_context", return_value="hi"):
             await bot._on_message(event, say, client)
         thread_ts_values = [
             c[1].get("thread_ts") for c in client.chat_postMessage.call_args_list
@@ -778,9 +756,7 @@ class TestThreadReplies:
         say = _make_say()
         client = _make_client()
         event = _make_event(text="review", ts="T600")
-        with patch("src.platform.common.history.get_history", AsyncMock(return_value=[])), \
-             patch("src.platform.common.history.build_context", return_value="review"), \
-             patch("src.platform.common.history.add_exchange", AsyncMock()):
+        with patch("src.platform.common.history.build_context", return_value="review"):
             await bot._on_message(event, say, client)
         delegation_calls = [
             c for c in client.chat_postMessage.call_args_list
@@ -910,9 +886,7 @@ class TestBroadcast:
         say = _make_say()
         client = _make_client()
         event = _make_event(text="gate review this")
-        with patch("src.platform.common.history.get_history", AsyncMock(return_value=[])), \
-             patch("src.platform.common.history.build_context", return_value="review this"), \
-             patch("src.platform.common.history.add_exchange", AsyncMock()):
+        with patch("src.platform.common.history.build_context", return_value="review this"):
             await bot._on_message(event, say, client)
         delegation_texts = [
             c[1].get("text", "") for c in client.chat_postMessage.call_args_list

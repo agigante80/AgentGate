@@ -8,8 +8,9 @@ import time
 
 from src.config import Settings
 from src.ai.factory import create_backend
-from src import repo, runtime, history
-from src.config import REPO_DIR
+from src import repo, runtime
+from src.config import REPO_DIR, DB_PATH
+from src.history import SQLiteStorage
 from src.logging_setup import configure_logging
 from src.ready_msg import build_ready_message
 logger = logging.getLogger(__name__)
@@ -61,7 +62,7 @@ def _validate_config(settings: Settings) -> None:
             )
 
 
-async def _startup_telegram(settings: Settings, backend, start_time: float) -> None:
+async def _startup_telegram(settings: Settings, backend, storage: SQLiteStorage, start_time: float) -> None:
     from src.bot import build_app, _prefix
 
     loop = asyncio.get_running_loop()
@@ -74,7 +75,7 @@ async def _startup_telegram(settings: Settings, backend, start_time: float) -> N
 
     signal.signal(signal.SIGTERM, _handle_sigterm)
 
-    app = build_app(settings, backend, start_time)
+    app = build_app(settings, backend, storage, start_time)
     p = _prefix(settings)
     ready_msg = build_ready_message(settings, _read_version(), p)
 
@@ -91,13 +92,13 @@ async def _startup_telegram(settings: Settings, backend, start_time: float) -> N
         await stop_event.wait()
 
 
-async def _startup_slack(settings: Settings, backend, start_time: float) -> None:
+async def _startup_slack(settings: Settings, backend, storage: SQLiteStorage, start_time: float) -> None:
     from src.platform.slack import SlackBot
 
     loop = asyncio.get_running_loop()
     stop_event = asyncio.Event()
 
-    bot = SlackBot(settings, backend, start_time)
+    bot = SlackBot(settings, backend, storage, start_time)
 
     def _handle_sigterm(*_):
         logger.info("Received SIGTERM, shutting down…")
@@ -187,16 +188,17 @@ async def startup(settings: Settings) -> None:
     logger.info(dep_result)
 
     logger.info("Initializing conversation history DB…")
-    await history.init_db()
+    storage = SQLiteStorage(DB_PATH)
+    await storage.init()
 
     logger.info("Initializing AI backend: %s", settings.ai.ai_cli)
     backend = create_backend(settings.ai)
 
     logger.info("Starting platform: %s", settings.platform)
     if settings.platform == "slack":
-        await _startup_slack(settings, backend, start_time)
+        await _startup_slack(settings, backend, storage, start_time)
     else:
-        await _startup_telegram(settings, backend, start_time)
+        await _startup_telegram(settings, backend, storage, start_time)
 
 
 def main() -> None:

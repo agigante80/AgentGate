@@ -1,10 +1,11 @@
 """Unit tests for src/platform/common.py — platform-agnostic helpers."""
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from src.platform.common import build_prompt, is_allowed_slack, save_to_history
 from src.config import BotConfig, SlackConfig, Settings
+from src.history import ConversationStorage
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -33,71 +34,66 @@ def _make_backend(is_stateful: bool):
     return backend
 
 
+def _make_storage(history=None):
+    storage = MagicMock(spec=ConversationStorage)
+    storage.get_history = AsyncMock(return_value=history or [])
+    storage.add_exchange = AsyncMock()
+    storage.clear = AsyncMock()
+    return storage
+
+
 # ── build_prompt ──────────────────────────────────────────────────────────────
 
 class TestBuildPrompt:
     async def test_stateful_returns_text_directly(self):
         backend = _make_backend(is_stateful=True)
-        result = await build_prompt("hello", "chan1", _make_settings(), backend)
+        storage = _make_storage()
+        result = await build_prompt("hello", "chan1", _make_settings(), backend, storage)
         assert result == "hello"
+        storage.get_history.assert_not_awaited()
 
     async def test_stateless_no_history(self):
         backend = _make_backend(is_stateful=False)
         settings = _make_settings(history_enabled=False)
-        with __import__("unittest.mock", fromlist=["patch"]).patch(
-            "src.platform.common.history.get_history", AsyncMock(return_value=[])
-        ), __import__("unittest.mock", fromlist=["patch"]).patch(
-            "src.platform.common.history.build_context",
-            return_value="context+hello",
-        ):
-            result = await build_prompt("hello", "chan1", settings, backend)
-        # history_enabled=False → hist=[], build_context([], text) still called
-        assert result == "context+hello"
+        storage = _make_storage(history=[])
+        result = await build_prompt("hello", "chan1", settings, backend, storage)
+        # history_enabled=False → hist=[], build_context([], text) returns text unchanged
+        assert result == "hello"
 
     async def test_stateless_injects_history(self):
-        from unittest.mock import patch, AsyncMock
-
         backend = _make_backend(is_stateful=False)
         settings = _make_settings(history_enabled=True)
         hist = [("q", "a")]
-        with patch(
-            "src.platform.common.history.get_history", AsyncMock(return_value=hist)
-        ), patch(
-            "src.platform.common.history.build_context",
-            return_value="context+hello",
-        ):
-            result = await build_prompt("hello", "chan1", settings, backend)
+        storage = _make_storage(history=hist)
+        with patch("src.platform.common.history.build_context", return_value="context+hello"):
+            result = await build_prompt("hello", "chan1", settings, backend, storage)
         assert result == "context+hello"
 
     async def test_history_turns_zero_no_injection(self):
         """HISTORY_TURNS=0: build_prompt returns raw text even when history_enabled=True."""
         backend = _make_backend(is_stateful=False)
         settings = _make_settings(history_enabled=True, history_turns=0)
-        result = await build_prompt("hello", "chan1", settings, backend)
+        storage = _make_storage()
+        result = await build_prompt("hello", "chan1", settings, backend, storage)
         assert result == "hello"
         assert "<HISTORY>" not in result
+        storage.get_history.assert_not_awaited()
 
 
 # ── save_to_history ───────────────────────────────────────────────────────────
 
 class TestSaveToHistory:
     async def test_saves_when_enabled(self):
-        from unittest.mock import patch, AsyncMock
-
         settings = _make_settings(history_enabled=True)
-        mock_add = AsyncMock()
-        with patch("src.platform.common.history.add_exchange", mock_add):
-            await save_to_history("chan1", "question", "answer", settings)
-        mock_add.assert_awaited_once_with("chan1", "question", "answer")
+        storage = _make_storage()
+        await save_to_history("chan1", "question", "answer", settings, storage)
+        storage.add_exchange.assert_awaited_once_with("chan1", "question", "answer")
 
     async def test_skips_when_disabled(self):
-        from unittest.mock import patch, AsyncMock
-
         settings = _make_settings(history_enabled=False)
-        mock_add = AsyncMock()
-        with patch("src.platform.common.history.add_exchange", mock_add):
-            await save_to_history("chan1", "question", "answer", settings)
-        mock_add.assert_not_awaited()
+        storage = _make_storage()
+        await save_to_history("chan1", "question", "answer", settings, storage)
+        storage.add_exchange.assert_not_awaited()
 
 
 # ── is_allowed_slack ──────────────────────────────────────────────────────────

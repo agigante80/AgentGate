@@ -209,9 +209,14 @@ class TestCmdDiffSanitization:
         settings.voice.whisper_api_key = ""
 
         from src.bot import _BotHandlers
+        from src.history import ConversationStorage
         backend = MagicMock()
         backend.is_stateful = False
-        handlers = _BotHandlers(settings, backend, start_time=0.0)
+        storage = MagicMock(spec=ConversationStorage)
+        storage.get_history = AsyncMock(return_value=[])
+        storage.add_exchange = AsyncMock()
+        storage.clear = AsyncMock()
+        handlers = _BotHandlers(settings, backend, storage, start_time=0.0)
 
         update = MagicMock()
         update.effective_chat.id = 99999
@@ -268,7 +273,12 @@ class TestCmdDiffSanitization:
 
         backend = MagicMock()
         backend.is_stateful = False
-        handlers = _BotHandlers(settings, backend, start_time=0.0)
+        from src.history import ConversationStorage
+        storage = MagicMock(spec=ConversationStorage)
+        storage.get_history = AsyncMock(return_value=[])
+        storage.add_exchange = AsyncMock()
+        storage.clear = AsyncMock()
+        handlers = _BotHandlers(settings, backend, storage, start_time=0.0)
 
         update = MagicMock()
         update.effective_chat.id = 99999

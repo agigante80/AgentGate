@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from src.bot import _BotHandlers, build_app, _stream_to_telegram
 from src.config import Settings, TelegramConfig, BotConfig, AIConfig, GitHubConfig, VoiceConfig, DirectAIConfig
 from src.ai.adapter import AICLIBackend
+from src.history import ConversationStorage
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -90,10 +91,18 @@ def _make_backend(stateful=False, response="AI response"):
     return backend
 
 
-def _make_handlers(settings=None, backend=None):
+def _make_storage():
+    storage = MagicMock(spec=ConversationStorage)
+    storage.get_history = AsyncMock(return_value=[])
+    storage.add_exchange = AsyncMock()
+    storage.clear = AsyncMock()
+    return storage
+
+
+def _make_handlers(settings=None, backend=None, storage=None):
     settings = settings or _make_settings()
     backend = backend or _make_backend()
-    return _BotHandlers(settings, backend, start_time=0.0)
+    return _BotHandlers(settings, backend, storage or _make_storage(), start_time=0.0)
 
 
 # ── cmd_run ───────────────────────────────────────────────────────────────────
@@ -181,23 +190,23 @@ class TestCmdStatus:
 class TestCmdClear:
     async def test_clears_sqlite_and_backend(self):
         backend = _make_backend()
-        h = _make_handlers(backend=backend)
+        storage = _make_storage()
+        h = _make_handlers(backend=backend, storage=storage)
         update = _make_update()
 
-        with patch("src.bot.history.clear_history", new=AsyncMock()) as mock_hist:
-            await h.cmd_clear(update, MagicMock())
-            mock_hist.assert_awaited_once()
+        await h.cmd_clear(update, MagicMock())
+        storage.clear.assert_awaited_once()
         backend.clear_history.assert_called_once()
 
     async def test_clear_skips_sqlite_when_disabled(self):
         settings = _make_settings(history_enabled=False)
         backend = _make_backend()
-        h = _make_handlers(settings=settings, backend=backend)
+        storage = _make_storage()
+        h = _make_handlers(settings=settings, backend=backend, storage=storage)
         update = _make_update()
 
-        with patch("src.bot.history.clear_history", new=AsyncMock()) as mock_hist:
-            await h.cmd_clear(update, MagicMock())
-            mock_hist.assert_not_awaited()
+        await h.cmd_clear(update, MagicMock())
+        storage.clear.assert_not_awaited()
 
 
 # ── _requires_auth ────────────────────────────────────────────────────────────
@@ -232,21 +241,21 @@ class TestForwardToAI:
         h = _make_handlers(backend=backend)
         update = _make_update(text="hello AI")
 
-        with patch("src.bot.history.add_exchange", new=AsyncMock()), \
-             patch("src.bot.history.get_history", new=AsyncMock(return_value=[])):
-            await h.forward_to_ai(update, MagicMock())
+        await h.forward_to_ai(update, MagicMock())
 
         backend.send.assert_awaited_once_with("hello AI")
 
     async def test_stateless_injects_history(self):
         backend = _make_backend(stateful=False)
-        h = _make_handlers(backend=backend)
-        update = _make_update(text="hello AI")
         hist = [("prev q", "prev a")]
+        storage = MagicMock(spec=ConversationStorage)
+        storage.get_history = AsyncMock(return_value=hist)
+        storage.add_exchange = AsyncMock()
+        storage.clear = AsyncMock()
+        h = _make_handlers(backend=backend, storage=storage)
+        update = _make_update(text="hello AI")
 
-        with patch("src.bot.history.get_history", new=AsyncMock(return_value=hist)), \
-             patch("src.bot.history.add_exchange", new=AsyncMock()):
-            await h.forward_to_ai(update, MagicMock())
+        await h.forward_to_ai(update, MagicMock())
 
         call_prompt = backend.send.call_args[0][0]
         assert "prev q" in call_prompt
@@ -258,9 +267,7 @@ class TestForwardToAI:
         h = _make_handlers(backend=backend)
         update = _make_update(text="test")
 
-        with patch("src.bot.history.get_history", new=AsyncMock(return_value=[])), \
-             patch("src.bot.history.add_exchange", new=AsyncMock()):
-            await h.forward_to_ai(update, MagicMock())
+        await h.forward_to_ai(update, MagicMock())
 
         reply_text = update.effective_message.reply_text.call_args[0][0]
         assert "⚠️" in reply_text
@@ -455,9 +462,7 @@ class TestHandleVoice:
         status_msg = AsyncMock()
         update.effective_message.reply_text = AsyncMock(return_value=status_msg)
 
-        with patch("src.bot.history.add_exchange", new=AsyncMock()), \
-             patch("src.bot.history.get_history", new=AsyncMock(return_value=[])):
-            await h.handle_voice(update, MagicMock())
+        await h.handle_voice(update, MagicMock())
 
         # Transcription shown
         status_msg.edit_text.assert_awaited()
@@ -637,11 +642,10 @@ class TestRunAiPipelineStreaming:
         """When stream_responses=True, _stream_to_telegram is called (line 167)."""
         settings = _make_settings(stream=True, history_enabled=False)
         backend = _make_backend(stateful=False, response="streamed reply")
-        h = _BotHandlers(settings, backend, start_time=0.0)
+        h = _BotHandlers(settings, backend, _make_storage(), start_time=0.0)
         update = _make_update()
 
-        with patch("src.bot._stream_to_telegram", new=AsyncMock(return_value="streamed reply")) as mock_stream, \
-             patch("src.bot.history.add_exchange", new=AsyncMock()):
+        with patch("src.bot._stream_to_telegram", new=AsyncMock(return_value="streamed reply")) as mock_stream:
             await h._run_ai_pipeline(update, "hello", "99999")
 
         mock_stream.assert_awaited_once()
@@ -651,12 +655,11 @@ class TestRunAiPipelineStreaming:
         settings = _make_settings(stream=False, history_enabled=False)
         settings.bot.ai_timeout_secs = 30
         backend = _make_backend(stateful=True, response="ok")
-        h = _BotHandlers(settings, backend, start_time=0.0)
+        h = _BotHandlers(settings, backend, _make_storage(), start_time=0.0)
         update = _make_update()
 
         with patch("src.bot.asyncio.wait_for", new=AsyncMock(return_value="ok")) as mock_wait_for, \
-             patch("src.bot.executor.summarize_if_long", new=AsyncMock(return_value="ok")), \
-             patch("src.bot.history.add_exchange", new=AsyncMock()):
+             patch("src.bot.executor.summarize_if_long", new=AsyncMock(return_value="ok")):
             await h._run_ai_pipeline(update, "hello", "99999")
 
         mock_wait_for.assert_awaited_once()
@@ -666,7 +669,7 @@ class TestRunAiPipelineStreaming:
         settings = _make_settings(stream=False, history_enabled=False)
         settings.bot.ai_timeout_secs = 5
         backend = _make_backend(stateful=True)
-        h = _BotHandlers(settings, backend, start_time=0.0)
+        h = _BotHandlers(settings, backend, _make_storage(), start_time=0.0)
         update = _make_update()
 
         with patch("src.bot.asyncio.wait_for", new=AsyncMock(side_effect=asyncio.TimeoutError())):
@@ -686,7 +689,7 @@ class TestInitTranscriber:
         settings = _make_settings()
         backend = _make_backend()
         with patch("src.bot.transcriber_mod.create_transcriber", side_effect=NotImplementedError("bad")):
-            h = _BotHandlers(settings, backend, start_time=0.0)
+            h = _BotHandlers(settings, backend, _make_storage(), start_time=0.0)
         assert h._transcriber is None
 
 
@@ -769,7 +772,7 @@ class TestHandleVoiceNoAudio:
         mock_transcriber.transcribe = AsyncMock(return_value="hello")
 
         with patch("src.bot.transcriber_mod.create_transcriber", return_value=AsyncMock(spec=[])):
-            h = _BotHandlers(settings, backend, start_time=0.0)
+            h = _BotHandlers(settings, backend, _make_storage(), start_time=0.0)
         # Force a non-None transcriber so we get past the first guard
         h._transcriber = mock_transcriber
 
@@ -799,7 +802,7 @@ class TestBuildApp:
         with patch("src.bot.Application") as MockApp:
             mock_app_instance = MagicMock()
             MockApp.builder.return_value.token.return_value.build.return_value = mock_app_instance
-            build_app(settings, backend, 0.0)
+            build_app(settings, backend, _make_storage(), 0.0)
 
         # 12 CommandHandlers + 1 CallbackQueryHandler + 2 MessageHandlers = 16
         assert mock_app_instance.add_handler.call_count == 16

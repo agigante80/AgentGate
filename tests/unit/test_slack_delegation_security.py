@@ -20,6 +20,7 @@ from src.config import (
     VoiceConfig,
 )
 from src.ai.adapter import AICLIBackend
+from src.history import ConversationStorage
 from src.platform.slack import (
     SlackBot,
     _BLOCKED_DELEGATION_SUBS,
@@ -80,12 +81,21 @@ def _make_settings():
     return settings
 
 
+def _make_storage():
+    storage = MagicMock(spec=ConversationStorage)
+    storage.get_history = AsyncMock(return_value=[])
+    storage.add_exchange = AsyncMock()
+    storage.clear = AsyncMock()
+    return storage
+
+
 def _make_bot():
     settings = _make_settings()
     backend = MagicMock(spec=AICLIBackend)
     backend.is_stateful = True
+    storage = _make_storage()
     with patch("slack_bolt.async_app.AsyncApp"):
-        bot = SlackBot(settings, backend, start_time=0.0)
+        bot = SlackBot(settings, backend, storage, start_time=0.0)
     bot._bot_display_name = "GateCode"
     return bot
 

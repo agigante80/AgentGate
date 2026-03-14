@@ -17,7 +17,8 @@ from telegram.ext import (
 
 from src.ai.adapter import AICLIBackend
 from src.config import Settings, VERSION
-from src import executor, history, repo
+from src import executor, repo
+from src.history import ConversationStorage, build_context as _build_context
 from src.redact import SecretRedactor
 from src.ai import factory as ai_factory
 from src import transcriber as transcriber_mod
@@ -134,9 +135,10 @@ def _requires_auth(method: Callable) -> Callable:
 # ── Handler class ────────────────────────────────────────────────────────────
 
 class _BotHandlers:
-    def __init__(self, settings: Settings, backend: AICLIBackend, start_time: float) -> None:
+    def __init__(self, settings: Settings, backend: AICLIBackend, storage: ConversationStorage, start_time: float) -> None:
         self._settings = settings
         self._backend = backend
+        self._history = storage
         self._start_time = start_time
         self._p = _prefix(settings)
         # (chat_id, message_id) → shell command waiting for confirmation
@@ -167,8 +169,8 @@ class _BotHandlers:
             if self._backend.is_stateful:
                 prompt = text
             else:
-                hist = await history.get_history(chat_id) if self._settings.bot.history_enabled else []
-                prompt = history.build_context(hist, text)
+                hist = await self._history.get_history(chat_id) if self._settings.bot.history_enabled else []
+                prompt = _build_context(hist, text)
 
             if self._settings.bot.stream_responses:
                 response = await _stream_to_telegram(
@@ -217,7 +219,7 @@ class _BotHandlers:
                 await msg.edit_text(response or "_(empty response)_")
 
             if self._settings.bot.history_enabled:
-                await history.add_exchange(chat_id, text, response)
+                await self._history.add_exchange(chat_id, text, response)
         except Exception as exc:
             logger.exception("AI backend error")
             await _reply(update, self._redactor.redact(f"⚠️ Error: {exc}"))
@@ -420,7 +422,7 @@ class _BotHandlers:
     async def cmd_clear(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = str(update.effective_chat.id)
         if self._settings.bot.history_enabled:
-            await history.clear_history(chat_id)
+            await self._history.clear(chat_id)
         self._backend.clear_history()
         await _reply(update, "🗑 Conversation history cleared.")
 
@@ -489,9 +491,9 @@ class _BotHandlers:
 
 # ── App factory ──────────────────────────────────────────────────────────────
 
-def build_app(settings: Settings, backend: AICLIBackend, start_time: float) -> Application:
+def build_app(settings: Settings, backend: AICLIBackend, storage: ConversationStorage, start_time: float) -> Application:
     app = Application.builder().token(settings.telegram.bot_token).build()
-    h = _BotHandlers(settings, backend, start_time)
+    h = _BotHandlers(settings, backend, storage, start_time)
     p = _prefix(settings)
 
     app.add_handler(CommandHandler(p, h.cmd_ta))
