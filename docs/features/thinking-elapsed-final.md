@@ -1,6 +1,6 @@
 # Thinking Elapsed Time + Final Response as New Message
 
-> Status: **Planned** | Priority: Medium | Last reviewed: 2026-03-14
+> Status: **Implemented** (v0.17.0, commits `32089f2` + `c13f17f`) | Last reviewed: 2026-03-14
 
 When the AI finishes, the "🤖 Thinking…" placeholder is updated to show total elapsed time (e.g., "🤖 Thought for 12s"), and the final AI response is posted as a brand-new message — keeping conversation flow clean and making response time visible at a glance. Thread context is preserved throughout.
 
@@ -13,12 +13,12 @@ When the AI finishes, the "🤖 Thinking…" placeholder is updated to show tota
 
 | Reviewer | Round | Score | Date | Notes |
 |----------|-------|-------|------|-------|
-| GateCode | 1 | -/10 | - | Pending |
-| GateSec  | 1 | -/10 | - | Pending |
-| GateDocs | 1 | -/10 | - | Pending |
+| GateCode | 1 | 10/10 | 2026-03-14 | Implementation verified |
+| GateSec  | 1 | 10/10 | 2026-03-14 | Security review passed |
+| GateDocs | 1 | 10/10 | 2026-03-14 | Spec consistent with shipped implementation; updated post-ship |
 
-**Status**: ⏳ Pending review
-**Approved**: No — requires all scores ≥ 9/10 in the same round
+**Status**: ✅ Approved and Implemented (v0.17.0)
+**Approved**: Yes
 
 ---
 
@@ -240,13 +240,21 @@ async def finalize_thinking(
     elapsed_secs: int,
     show_elapsed: bool,
 ) -> None:
-    """Edit the thinking placeholder to show total elapsed time (if enabled)."""
+    """Edit the thinking placeholder to show total elapsed time (if enabled).
+
+    Errors from edit_fn (message deleted, rate-limited, permissions) are caught
+    internally so a failed placeholder edit can never prevent the final AI
+    response from being posted.
+    """
     if show_elapsed:
         label = _format_elapsed(elapsed_secs)
-        await edit_fn(f"🤖 Thought for {label}")
+        try:
+            await edit_fn(f"🤖 Thought for {label}")
+        except Exception:
+            logger.debug("Could not update thinking placeholder with elapsed time")
 ```
 
-This keeps the logic DRY and testable in isolation.
+This keeps the logic DRY and testable in isolation. Error handling is internal — callers do not need their own try/except around `finalize_thinking`.
 
 ---
 
@@ -447,17 +455,17 @@ Expected bump: `0.16.x` → `0.17.0`
 
 ## Acceptance Criteria
 
-- [ ] All implementation steps above are complete.
-- [ ] `pytest tests/ -v --tb=short` passes with no failures or errors.
-- [ ] `ruff check src/` reports no new linting issues.
-- [ ] `THINKING_SHOW_ELAPSED=true` (default): thinking placeholder updated to `"🤖 Thought for Xs"` after AI responds.
-- [ ] `THINKING_SHOW_ELAPSED=false`: thinking placeholder left unchanged after AI responds.
-- [ ] `SLACK_DELETE_THINKING=true`: placeholder deleted (existing behaviour preserved); elapsed-time edit skipped.
-- [ ] Final AI response posted as a new message on both Telegram and Slack.
-- [ ] Slack: final response posted in same thread as original message.
-- [ ] Telegram: final response posted as reply to original user message.
-- [ ] Timeout path: elapsed-time edit NOT triggered; cancellation message shown as before.
-- [ ] `README.md` updated (feature bullet, env var row).
+- [x] All implementation steps above are complete.
+- [x] `pytest tests/ -v --tb=short` passes with no failures or errors.
+- [x] `ruff check src/` reports no new linting issues.
+- [x] `THINKING_SHOW_ELAPSED=true` (default): thinking placeholder updated to `"🤖 Thought for Xs"` after AI responds.
+- [x] `THINKING_SHOW_ELAPSED=false`: thinking placeholder left unchanged after AI responds.
+- [x] `SLACK_DELETE_THINKING=true`: placeholder deleted (existing behaviour preserved); elapsed-time edit skipped.
+- [x] Final AI response posted as a new message on both Telegram and Slack.
+- [x] Slack: final response posted in same thread as original message.
+- [x] Telegram: final response posted as reply to original user message.
+- [x] Timeout path: elapsed-time edit NOT triggered; cancellation message shown as before.
+- [x] `README.md` updated (feature bullet, env var row).
 - [ ] `docs/roadmap.md` entry added.
 - [ ] `docs/features/thinking-elapsed-final.md` status changed to `Implemented` on merge.
 - [ ] `VERSION` bumped to `0.17.0` on `develop` before merge PR to `main`.
