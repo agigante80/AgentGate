@@ -1,6 +1,6 @@
 # Broadcast bare-command dispatch (`@here sync`, `@channel run …`)
 
-> Status: **Planned** | Priority: High | Last reviewed: 2026-03-14
+> Status: **Approved** | Priority: High | Last reviewed: 2026-03-14
 
 When a user broadcasts a bare utility subcommand (e.g. `@here sync`), every bot should
 execute it as if the user had addressed them directly (e.g. `dev sync`, `sec sync`).
@@ -20,9 +20,10 @@ Currently the broadcast router misclassifies bare subcommands as AI prompts.
 | GateSec  | 2 | 9/10 | 2026-03-14 | Test file fix verified ✅; OQ6 resolution accepted (per-bot `confirm` gate is the real boundary); OQ7 resolution strengthened (corrected warning text, added Step 2 + AC 13 + 3 test cases, added Future Work section). -1: no `broadcast=True` plumbing detail in Step 1 snippet — implementer must infer from Step 2 |
 | GateDocs | 1 | 8/10 | 2026-03-14 | Architecture Notes auth claim is wrong (auth IS enforced at line 473, before broadcast block); test file should extend existing TestBroadcast class, not create new file; README placement needs section name |
 | GateDocs | 2 | 9/10 | 2026-03-14 | Fixed: test target corrected to extend `TestBroadcast` in `test_slack_bot.py`; README placement now specifies `## Slack` section; OQ6 resolved (document-as-expected + warning deferred to Future Work); OQ7 resolved (emit warning on broadcast `confirm off`; full block deferred). -1 for OQ7 warning AC not yet added to Acceptance Criteria checklist — low risk, spec is fully implementable. |
+| GateCode | 2 | 9/10 | 2026-03-14 | Both R1 blockers resolved: (1) test file correctly targets existing `TestBroadcast` in `test_slack_bot.py` ✅; (2) OQ6 resolved as document-as-expected-behaviour ✅; OQ7 resolved with Step 2, 3 test cases, and AC entries for confirm-off/on warnings ✅. GateDocs R2 -1 (AC not in checklist) is itself now resolved — confirm warning entries present in checklist. Shared -1 with GateSec: Step 1 snippet doesn't show the `is_broadcast` kwarg threading — implementer must cross-reference Step 2 to compose the full change. Advisory only; spec is implementable. |
 
-**Status**: ⏳ Round 2 complete (GateDocs 9/10, GateSec 9/10) — GateCode Round 2 required
-**Approved**: No — requires all scores ≥ 9/10 in the same round
+**Status**: ✅ Approved — GateCode 9/10, GateSec 9/10, GateDocs 9/10 (Round 2 unanimous)
+**Approved**: Yes
 
 ---
 
