@@ -62,12 +62,12 @@ def test_strip_stats_strips_whitespace():
 
 def test_build_cmd_no_model():
     s = CopilotSession()
-    assert s._build_cmd("hello") == ["copilot", "-p", "hello", "--allow-all"]
+    assert s._build_cmd("hello") == ["copilot", "-p", "hello", "--silent", "--allow-all"]
 
 
 def test_build_cmd_with_model():
     s = CopilotSession(model="gpt-4o")
-    assert s._build_cmd("q") == ["copilot", "-p", "q", "--model", "gpt-4o", "--allow-all"]
+    assert s._build_cmd("q") == ["copilot", "-p", "q", "--silent", "--model", "gpt-4o", "--allow-all"]
 
 
 def test_build_cmd_empty_opts_defaults_to_allow_all():
