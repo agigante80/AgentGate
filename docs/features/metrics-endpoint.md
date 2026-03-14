@@ -44,6 +44,43 @@ Security Considerations
 - Consider basic auth or network policy if metrics must be reachable remotely.
 - Metrics may leak metadata (model names, counts). Avoid including sensitive identifiers in labels.
 
+### Endpoint Authentication (GateSec review)
+
+An IP allowlist (`METRICS_ALLOWED_IPS`) alone is *insufficient* as the sole
+access control:
+- Container-orchestrated environments (Kubernetes, ECS) assign dynamic pod IPs;
+  allowlists become stale or overly broad (entire CIDR blocks).
+- IP spoofing is trivial on flat container networks without mutual TLS.
+- A compromised sidecar on the same node bypasses any IP-based restriction.
+
+*Recommended layered approach:*
+1. **Bind to localhost** (`METRICS_BIND=127.0.0.1:9000`) — default, zero-config.
+   Prometheus reaches it via `kubectl port-forward` or a sidecar scraper.
+2. **Bearer token auth** (`METRICS_AUTH_TOKEN`) — if the endpoint must be
+   network-reachable, require a static bearer token validated in middleware.
+   The token MUST be registered with `SecretRedactor` so it is never leaked in
+   AI responses.
+3. **IP allowlist** (`METRICS_ALLOWED_IPS`) — optional *additional* layer, not
+   a replacement for auth. Useful for defense-in-depth in VPC/private-network
+   deployments.
+4. **Network policy** — in Kubernetes, a `NetworkPolicy` restricting ingress to
+   the metrics port from the monitoring namespace only.
+
+At minimum, implement layers 1 + 2. Layer 3 is a nice-to-have. Layer 4 is
+infrastructure-level and outside the app's scope but should be documented.
+
+### Label Cardinality — User Tracking Prevention (GateSec review)
+
+The Notes section says "avoid unbounded label values (user IDs, full repo
+names)" — this is correct but too vague. Explicit prohibitions:
+- `chat_id`, `user_id`, `channel_id`, `session_id` MUST NOT appear as
+  Prometheus label values. These are unbounded, PII-adjacent identifiers that
+  enable user tracking via the unauthenticated metrics endpoint.
+- `tenant_id` is acceptable ONLY if the deployment has a small, fixed set of
+  tenants (< 20). Otherwise use a separate metrics partition per tenant.
+- Allowed labels: `backend`, `model`, `route`, `status_code`, `platform`
+  (telegram/slack). All are low-cardinality and non-identifying.
+
 Testing
 
 - Unit tests: check that metrics counters/histograms increment under simulated calls.
@@ -63,3 +100,6 @@ Open Questions
 Notes
 
 Keep metric cardinality low — avoid unbounded label values (user IDs, full repo names). Use stable labels: backend, model, route, status_code.
+
+**Hard rule (GateSec):** `chat_id`, `user_id`, `session_id` MUST NEVER be used
+as Prometheus labels. See "Label Cardinality" in Security Considerations.
