@@ -25,7 +25,7 @@ class CopilotSession(SubprocessMixin):
         self._opts = opts
 
     def _build_cmd(self, prompt: str) -> list[str]:
-        args = ["copilot", "-p", prompt]
+        args = ["copilot", "-p", prompt, "--silent"]  # --silent: no stats footer (v1.0.5+)
         if self._model:
             args += ["--model", self._model]
         # Empty opts → full-auto default; non-empty → verbatim (replaces defaults)
