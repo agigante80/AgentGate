@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from src.bot import _BotHandlers, build_app, _stream_to_telegram
 from src.config import Settings, TelegramConfig, BotConfig, AIConfig, GitHubConfig, VoiceConfig, DirectAIConfig
 from src.ai.adapter import AICLIBackend
+from src.audit import NullAuditLog
 from src.history import ConversationStorage
 
 
@@ -102,7 +103,7 @@ def _make_storage():
 def _make_handlers(settings=None, backend=None, storage=None):
     settings = settings or _make_settings()
     backend = backend or _make_backend()
-    return _BotHandlers(settings, backend, storage or _make_storage(), start_time=0.0)
+    return _BotHandlers(settings, backend, storage or _make_storage(), start_time=0.0, audit=NullAuditLog())
 
 
 # ── cmd_run ───────────────────────────────────────────────────────────────────
@@ -642,7 +643,7 @@ class TestRunAiPipelineStreaming:
         """When stream_responses=True, _stream_to_telegram is called (line 167)."""
         settings = _make_settings(stream=True, history_enabled=False)
         backend = _make_backend(stateful=False, response="streamed reply")
-        h = _BotHandlers(settings, backend, _make_storage(), start_time=0.0)
+        h = _BotHandlers(settings, backend, _make_storage(), start_time=0.0, audit=NullAuditLog())
         update = _make_update()
 
         with patch("src.bot._stream_to_telegram", new=AsyncMock(return_value="streamed reply")) as mock_stream:
@@ -655,7 +656,7 @@ class TestRunAiPipelineStreaming:
         settings = _make_settings(stream=False, history_enabled=False)
         settings.bot.ai_timeout_secs = 30
         backend = _make_backend(stateful=True, response="ok")
-        h = _BotHandlers(settings, backend, _make_storage(), start_time=0.0)
+        h = _BotHandlers(settings, backend, _make_storage(), start_time=0.0, audit=NullAuditLog())
         update = _make_update()
 
         with patch("src.bot.asyncio.wait_for", new=AsyncMock(return_value="ok")) as mock_wait_for, \
@@ -669,7 +670,7 @@ class TestRunAiPipelineStreaming:
         settings = _make_settings(stream=False, history_enabled=False)
         settings.bot.ai_timeout_secs = 5
         backend = _make_backend(stateful=True)
-        h = _BotHandlers(settings, backend, _make_storage(), start_time=0.0)
+        h = _BotHandlers(settings, backend, _make_storage(), start_time=0.0, audit=NullAuditLog())
         update = _make_update()
 
         with patch("src.bot.asyncio.wait_for", new=AsyncMock(side_effect=asyncio.TimeoutError())):
@@ -689,7 +690,7 @@ class TestInitTranscriber:
         settings = _make_settings()
         backend = _make_backend()
         with patch("src.bot.transcriber_mod.create_transcriber", side_effect=NotImplementedError("bad")):
-            h = _BotHandlers(settings, backend, _make_storage(), start_time=0.0)
+            h = _BotHandlers(settings, backend, _make_storage(), start_time=0.0, audit=NullAuditLog())
         assert h._transcriber is None
 
 
@@ -772,7 +773,7 @@ class TestHandleVoiceNoAudio:
         mock_transcriber.transcribe = AsyncMock(return_value="hello")
 
         with patch("src.bot.transcriber_mod.create_transcriber", return_value=AsyncMock(spec=[])):
-            h = _BotHandlers(settings, backend, _make_storage(), start_time=0.0)
+            h = _BotHandlers(settings, backend, _make_storage(), start_time=0.0, audit=NullAuditLog())
         # Force a non-None transcriber so we get past the first guard
         h._transcriber = mock_transcriber
 
@@ -802,7 +803,7 @@ class TestBuildApp:
         with patch("src.bot.Application") as MockApp:
             mock_app_instance = MagicMock()
             MockApp.builder.return_value.token.return_value.build.return_value = mock_app_instance
-            build_app(settings, backend, _make_storage(), 0.0)
+            build_app(settings, backend, _make_storage(), 0.0, NullAuditLog())
 
         # 12 CommandHandlers + 1 CallbackQueryHandler + 2 MessageHandlers = 16
         assert mock_app_instance.add_handler.call_count == 16

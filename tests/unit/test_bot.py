@@ -210,13 +210,14 @@ class TestCmdDiffSanitization:
 
         from src.bot import _BotHandlers
         from src.history import ConversationStorage
+        from src.audit import NullAuditLog
         backend = MagicMock()
         backend.is_stateful = False
         storage = MagicMock(spec=ConversationStorage)
         storage.get_history = AsyncMock(return_value=[])
         storage.add_exchange = AsyncMock()
         storage.clear = AsyncMock()
-        handlers = _BotHandlers(settings, backend, storage, start_time=0.0)
+        handlers = _BotHandlers(settings, backend, storage, start_time=0.0, audit=NullAuditLog())
 
         update = MagicMock()
         update.effective_chat.id = 99999
@@ -236,6 +237,7 @@ class TestCmdDiffSanitization:
         from unittest.mock import AsyncMock, MagicMock, patch
         from src.config import Settings, TelegramConfig, BotConfig, AIConfig, GitHubConfig, VoiceConfig, SlackConfig
         from src.bot import _BotHandlers
+        from src.audit import NullAuditLog
 
         settings = MagicMock(spec=Settings)
         tg = MagicMock(spec=TelegramConfig)
@@ -278,7 +280,7 @@ class TestCmdDiffSanitization:
         storage.get_history = AsyncMock(return_value=[])
         storage.add_exchange = AsyncMock()
         storage.clear = AsyncMock()
-        handlers = _BotHandlers(settings, backend, storage, start_time=0.0)
+        handlers = _BotHandlers(settings, backend, storage, start_time=0.0, audit=NullAuditLog())
 
         update = MagicMock()
         update.effective_chat.id = 99999

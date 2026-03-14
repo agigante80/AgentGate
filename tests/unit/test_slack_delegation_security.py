@@ -95,7 +95,8 @@ def _make_bot():
     backend.is_stateful = True
     storage = _make_storage()
     with patch("slack_bolt.async_app.AsyncApp"):
-        bot = SlackBot(settings, backend, storage, start_time=0.0)
+        from src.audit import NullAuditLog
+        bot = SlackBot(settings, backend, storage, start_time=0.0, audit=NullAuditLog())
     bot._bot_display_name = "GateCode"
     return bot
 

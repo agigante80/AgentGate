@@ -117,6 +117,12 @@ class AIConfig(BaseSettings):
     direct: DirectAIConfig = Field(default_factory=DirectAIConfig)
 
 
+class AuditConfig(BaseSettings):
+    model_config = SettingsConfigDict(extra="ignore")
+
+    audit_enabled: bool = True  # AUDIT_ENABLED — set to false to disable audit logging
+
+
 class VoiceConfig(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
@@ -136,6 +142,7 @@ class Settings(BaseSettings):
     ai: AIConfig = Field(default_factory=AIConfig)
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
     slack: SlackConfig = Field(default_factory=SlackConfig)
+    audit: AuditConfig = Field(default_factory=AuditConfig)
 
     @classmethod
     def load(cls) -> "Settings":
@@ -147,6 +154,7 @@ class Settings(BaseSettings):
             ai=AIConfig(),
             voice=VoiceConfig(),
             slack=SlackConfig(),
+            audit=AuditConfig(),
         )
 
 
@@ -154,6 +162,7 @@ class Settings(BaseSettings):
 from pathlib import Path  # noqa: E402
 REPO_DIR = Path("/repo")
 DB_PATH = Path("/data/history.db")
+AUDIT_DB_PATH = Path("/data/audit.db")
 
 _VERSION_FILE = Path(__file__).parent.parent / "VERSION"
 VERSION = _VERSION_FILE.read_text().strip() if _VERSION_FILE.exists() else "unknown"

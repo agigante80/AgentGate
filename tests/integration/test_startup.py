@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 class TestStartup:
     async def test_startup_calls_all_phases(self, monkeypatch):
         """Verify startup() calls each phase in order and sends Ready message."""
-        from src.config import Settings, TelegramConfig, GitHubConfig, BotConfig, AIConfig
+        from src.config import Settings, TelegramConfig, GitHubConfig, BotConfig, AIConfig, AuditConfig
 
         # Build a minimal settings object
         tg = MagicMock(spec=TelegramConfig)
@@ -25,12 +25,15 @@ class TestStartup:
         direct = MagicMock()
         direct.ai_provider = "openai"
         ai.direct = direct
+        audit = MagicMock(spec=AuditConfig)
+        audit.audit_enabled = True
         settings = MagicMock(spec=Settings)
         settings.platform = "telegram"
         settings.telegram = tg
         settings.github = gh
         settings.bot = bot
         settings.ai = ai
+        settings.audit = audit
 
         mock_clone = AsyncMock()
         mock_install = AsyncMock(return_value="OK")
@@ -52,6 +55,7 @@ class TestStartup:
              patch("src.repo.configure_git_auth", AsyncMock()), \
              patch("src.runtime.install_deps", mock_install), \
              patch("src.main.SQLiteStorage", return_value=mock_storage), \
+             patch("src.main.SQLiteAuditLog", return_value=MagicMock(init=AsyncMock())), \
              patch("src.main.create_backend", return_value=mock_backend):
 
             from src.main import startup

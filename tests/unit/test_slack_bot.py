@@ -138,7 +138,8 @@ def _make_bot(settings=None, backend=None, storage=None):
     storage = storage or _make_storage()
     with patch("slack_bolt.async_app.AsyncApp"):
         from src.platform.slack import SlackBot
-        bot = SlackBot(settings, backend, storage, start_time=0.0)
+        from src.audit import NullAuditLog
+        bot = SlackBot(settings, backend, storage, start_time=0.0, audit=NullAuditLog())
     return bot
 
 

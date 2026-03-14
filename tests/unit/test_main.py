@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.main import _read_version, _log_startup_banner, _validate_config, main
-from src.config import Settings, TelegramConfig, SlackConfig, BotConfig, AIConfig, GitHubConfig
+from src.config import Settings, TelegramConfig, SlackConfig, BotConfig, AIConfig, GitHubConfig, AuditConfig
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -39,6 +39,9 @@ def _make_settings(platform="telegram", bot_token="abc:token", chat_id="99999",
     s.ai = ai
     s.github = gh
     s.log = log
+    audit = MagicMock(spec=AuditConfig)
+    audit.audit_enabled = True
+    s.audit = audit
     return s
 
 
@@ -142,6 +145,7 @@ async def test_startup_calls_slack_branch():
          patch("src.main.repo.configure_git_auth", new=AsyncMock()), \
          patch("src.main.runtime.install_deps", new=AsyncMock(return_value="ok")), \
          patch("src.main.SQLiteStorage", return_value=MagicMock(init=AsyncMock())), \
+         patch("src.main.SQLiteAuditLog", return_value=MagicMock(init=AsyncMock())), \
          patch("src.main.create_backend", return_value=MagicMock()), \
          patch("src.main._startup_slack", new=AsyncMock()) as mock_slack, \
          patch("src.main._startup_telegram", new=AsyncMock()) as mock_tg:
@@ -167,6 +171,7 @@ async def test_startup_calls_telegram_branch():
          patch("src.main.repo.configure_git_auth", new=AsyncMock()), \
          patch("src.main.runtime.install_deps", new=AsyncMock(return_value="ok")), \
          patch("src.main.SQLiteStorage", return_value=MagicMock(init=AsyncMock())), \
+         patch("src.main.SQLiteAuditLog", return_value=MagicMock(init=AsyncMock())), \
          patch("src.main.create_backend", return_value=MagicMock()), \
          patch("src.main._startup_slack", new=AsyncMock()) as mock_slack, \
          patch("src.main._startup_telegram", new=AsyncMock()) as mock_tg:

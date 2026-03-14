@@ -16,6 +16,7 @@ from telegram.ext import (
 )
 
 from src.ai.adapter import AICLIBackend
+from src.audit import AuditLog, _ms_since
 from src.config import Settings, VERSION
 from src import executor, repo
 from src.history import ConversationStorage, build_context as _build_context
@@ -127,6 +128,13 @@ def _requires_auth(method: Callable) -> Callable:
     @functools.wraps(method)
     async def wrapper(self: "_BotHandlers", update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         if not _is_allowed(update, self._settings):
+            await self._audit.record(
+                platform="telegram",
+                chat_id=str(update.effective_chat.id) if update.effective_chat else "",
+                user_id=str(update.effective_user.id) if update.effective_user else None,
+                action="auth_denied",
+                detail={"handler": method.__name__},
+            )
             return
         await method(self, update, ctx)
     return wrapper
@@ -135,11 +143,12 @@ def _requires_auth(method: Callable) -> Callable:
 # ── Handler class ────────────────────────────────────────────────────────────
 
 class _BotHandlers:
-    def __init__(self, settings: Settings, backend: AICLIBackend, storage: ConversationStorage, start_time: float) -> None:
+    def __init__(self, settings: Settings, backend: AICLIBackend, storage: ConversationStorage, start_time: float, audit: AuditLog) -> None:
         self._settings = settings
         self._backend = backend
         self._history = storage
         self._start_time = start_time
+        self._audit = audit
         self._p = _prefix(settings)
         # (chat_id, message_id) → shell command waiting for confirmation
         self._pending_cmds: dict[tuple, str] = {}
@@ -165,6 +174,8 @@ class _BotHandlers:
         """Shared AI pipeline: build prompt → stream/send → save history."""
         key = text[:60]
         self._active_ai[key] = time.time()
+        t0 = time.time()
+        user_id = str(update.effective_user.id) if update.effective_user else None
         try:
             if self._backend.is_stateful:
                 prompt = text
@@ -220,9 +231,21 @@ class _BotHandlers:
 
             if self._settings.bot.history_enabled:
                 await self._history.add_exchange(chat_id, text, response)
+            await self._audit.record(
+                platform="telegram", chat_id=chat_id, user_id=user_id,
+                action="ai_query",
+                detail={"prompt_len": len(text), "response_len": len(response)},
+                duration_ms=_ms_since(t0),
+            )
         except Exception as exc:
             logger.exception("AI backend error")
             await _reply(update, self._redactor.redact(f"⚠️ Error: {exc}"))
+            await self._audit.record(
+                platform="telegram", chat_id=chat_id, user_id=user_id,
+                action="ai_query", status="error",
+                detail={"error": str(exc)},
+                duration_ms=_ms_since(t0),
+            )
         finally:
             self._active_ai.pop(key, None)
 
@@ -231,6 +254,8 @@ class _BotHandlers:
     @_requires_auth
     async def cmd_run(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         cmd = " ".join(ctx.args) if ctx.args else ""
+        chat_id = str(update.effective_chat.id)
+        user_id = str(update.effective_user.id) if update.effective_user else None
         if not cmd:
             await _reply(update, f"Usage: /{self._p}run <shell command>")
             return
@@ -250,10 +275,22 @@ class _BotHandlers:
                 parse_mode="Markdown",
             )
             self._pending_cmds[(update.effective_chat.id, msg.message_id)] = cmd
+            await self._audit.record(
+                platform="telegram", chat_id=chat_id, user_id=user_id,
+                action="shell_exec",
+                detail={"cmd": self._redactor.redact(cmd), "destructive": True, "awaiting_confirm": True},
+            )
         else:
+            t0 = time.time()
             await update.effective_message.reply_text("⏳ Running…")
             result = await executor.run_shell(cmd, self._settings.bot.max_output_chars, self._redactor)
             await _reply(update, f"```\n{self._redactor.redact(result)}\n```")
+            await self._audit.record(
+                platform="telegram", chat_id=chat_id, user_id=user_id,
+                action="shell_exec",
+                detail={"cmd": self._redactor.redact(cmd), "destructive": False},
+                duration_ms=_ms_since(t0),
+            )
 
     @_requires_auth
     async def cmd_sync(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -421,21 +458,37 @@ class _BotHandlers:
     @_requires_auth
     async def cmd_clear(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
         chat_id = str(update.effective_chat.id)
+        user_id = str(update.effective_user.id) if update.effective_user else None
         if self._settings.bot.history_enabled:
             await self._history.clear(chat_id)
         self._backend.clear_history()
         await _reply(update, "🗑 Conversation history cleared.")
+        await self._audit.record(
+            platform="telegram", chat_id=chat_id, user_id=user_id,
+            action="command", detail={"sub": "clear"},
+        )
 
     @_requires_auth
     async def cmd_restart(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        chat_id = str(update.effective_chat.id)
+        user_id = str(update.effective_user.id) if update.effective_user else None
         await _reply(update, "🔄 Restarting AI backend…")
         try:
             self._backend.close()
             self._backend = ai_factory.create_backend(self._settings.ai)
             await _reply(update, f"✅ AI backend restarted ({self._settings.ai.ai_cli})")
+            await self._audit.record(
+                platform="telegram", chat_id=chat_id, user_id=user_id,
+                action="command", detail={"sub": "restart"},
+            )
         except Exception as exc:
             logger.exception("Backend restart failed")
             await _reply(update, self._redactor.redact(f"⚠️ Restart failed: {exc}"))
+            await self._audit.record(
+                platform="telegram", chat_id=chat_id, user_id=user_id,
+                action="command", status="error",
+                detail={"sub": "restart", "error": str(exc)},
+            )
 
     # ── Callback & AI forwarding ──────────────────────────────────────────
 
@@ -443,13 +496,27 @@ class _BotHandlers:
         query = update.callback_query
         await query.answer()
         key = (update.effective_chat.id, query.message.message_id)
+        chat_id = str(update.effective_chat.id)
+        user_id = str(update.effective_user.id) if update.effective_user else None
         cmd = self._pending_cmds.pop(key, None)
         if query.data == "cancel_run" or cmd is None:
             await query.edit_message_text("❌ Cancelled.")
+            await self._audit.record(
+                platform="telegram", chat_id=chat_id, user_id=user_id,
+                action="shell_confirm", status="cancelled",
+                detail={"cmd": self._redactor.redact(cmd) if cmd else None},
+            )
             return
+        t0 = time.time()
         await query.edit_message_text(f"⏳ Running:\n`{cmd}`", parse_mode="Markdown")
         result = await executor.run_shell(cmd, self._settings.bot.max_output_chars, self._redactor)
         await query.message.reply_text(f"```\n{self._redactor.redact(result)}\n```", parse_mode="Markdown")
+        await self._audit.record(
+            platform="telegram", chat_id=chat_id, user_id=user_id,
+            action="shell_confirm",
+            detail={"cmd": self._redactor.redact(cmd)},
+            duration_ms=_ms_since(t0),
+        )
 
     @_requires_auth
     async def handle_voice(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -491,9 +558,9 @@ class _BotHandlers:
 
 # ── App factory ──────────────────────────────────────────────────────────────
 
-def build_app(settings: Settings, backend: AICLIBackend, storage: ConversationStorage, start_time: float) -> Application:
+def build_app(settings: Settings, backend: AICLIBackend, storage: ConversationStorage, start_time: float, audit: AuditLog) -> Application:
     app = Application.builder().token(settings.telegram.bot_token).build()
-    h = _BotHandlers(settings, backend, storage, start_time)
+    h = _BotHandlers(settings, backend, storage, start_time, audit)
     p = _prefix(settings)
 
     app.add_handler(CommandHandler(p, h.cmd_ta))
