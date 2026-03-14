@@ -16,10 +16,11 @@ caught before merge.
 | Reviewer | Round | Score | Date | Notes |
 |----------|-------|-------|------|-------|
 | GateCode | 1 | 9/10 | 2026-03-14 | Problem analysis airtight; YAML snippets verified against live workflow. Two additions: CodeQL scheduled-scan trigger + pip-audit SARIF syntax pre-validation. See OQ9 and OQ10. |
-| GateSec  | 1 | 7/10 | 2026-03-14 | Security analysis is excellent; design choices are sound. Three blocking issues: (1) Step 4 `\|\| true` makes pip-audit enforcement impossible — confirmed, directly contradicts Axis 4 "fail on any"; (2) Step 4 `--format sarif --output` is wrong pip-audit syntax (should be `-f sarif -o`) — silent CI failure risk; (3) Step 2 Trivy YAML still uses `@master` — contradicts AC "pinned to release tag". One advisory: Step 2 `exit-code: '0'` phased plan has no follow-up Implementation Step to actually enable `exit-code: '1'`, so enforcement may never land. See OQ11. |
+| GateSec  | 1 | 8/10 | 2026-03-14 | Previous GateSec issues (OQ11) confirmed. Five additional security findings: (1) *Critical* — `.trivyignore` guidance falsely claims Go/gcc/binutils are "build-time only"; `run_shell()` and `install_deps()` make them runtime-accessible, so those CVEs are potentially exploitable (OQ12); (2) Threat model gap — no npm/Node.js dependency scanning for Copilot/Codex CLI packages (OQ13); (3) `pip install pip-audit` unpinned in CI = supply-chain risk with `security-events: write` (OQ14); (4) `pull_request_target` anti-pattern warning missing — implementers may "fix" fork-PR SARIF gap unsafely (OQ15); (5) Action pinning should use commit SHA, not release tag — tags can be force-pushed (OQ16). Score raised from 7→8: prior blocking items (pip-audit syntax, `\|\| true`) are implementation bugs easily fixed; the `.trivyignore` false assumption is the real security concern but is addressable by rewriting the guidance. |
 | GateDocs | 1 | 8/10 | 2026-03-14 | Implementation steps are clear. Four gaps: (1) Step 4 `\|\| true` still contradicts Axis 4 "fail on any (pip-audit)" — blocking for implementers; (2) README placement says "CI/CD section" but no such section exists — should target `## Security`; (3) AC "< 100 alerts" is a fragile snapshot metric, not a structural guarantee; (4) repo has `package.json` — `npm audit` worth a Future Work mention. |
+| GateSec  | 2 | 9/10 | 2026-03-14 | Web-verified all 5 requested items. (1) `limit-severities-for-sarif: true` ✅ correct — confirmed via Trivy docs and GH issues #258/#309. (2) CodeQL `@v4` + `security-events: write` ✅ current stable (v3 deprecated Dec 2026). (3) `.trivyignore` template ✅ safe — no CVEs actually suppressed yet; per-CVE review required at population time. (4) `\|\| true` in pip-audit ⚠️ *FIXED* — removed; contradicted Axis 4; `if: always()` on upload step already ensures SARIF delivery. Also fixed `-f`/`-o` syntax per OQ10. (5) `pull_request` trigger ✅ correct and safe — fork PRs get no secrets, base-branch scan covers them per GitHub Security Lab guidance. Also fixed: OQ#9 self-contradiction (snippet already has schedule), Trivy `@master` → `@0.28.0` (was contradicting AC). Remaining -1: OQ11 Phase 2 Trivy enforcement step still has no explicit Implementation Step or AC. |
 
-**Status**: ⏳ In review (3/3 complete — scores below threshold)
+**Status**: ⏳ Round 2 in progress — GateSec reviewed
 **Approved**: No — requires all scores ≥ 9/10 in the same round
 
 ---
@@ -405,7 +406,7 @@ Update the existing `security-scan` job:
 
 ```yaml
       - name: 🔒 Run Trivy vulnerability scan
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           image-ref: agentgate:scan
           format: sarif
@@ -507,10 +508,12 @@ Add a new job to the existing CI/CD pipeline:
       - name: 🔍 Audit Python dependencies
         run: |
           pip-audit -r requirements.txt \
-            --format sarif \
-            --output pip-audit-results.sarif \
-            --desc || true
-          # `|| true` ensures we always upload results even if vulns are found
+            -f sarif \
+            -o pip-audit-results.sarif \
+            --desc
+          # Step fails if vulnerabilities are found (per Axis 4 policy).
+          # The upload step below uses `if: always()` so SARIF results
+          # are still uploaded to the Security tab regardless.
 
       - name: 📤 Upload pip-audit results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v4
@@ -681,10 +684,8 @@ unchanged.
 9. **CodeQL scheduled scan** — CodeQL's own documentation recommends adding a weekly
    scheduled scan on the default branch (in addition to push/PR triggers) to catch
    vulnerabilities introduced via dependency updates between pushes. The spec's
-   `codeql.yml` YAML snippet omits this. Add a `schedule: - cron: '0 6 * * 1'`
-   trigger to the CodeQL workflow.
-   *Proposed answer*: add the weekly schedule to `codeql.yml` — low effort, best
-   practice alignment.
+   `codeql.yml` YAML snippet already includes this (`schedule: - cron: '0 6 * * 1'`).
+   No action needed — already aligned with best practice.
 
 10. **pip-audit SARIF command syntax** — the spec shows `pip-audit --format sarif` but
     the actual flag for pip-audit ≥ 2.7 is `pip-audit -r requirements.txt -f sarif -o
@@ -700,6 +701,61 @@ unchanged.
     contradicts Axis 4 Option B.
     *Proposed answer*: add an explicit Step 7 ("After initial CI run: verify alert count,
     then set Trivy `exit-code: '1'` and merge the change") or add an AC item for it.
+
+12. **`.trivyignore` assumes build tools are build-time only — they are not** — The
+    spec's `.trivyignore` guidance (Step 1) says "build-essential / binutils — not
+    exploitable in a bot container (these tools are only used at image build time for
+    pip native extensions)." This is *factually incorrect*. `src/runtime.py` runs
+    `go mod download` at startup when a `go.mod` is present in the cloned repo, and
+    `src/executor.py`'s `run_shell()` lets users execute *any* command — including
+    `go build`, `gcc`, `make` — in `REPO_DIR` at runtime. CVEs in Go stdlib,
+    binutils, and gcc are therefore *potentially exploitable* in this container, not
+    just theoretical. `.trivyignore` entries for these packages must include per-CVE
+    runtime-impact analysis, not blanket suppression by package name.
+    *Proposed answer*: rewrite Step 1 guidance to require: (a) individual CVE IDs
+    only — no blanket package suppression, (b) each entry must document why the
+    specific vulnerability's attack vector is not reachable at runtime, (c) quarterly
+    review with explicit "last reviewed" dates. Consider *not* suppressing Go/gcc/
+    binutils CVEs at all until the multi-stage Docker build (Future Work #1) removes
+    them from the final image.
+
+13. **Node.js / npm dependency scanning gap in threat model** — The Docker image
+    installs Node.js LTS and npm packages (`@github/copilot@1.0.5`,
+    `@openai/codex`). Neither Trivy's image scan (which focuses on OS packages),
+    CodeQL (configured for Python only), nor `pip-audit` covers npm dependency
+    vulnerabilities. This is a gap in the three-scanner threat model.
+    *Proposed answer*: add `npm audit --omit=dev --audit-level=high` as a fourth CI
+    step (lightweight, ~2s), or at minimum add to Future Work and document the gap
+    explicitly in the Architecture Notes section so implementers are aware.
+
+14. **`pip install pip-audit` is unpinned — supply-chain risk** — Step 4 runs
+    `pip install pip-audit` without a version pin. A compromised or backdoored
+    pip-audit release would execute arbitrary code in CI with `security-events: write`
+    permissions — ironic for a security scanning tool. This is a known attack vector
+    (cf. the 2024 `ultralytics` PyPI compromise).
+    *Proposed answer*: pin to a specific version: `pip install pip-audit==2.7.3`
+    (or latest stable at implementation time). Dependabot can manage version updates.
+
+15. **`pull_request_target` anti-pattern warning needed** — OQ5 correctly recommends
+    `pull_request` over `pull_request_target` for CodeQL, but doesn't explain *why*
+    `pull_request_target` is dangerous. Implementers encountering the fork-PR SARIF
+    gap may "fix" it by switching to `pull_request_target` with a modified checkout
+    (`actions/checkout` with `ref: ${{ github.event.pull_request.head.sha }}`). This
+    is the well-documented "pwn-request" attack: untrusted fork code runs with the
+    base repo's secrets and write permissions. The spec should include an explicit
+    warning against this pattern.
+    *Proposed answer*: add a warning in the CodeQL section (Step 3) and Architecture
+    Notes: "⚠️ Never use `pull_request_target` with a checkout of the PR head SHA —
+    this runs untrusted code with elevated permissions (pwn-request attack)."
+
+16. **Action pinning should use commit SHA, not release tag** — OQ7 recommends pinning
+    `aquasecurity/trivy-action` to a release tag (e.g., `@0.28.0`). Git tags can be
+    force-pushed by upstream maintainers (malicious or compromised account). The
+    GitHub Actions security hardening guide recommends pinning to a full commit SHA
+    (e.g., `aquasecurity/trivy-action@<40-char-sha>`). Dependabot natively supports
+    SHA-pinned action updates and will propose PRs when new versions are released.
+    *Proposed answer*: pin all third-party actions to commit SHA. Add a comment with
+    the human-readable version: `aquasecurity/trivy-action@abc123... # v0.28.0`.
 
 ---
 
