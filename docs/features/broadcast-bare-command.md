@@ -17,10 +17,11 @@ Currently the broadcast router misclassifies bare subcommands as AI prompts.
 |----------|-------|-------|------|-------|
 | GateCode | 1 | 8/10 | 2026-03-14 | Code snippet verified accurate against live `slack.py:507–510`; `_KNOWN_SUBS` ref correct; auth claim confirmed fixed by GateSec; two blocking gaps: (1) "Files to Change" still says *create* `test_slack_broadcast.py` — must be *extend* `TestBroadcast` in `test_slack_bot.py`; (2) OQ6/OQ7 have no resolution decision or AC — spec should either document-as-expected-behaviour or add a warning step |
 | GateSec  | 1 | 8/10 | 2026-03-14 | Auth claim corrected (OQ3→Architecture Notes fix); added OQ6 multi-bot `run` amplification risk; added OQ7 `@here confirm off` mass-disarm; OQ3 `confirm` edge case verified safe |
+| GateSec  | 2 | 9/10 | 2026-03-14 | Test file fix verified ✅; OQ6 resolution accepted (per-bot `confirm` gate is the real boundary); OQ7 resolution strengthened (corrected warning text, added Step 2 + AC 13 + 3 test cases, added Future Work section). -1: no `broadcast=True` plumbing detail in Step 1 snippet — implementer must infer from Step 2 |
 | GateDocs | 1 | 8/10 | 2026-03-14 | Architecture Notes auth claim is wrong (auth IS enforced at line 473, before broadcast block); test file should extend existing TestBroadcast class, not create new file; README placement needs section name |
 | GateDocs | 2 | 9/10 | 2026-03-14 | Fixed: test target corrected to extend `TestBroadcast` in `test_slack_bot.py`; README placement now specifies `## Slack` section; OQ6 resolved (document-as-expected + warning deferred to Future Work); OQ7 resolved (emit warning on broadcast `confirm off`; full block deferred). -1 for OQ7 warning AC not yet added to Acceptance Criteria checklist — low risk, spec is fully implementable. |
 
-**Status**: ⏳ Round 2 complete (GateDocs 9/10) — GateCode and GateSec Round 2 required
+**Status**: ⏳ Round 2 complete (GateDocs 9/10, GateSec 9/10) — GateCode Round 2 required
 **Approved**: No — requires all scores ≥ 9/10 in the same round
 
 ---
@@ -209,6 +210,17 @@ With:
                     )
 ```
 
+### Step 2 — `src/platform/slack.py`: broadcast-context warning for `confirm` toggle
+
+When `confirm on` or `confirm off` is dispatched via broadcast (detected by `_SLACK_SPECIAL_MENTION_RE`
+matching the original message), emit a warning *after* the toggle takes effect:
+
+- `confirm off` via broadcast → append: `⚠️ Confirmation guard disabled via broadcast — all active bots affected.`
+- `confirm on` via broadcast → append: `🔒 Confirmation guard enabled via broadcast.`
+
+Implementation: pass a `broadcast=True` kwarg through `_dispatch` → `_cmd_confirm`. When
+`broadcast=True` and the subcommand is `confirm`, append the warning to the response.
+
 ---
 
 ## Files to Create / Change
@@ -243,6 +255,9 @@ With:
 | `test_broadcast_prefixed_ai_still_works` | `@here dev what does this do?` → `_run_ai_pipeline` (existing path unchanged) |
 | `test_broadcast_empty_after_strip` | `@here` alone → returns without error |
 | `test_broadcast_all_known_subs` | Parameterised over every entry in `_KNOWN_SUBS`; each dispatches correctly |
+| `test_broadcast_confirm_off_emits_warning` | `@here confirm off` → response includes `⚠️ Confirmation guard disabled via broadcast` |
+| `test_broadcast_confirm_on_emits_warning` | `@here confirm on` → response includes `🔒 Confirmation guard enabled via broadcast` |
+| `test_broadcast_confirm_off_direct_no_warning` | `dev confirm off` (non-broadcast) → no broadcast warning emitted |
 
 ---
 
@@ -303,13 +318,21 @@ This is a bug fix with no new env vars or API surface changes.
 
    **Resolution (GateDocs R2)**: Document as expected behaviour. The existing per-bot destructive-command confirmation gate already applies on each instance. A broadcast-specific warning banner is deferred to Future Work (see below).
 
+   **Security note (GateSec R2)**: Accepted for v1. The per-bot `confirm` gate is the
+   real safety boundary and it holds. The deferred warning banner should be tracked as a
+   follow-up issue — see Future Work section below.
+
 7. **[SEC] `@here confirm off` mass-disarm** — broadcasting `confirm off` disables
    destructive-command confirmation on *all* bot instances in a single message. This silently
    removes the safety net across the entire workspace. Consider: (a) requiring `confirm off`
    to be addressed to a specific bot (no broadcast), or (b) emitting a prominent warning when
    confirmation is disabled via broadcast.
 
-   **Resolution (GateDocs R2)**: Emit a prominent warning when `confirm off` is received via broadcast. The implementation should detect the broadcast context and prefix the response with `⚠️ Confirmation guard disabled via broadcast — all N active bots affected.` Blocking broadcast of `confirm off` entirely is deferred to Future Work.
+   **Resolution (GateDocs R2)**: Emit a prominent warning when `confirm off` is received via broadcast. The implementation should detect the broadcast context and prefix the response with `⚠️ Confirmation guard disabled via broadcast — all active bots affected.` Blocking broadcast of `confirm off` entirely is deferred to Future Work.
+
+   **Security note (GateSec R2)**: Accepted. Corrected warning text — each bot only knows
+   about itself, not the total count of active bots; removed "N" from the phrasing. Added
+   Step 2, AC 13, and test cases below to ensure this is implemented.
 
 ---
 
@@ -320,6 +343,7 @@ This is a bug fix with no new env vars or API surface changes.
 - [ ] `@here <free text>` (non-subcommand) still routes to the AI pipeline unchanged.
 - [ ] `@here dev sync` (prefixed) still works as before.
 - [ ] `@here confirm off` emits a broadcast-context warning before disabling confirmation.
+- [ ] `@here confirm on` emits a broadcast-context confirmation message (no warning needed).
 - [ ] All new unit tests pass.
 - [ ] `pytest tests/ -v --tb=short` — zero failures.
 - [ ] `ruff check src/` — no new issues.
@@ -327,3 +351,14 @@ This is a bug fix with no new env vars or API surface changes.
 - [ ] `docs/roadmap.md` entry added.
 - [ ] `VERSION` bumped (PATCH).
 - [ ] Telegram behaviour unchanged (no regression).
+
+---
+
+## Future Work
+
+- **Broadcast `run` warning banner** (OQ6): Add a visible warning when `run` is dispatched
+  via broadcast, e.g. `⚠️ Broadcast: this command is running on all active bots.` Deferred
+  from v1 since the per-bot `confirm` gate already covers destructive commands.
+- **Block `confirm off` via broadcast** (OQ7): Consider preventing `confirm off` from being
+  broadcast entirely, requiring it to be addressed to a specific bot. Deferred from v1 in
+  favour of the warning approach.
