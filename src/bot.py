@@ -141,6 +141,11 @@ async def _stream_to_telegram(
 async def _deliver_telegram(update: Update, streaming_msg, text: str) -> None:
     """Send *text* back to the user, splitting across multiple messages if needed.
 
+    Redaction contract: callers are responsible for redacting *text* before
+    calling this function.  This keeps the function stateless and testable
+    without a live SecretRedactor, and ensures the streaming preview path and
+    the final-delivery path both go through the same redaction point.
+
     Strategy:
     - Fits in one Telegram message (≤ 4096 chars) → single edit/reply.
     - 2–4 chunks → edit/reply chunk 1, then reply with each subsequent chunk.

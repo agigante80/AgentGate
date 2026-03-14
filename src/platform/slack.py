@@ -277,6 +277,15 @@ class SlackBot:
     ) -> None:
         """Send *text* to Slack, choosing the best delivery strategy based on length.
 
+        Redaction contract: this function redacts *text* internally at each
+        path that writes content to the Slack API (multi-block and file-upload).
+        This is intentional: the single-message fast path delegates to
+        ``_reply``/``_edit``, which already redact via ``SecretRedactor``, so
+        redacting here would double-apply.  The static "uploading…" note is
+        safe to post unredacted because it contains no user/AI content.
+        Contrast with ``_deliver_telegram``, where the caller redacts once
+        before the call to keep that function stateless.
+
         Strategy:
         - ≤ 3 000 chars → single message edit/reply (unchanged behaviour).
         - 3 001–12 000 chars → multi-section Block Kit message (one API call).
