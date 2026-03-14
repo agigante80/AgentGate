@@ -204,7 +204,10 @@ With:
                 sub_b = parts_b[0].lower()
                 args_b = parts_b[1].split() if len(parts_b) > 1 else []
                 if sub_b in _KNOWN_SUBS:
-                    await self._dispatch(sub_b, args_b, say, client, channel, thread_ts=thread_ts)
+                    await self._dispatch(
+                        sub_b, args_b, say, client, channel,
+                        thread_ts=thread_ts, is_broadcast=True,
+                    )
                 else:
                     await self._run_ai_pipeline(
                         say, client, broadcast_text, channel, thread_ts=thread_ts, user_id=user
@@ -213,14 +216,68 @@ With:
 
 ### Step 2 — `src/platform/slack.py`: broadcast-context warning for `confirm` toggle
 
-When `confirm on` or `confirm off` is dispatched via broadcast (detected by `_SLACK_SPECIAL_MENTION_RE`
-matching the original message), emit a warning *after* the toggle takes effect:
+When `confirm on` or `confirm off` is dispatched via broadcast, emit a warning after the toggle takes effect:
 
-- `confirm off` via broadcast → append: `⚠️ Confirmation guard disabled via broadcast — all active bots affected.`
-- `confirm on` via broadcast → append: `🔒 Confirmation guard enabled via broadcast.`
+- `confirm off` via broadcast → prepend: `⚠️ Confirmation guard disabled via broadcast — all active bots affected.`
+- `confirm on` via broadcast → prepend: `🔒 Confirmation guard enabled via broadcast.`
 
-Implementation: pass a `broadcast=True` kwarg through `_dispatch` → `_cmd_confirm`. When
-`broadcast=True` and the subcommand is `confirm`, append the warning to the response.
+**2a. Update `_dispatch` signature** (`src/platform/slack.py` around line 542):
+
+```python
+async def _dispatch(
+    self,
+    sub: str,
+    args: list[str],
+    say,
+    client,
+    channel: str,
+    *,
+    thread_ts: str | None = None,
+    is_broadcast: bool = False,
+) -> None:
+    ...
+    # Special-case: thread is_broadcast only to _cmd_confirm; all other handlers unchanged
+    if sub == "confirm" and is_broadcast:
+        await self._cmd_confirm(args, say, client, channel, thread_ts=thread_ts, is_broadcast=True)
+        return
+    await handler(args, say, client, channel, thread_ts=thread_ts)
+```
+
+**2b. Update `_cmd_confirm` signature and response** (`src/platform/slack.py` around line 707):
+
+```python
+async def _cmd_confirm(
+    self, args: list[str], say, client, channel: str, *,
+    thread_ts: str | None = None,
+    is_broadcast: bool = False,
+) -> None:
+    arg = (args[0].lower() if args else "").strip()
+    if arg == "off":
+        self._confirm_destructive = False
+        warning = (
+            "⚠️ Confirmation guard disabled via broadcast — all active bots affected.\n"
+            if is_broadcast else ""
+        )
+        await self._reply(
+            client, channel,
+            f"{warning}⚡ Confirmation prompts *disabled* for this session.\n"
+            "Destructive commands will run immediately.",
+            thread_ts,
+        )
+    elif arg == "on":
+        self._confirm_destructive = True
+        note = "🔒 Confirmation guard enabled via broadcast.\n" if is_broadcast else ""
+        await self._reply(
+            client, channel,
+            f"{note}🛡 Confirmation prompts *enabled* for this session.",
+            thread_ts,
+        )
+    else:
+        ...  # unchanged status branch
+```
+
+> **Note**: Only `_cmd_confirm` receives `is_broadcast`. All other handlers retain their existing
+> signature — no cascade change required.
 
 ---
 
