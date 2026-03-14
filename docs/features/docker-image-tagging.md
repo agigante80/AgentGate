@@ -15,7 +15,7 @@ Formalise the Docker image tagging convention so users can pull predictable, wel
 |----------|-------|-------|------|-------|
 | GateCode | 1 | 9/10 | 2026-03-14 | Implementation matches spec exactly. Minor: open Q1 (pinned tag mutability) is a real risk on CI re-runs; Q4 (docker-compose example) worth addressing pre-approval. |
 | GateSec  | 1 | 10/10 | 2026-03-14 | Authored |
-| GateDocs | 1 | 9/10 | 2026-03-14 | Accurate, well-structured. Added Config Variables table. |
+| GateDocs | 1 | 9/10 | 2026-03-14 | Tag matrix and version-string table are clear and accurate. User Guide is comprehensive but missing a `docker login ghcr.io` note for registry pulls. OQ4 (`docker-compose.yml.example` registry snippet) should be resolved before approval; OQ1 (tag immutability) can be a follow-up CI task. |
 
 **Status**: ⏳ Pending GateCode review
 **Approved**: No — requires all scores ≥ 9/10 in the same round
