@@ -3,7 +3,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.platform.common import build_prompt, is_allowed_slack, save_to_history, finalize_thinking
+from src.platform.common import (
+    build_prompt,
+    finalize_thinking,
+    is_allowed_slack,
+    save_to_history,
+    split_text,
+)
 from src.config import BotConfig, SlackConfig, Settings
 from src.history import ConversationStorage
 
@@ -169,3 +175,53 @@ class TestFinalizeThinking:
 
         # Must not raise
         await finalize_thinking(edit_fn, elapsed_secs=10, show_elapsed=True)
+
+
+# ── split_text ────────────────────────────────────────────────────────────────
+
+class TestSplitText:
+    def test_short_text_returned_as_single_chunk(self):
+        text = "Hello world"
+        assert split_text(text, 100) == [text]
+
+    def test_exact_chunk_size_not_split(self):
+        text = "a" * 100
+        assert split_text(text, 100) == [text]
+
+    def test_splits_at_paragraph_boundary(self):
+        text = "First paragraph.\n\nSecond paragraph."
+        chunks = split_text(text, 20)
+        assert len(chunks) == 2
+        assert chunks[0] == "First paragraph.\n\n"
+        assert chunks[1] == "Second paragraph."
+
+    def test_splits_at_sentence_boundary(self):
+        text = "First sentence. Second sentence is longer."
+        chunks = split_text(text, 20)
+        # Should split after "First sentence. "
+        assert all(len(c) <= 20 for c in chunks)
+        assert "".join(chunks) == text
+
+    def test_splits_at_newline(self):
+        text = "line one\nline two that is longer"
+        chunks = split_text(text, 12)
+        assert all(len(c) <= 12 for c in chunks)
+        assert "".join(chunks) == text
+
+    def test_hard_cuts_when_no_boundary(self):
+        text = "a" * 50
+        chunks = split_text(text, 10)
+        assert all(len(c) == 10 for c in chunks)
+        assert "".join(chunks) == text
+
+    def test_no_data_loss(self):
+        text = "Para one.\n\nPara two. Sentence A. Sentence B.\n\nPara three."
+        for chunk_size in [15, 20, 30, 50]:
+            chunks = split_text(text, chunk_size)
+            assert "".join(chunks) == text, f"Data lost with chunk_size={chunk_size}"
+            assert all(len(c) <= chunk_size for c in chunks), (
+                f"Chunk exceeded limit with chunk_size={chunk_size}: {[len(c) for c in chunks]}"
+            )
+
+    def test_empty_string(self):
+        assert split_text("", 100) == [""]

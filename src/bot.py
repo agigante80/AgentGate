@@ -1,5 +1,6 @@
 import asyncio
 import functools
+import io
 import logging
 import time
 from collections.abc import Callable
@@ -23,10 +24,15 @@ from src.history import ConversationStorage, build_context as _build_context
 from src.redact import SecretRedactor
 from src.ai import factory as ai_factory
 from src import transcriber as transcriber_mod
-from src.platform.common import thinking_ticker, finalize_thinking
+from src.platform.common import thinking_ticker, finalize_thinking, split_text
 from src.ready_msg import ai_label as _ai_label
 
 logger = logging.getLogger(__name__)
+
+# Telegram hard limit per message
+_TG_MAX_CHARS = 4096
+# Send at most this many sequential messages before falling back to a file
+_TG_MAX_CHUNKS = 4
 
 
 # ── Pure helper functions (imported by tests) ───────────────────────────────
@@ -123,24 +129,72 @@ async def _stream_to_telegram(
         with suppress(asyncio.CancelledError):
             await ticker
 
-    final = accumulated[-max_chars:] if len(accumulated) > max_chars else accumulated
+    final = accumulated
     if redactor:
         final = redactor.redact(final)
     elapsed = int(time.monotonic() - t_start)
     await finalize_thinking(thinking_msg.edit_text, elapsed, show_elapsed)
-    if final_msg is None:
-        # No chunks received — post the full response as a new message
-        try:
-            await update.effective_message.reply_text(final or "_(empty response)_")
-        except Exception:
-            logger.warning("Failed to send final Telegram response")
-    else:
-        # Streaming message already exists — update it with clean content (remove cursor)
-        try:
-            await final_msg.edit_text(final or "_(empty response)_")
-        except Exception:
-            logger.debug("Telegram final message update skipped")
+    await _deliver_telegram(update, final_msg, final)
     return final
+
+
+async def _deliver_telegram(update: Update, streaming_msg, text: str) -> None:
+    """Send *text* back to the user, splitting across multiple messages if needed.
+
+    Strategy:
+    - Fits in one Telegram message (≤ 4096 chars) → single edit/reply.
+    - 2–4 chunks → edit/reply chunk 1, then reply with each subsequent chunk.
+    - > 4 chunks → send the full text as a ``response.txt`` file attachment.
+    """
+    if not text:
+        target_text = "_(empty response)_"
+        if streaming_msg is None:
+            try:
+                await update.effective_message.reply_text(target_text)
+            except Exception:
+                logger.warning("Failed to send final Telegram response")
+        else:
+            try:
+                await streaming_msg.edit_text(target_text)
+            except Exception:
+                logger.debug("Telegram final message update skipped")
+        return
+
+    chunks = split_text(text, _TG_MAX_CHARS)
+
+    if len(chunks) > _TG_MAX_CHUNKS:
+        # Too long — send as a downloadable file
+        note = f"📄 Response is too long to display ({len(text):,} chars). Sent as a file."
+        if streaming_msg is None:
+            try:
+                await update.effective_message.reply_text(note)
+            except Exception:
+                logger.warning("Failed to send Telegram file-fallback note")
+        else:
+            try:
+                await streaming_msg.edit_text(note)
+            except Exception:
+                logger.debug("Telegram file-fallback note update skipped")
+        buf = io.BytesIO(text.encode())
+        buf.name = "response.txt"
+        try:
+            await update.effective_message.reply_document(buf, caption="Full AI response")
+        except Exception:
+            logger.warning("Failed to send Telegram response as file")
+        return
+
+    # One or more chunks that fit within Telegram limits
+    for i, chunk in enumerate(chunks):
+        if i == 0 and streaming_msg is not None:
+            try:
+                await streaming_msg.edit_text(chunk)
+            except Exception:
+                logger.debug("Telegram final message update skipped")
+        else:
+            try:
+                await update.effective_message.reply_text(chunk)
+            except Exception:
+                logger.warning("Failed to send Telegram chunk %d", i + 1)
 
 
 # ── Auth decorator ───────────────────────────────────────────────────────────

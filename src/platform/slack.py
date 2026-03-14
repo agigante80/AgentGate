@@ -33,7 +33,7 @@ from src.audit import AuditLog, _ms_since
 from src.config import Settings, VERSION
 from src.history import ConversationStorage
 from src.platform import common
-from src.platform.common import thinking_ticker
+from src.platform.common import thinking_ticker, split_text
 from src.ready_msg import build_ready_message, ai_label as _ai_label
 from src.redact import SecretRedactor
 
@@ -41,6 +41,11 @@ logger = logging.getLogger(__name__)
 
 # Sent as a placeholder while streaming — updated chunk by chunk
 _THINKING = "🤖 Thinking…"
+
+# Slack section block text limit (API enforced)
+_SLACK_BLOCK_LIMIT = 3000
+# Responses longer than this are uploaded as a file snippet instead of multi-block
+_SLACK_SNIPPET_THRESHOLD = 12_000
 
 # ── Agent-to-agent delegation sentinel ────────────────────────────────────────
 
@@ -245,11 +250,7 @@ class SlackBot:
                 await ticker
 
         elapsed = int(time.monotonic() - t_start)
-        final = (
-            accumulated[-max_chars:]
-            if len(accumulated) > max_chars
-            else accumulated
-        )
+        final = accumulated
         final, delegations = _extract_delegations(final)
         if self._settings.slack.slack_delete_thinking:
             try:
@@ -262,14 +263,88 @@ class SlackBot:
                 elapsed,
                 self._settings.bot.thinking_show_elapsed,
             )
-        if final_ts is None:
-            # No chunks received — post the full response as a new message
-            await self._reply(client, channel, final or "_(empty response)_", thread_ts)
-        else:
-            # Streaming message already exists — update it with clean content (remove cursor)
-            await self._edit(client, channel, final_ts, final or "_(empty response)_")
+        await self._deliver_slack(client, channel, final_ts, final, thread_ts)
         await self._post_delegations(client, channel, delegations, thread_ts=thread_ts)
         return final
+
+    async def _deliver_slack(
+        self,
+        client,
+        channel: str,
+        existing_ts: str | None,
+        text: str,
+        thread_ts: str | None,
+    ) -> None:
+        """Send *text* to Slack, choosing the best delivery strategy based on length.
+
+        Strategy:
+        - ≤ 3 000 chars → single message edit/reply (unchanged behaviour).
+        - 3 001–12 000 chars → multi-section Block Kit message (one API call).
+        - > 12 000 chars → ``files_upload_v2`` snippet; existing placeholder
+          gets a short note.
+        """
+        empty_text = "_(empty response)_"
+        if not text:
+            if existing_ts is None:
+                await self._reply(client, channel, empty_text, thread_ts)
+            else:
+                await self._edit(client, channel, existing_ts, empty_text)
+            return
+
+        if len(text) <= _SLACK_BLOCK_LIMIT:
+            # Fast path — fits in a single message
+            if existing_ts is None:
+                await self._reply(client, channel, text, thread_ts)
+            else:
+                await self._edit(client, channel, existing_ts, text)
+            return
+
+        if len(text) <= _SLACK_SNIPPET_THRESHOLD:
+            # Multi-block: split into section blocks and send as one message
+            chunks = split_text(text, _SLACK_BLOCK_LIMIT)
+            blocks = [
+                {"type": "section", "text": {"type": "mrkdwn", "text": chunk}}
+                for chunk in chunks
+            ]
+            kwargs: dict = {
+                "channel": channel,
+                "text": text[:_SLACK_BLOCK_LIMIT],  # fallback text for notifications
+                "blocks": blocks,
+            }
+            if thread_ts:
+                kwargs["thread_ts"] = thread_ts
+            if existing_ts is None:
+                try:
+                    await client.chat_postMessage(**kwargs)
+                except Exception:
+                    logger.warning("Slack multi-block post failed; falling back to plain text")
+                    await self._reply(client, channel, text[:_SLACK_BLOCK_LIMIT], thread_ts)
+            else:
+                try:
+                    await client.chat_update(ts=existing_ts, **kwargs)
+                except Exception:
+                    logger.debug("Slack multi-block update failed; falling back to plain text")
+                    await self._edit(client, channel, existing_ts, text[:_SLACK_BLOCK_LIMIT])
+            return
+
+        # File upload for very large responses
+        note = f"📄 Response is too long to display ({len(text):,} chars). Uploading as a file…"
+        if existing_ts is None:
+            await self._reply(client, channel, note, thread_ts)
+        else:
+            await self._edit(client, channel, existing_ts, note)
+        try:
+            upload_kwargs: dict = {
+                "channel": channel,
+                "content": self._redactor.redact(text),
+                "filename": "response.txt",
+                "title": "Full AI response",
+            }
+            if thread_ts:
+                upload_kwargs["thread_ts"] = thread_ts
+            await client.files_upload_v2(**upload_kwargs)
+        except Exception:
+            logger.warning("Slack file upload failed for long response")
 
     async def _post_delegations(
         self,

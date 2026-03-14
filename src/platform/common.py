@@ -100,6 +100,46 @@ async def save_to_history(
         await storage.add_exchange(chat_id, user_msg, response)
 
 
+_PARAGRAPH_SEP = "\n\n"
+_SENTENCE_SEP = ". "
+
+
+def split_text(text: str, chunk_size: int) -> list[str]:
+    """Split *text* into chunks of at most *chunk_size* characters.
+
+    Prefers splitting at paragraph boundaries (double newline), then sentence
+    boundaries (``". "``), then single newlines, and finally hard-cuts at
+    *chunk_size* as a last resort.  Returns a list with at least one element.
+    """
+    if len(text) <= chunk_size:
+        return [text]
+
+    chunks: list[str] = []
+    remaining = text
+    while remaining:
+        if len(remaining) <= chunk_size:
+            chunks.append(remaining)
+            break
+
+        # Search for the best split point within the allowed window
+        window = remaining[:chunk_size]
+        pos = window.rfind(_PARAGRAPH_SEP)
+        if pos != -1:
+            split_at = pos + len(_PARAGRAPH_SEP)
+        else:
+            pos = window.rfind(_SENTENCE_SEP)
+            if pos != -1:
+                split_at = pos + len(_SENTENCE_SEP)
+            else:
+                pos = window.rfind("\n")
+                split_at = pos + 1 if pos != -1 else chunk_size
+
+        chunks.append(remaining[:split_at])
+        remaining = remaining[split_at:]
+
+    return chunks
+
+
 def is_allowed_slack(channel_id: str, user_id: str, settings: Settings) -> bool:
     """Auth check for Slack: optionally restrict by channel and/or user list."""
     cfg = settings.slack
