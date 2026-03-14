@@ -30,7 +30,7 @@ ENV PATH="/usr/local/go/bin:$PATH"
 RUN npm install -g @github/copilot@1.0.5
 
 # OpenAI Codex CLI — pinned version (update via Dependabot)
-RUN npm install -g @openai/codex@0.111.0
+RUN npm install -g @openai/codex@0.114.0
 
 # Python dependencies — installed as root so packages are system-wide and
 # accessible regardless of which UID the container runs as at runtime.
