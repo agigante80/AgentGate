@@ -1,6 +1,6 @@
 # Long-Response Delivery Without Head Truncation
 
-> Status: **Implemented** | Priority: High | Last reviewed: 2026-03-14 | GateDocs R2: 9/10
+> Status: **Approved** | Priority: High | Last reviewed: 2026-03-14 | All reviews: 9/10
 
 ## Overview
 
@@ -118,7 +118,7 @@ def split_text(text: str, chunk_size: int) -> list[str]: ...
 | OQ3 | *Security* — `_deliver_slack()` Block Kit multi-block path (3 001–12 000 chars) sends chunks via `client.chat_postMessage(**kwargs)` directly, bypassing `_reply()`/`_edit()` which apply `self._redactor.redact()`. Secrets in AI responses could leak in multi-section Slack messages. Fix: apply `self._redactor.redact(text)` before splitting so all chunks and the fallback notification text are redacted. | Fixed — `redacted = self._redactor.redact(text)` applied before `split_text()` in `_deliver_slack()` |
 | OQ4 | *Security* — Non-streaming paths bypass delivery functions entirely. `_run_ai_pipeline` (Telegram) sends via `reply_text()` and the Slack non-streaming branch sends via `_reply()` — neither uses `_deliver_telegram()`/`_deliver_slack()`. If `summarize_if_long()` produces output > 4 096 chars (e.g. the AI ignores the length instruction), Telegram will reject the API call. | Fixed — non-streaming Telegram path now calls `_deliver_telegram(update, msg, response)` using the thinking placeholder as `streaming_msg`; non-streaming Slack path now calls `_deliver_slack(client, channel, ts_or_None, response, thread_ts)` where `ts_or_None` is `None` when `slack_delete_thinking=True` (placeholder already deleted) or `ts` otherwise (edits placeholder in-place). |
 | OQ5 | *Spec accuracy* — AC 9 says "All 10 `TestSplitText` unit tests pass" but only 8 tests exist: `test_short_text_returned_as_single_chunk`, `test_exact_chunk_size_not_split`, `test_splits_at_paragraph_boundary`, `test_splits_at_sentence_boundary`, `test_splits_at_newline`, `test_hard_cuts_when_no_boundary`, `test_no_data_loss`, `test_empty_string`. Corrected to 8 in this review. | Fixed |
-| OQ6 | *Resilience* — Both delivery functions catch all exceptions with bare `except Exception` and log at WARNING/DEBUG. If `reply_document()` or `files_upload_v2` fails after the "Response is too long" note is sent, the user sees the note but never receives the file, and the full response is silently lost. Consider a fallback (e.g. re-try, or append first N chars inline). | Open |
+| OQ6 | *Resilience* — Both delivery functions catch all exceptions with bare `except Exception` and log at WARNING/DEBUG. If `reply_document()` or `files_upload_v2` fails after the "Response is too long" note is sent, the user sees the note but never receives the file, and the full response is silently lost. Consider a fallback (e.g. re-try, or append first N chars inline). | Deferred — track via GitHub issue (auth unavailable at review time; to be filed manually) |
 
 ## Team Review
 
