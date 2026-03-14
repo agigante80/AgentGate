@@ -178,7 +178,10 @@ When GateDocs completes the final review and all scores in that round are ≥ 9:
 If any score in a round is below 9, GateDocs does **not** post approval. Instead:
 
 1. List the blocking gaps (2–5 bullet points, one per unresolved issue) **directly in the doc**,
-   below the Team Review table for round N. Do not include them in the delegation message.
+   below the Team Review table for round N. Do not include them in the delegation message. When
+   listing blocking gaps in the doc, avoid exploit-ready or sensitive details; use high-level
+   descriptions, code paths, and remediation guidance. If a gap requires sharing sensitive
+   reproduction steps, coordinate privately with GateSec.
 2. Add a new set of rows to the Team Review table for round N+1:
    ```markdown
    | GateCode | 2 | -/10 | - | Pending |
@@ -200,7 +203,9 @@ Only the round-N+1 rows count for the ≥ 9 gate; earlier rounds are kept for hi
 - **Delegation messages must not include specific security gap details.** Reference
   the doc path and round number only; let the next agent read the doc itself. Posting
   gap descriptions (e.g. "auth guard missing on endpoint X") in the channel exposes
-  unpatched vulnerabilities to all workspace members before they are fixed.
+  unpatched vulnerabilities to all workspace members before they are fixed. When
+  listing blocking gaps in the repo doc (per Re-review Rounds), avoid exploit-ready
+  details; sensitive reproduction steps should be shared only with GateSec out-of-band.
 - **Scores are visible to the whole channel.** This is acceptable for transparency,
   but avoid including gap _descriptions_ alongside scores in delegation messages.
 
