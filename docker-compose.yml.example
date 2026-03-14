@@ -1,5 +1,13 @@
 services:
   bot:
+    # ── Image source (choose one) ──────────────────────────────────────────────
+    # Option A — pull from the GitHub Container Registry (recommended for production):
+    #   image: ghcr.io/agigante80/agentgate:latest        # latest stable release
+    #   image: ghcr.io/agigante80/agentgate:0.18.0        # pinned stable release
+    #   image: ghcr.io/agigante80/agentgate:develop       # latest dev snapshot
+    #   image: ghcr.io/agigante80/agentgate:0.18.0-dev-82d004e  # pinned dev snapshot
+    #
+    # Option B — build locally from source (default, useful for development):
     build: .
     restart: unless-stopped
     env_file: .env
