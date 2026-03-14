@@ -92,6 +92,8 @@ All three agents always participate in every round regardless of who started it.
 - No user-controlled input reaches a subprocess unsanitised
 - New DB tables/columns do not store unredacted secrets (redaction ordering preserved)
 - Any network endpoint (HTTP listener, webhook) documents its allowlist/auth model
+- Feature docs proposing new endpoints must include a threat model subsection
+- Example config blocks in the doc must not contain real API keys or tokens
 
 ### GateDocs (docs) — Clarity & Documentation
 - Problem Statement is clear and user-facing (not implementation-centric)
@@ -114,6 +116,9 @@ All three agents always participate in every round regardless of who started it.
 | **1–4** | Major issues (missing design, security hole, wrong architecture). |
 
 **Gate**: implementation may not begin until every reviewer's latest-round score is ≥ 9.
+
+> _A doc with an unmitigated security vulnerability (e.g., unsanitised subprocess input,
+> missing auth guard, plaintext secret storage) must score ≤ 4 regardless of other quality._
 
 ---
 
@@ -248,12 +253,31 @@ Only the round-N+1 rows count for the ≥ 9 gate; earlier rounds are kept for hi
   details; sensitive reproduction steps should be shared only with GateSec out-of-band.
 - **Scores are visible to the whole channel.** This is acceptable for transparency,
   but avoid including gap _descriptions_ alongside scores in delegation messages.
+- **New credential env vars require `SecretRedactor` coverage.** When a feature doc
+  introduces a new secret (API key, token, password), verify that the implementation
+  plan includes adding it to `_collect_secrets()` in `src/redact.py`. Omitting this
+  step has caused real leakage bugs (see v0.13.0 `CODEX_API_KEY` incident).
 
 ---
 
 ## Notes
 
 - All commits happen on `develop`. Never commit directly to `main`.
+
+---
+
+## Team Review
+
+| Reviewer | Round | Score | Date       | Notes |
+|----------|-------|-------|------------|-------|
+| GateCode | 1     | 9/10  | 2026-03-14 | Fixed template table placeholders, clarified wrap-around order |
+| GateSec  | 1     | 9/10  | 2026-03-14 | Added security scoring floor, SecretRedactor coverage rule, threat model requirement |
+| GateDocs | 1     | -/10  | -          | Pending |
+
+**Status**: ⏳ Pending review
+**Approved**: No — requires all scores ≥ 9/10 in the same round
+
+---
 - The reviewing agent is responsible for making the doc _better_, not just scoring it.
   A 6/10 score with a list of gaps is only useful if those gaps are also fixed or
   detailed enough that the next round can fix them.
