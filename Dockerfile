@@ -27,7 +27,7 @@ RUN ARCH=$(dpkg --print-architecture) && \
 ENV PATH="/usr/local/go/bin:$PATH"
 
 # GitHub Copilot CLI — pinned version (update via Dependabot)
-RUN npm install -g @github/copilot@0.0.421
+RUN npm install -g @github/copilot@0.0.423
 
 # OpenAI Codex CLI — pinned version (update via Dependabot)
 RUN npm install -g @openai/codex@0.111.0
