@@ -76,7 +76,7 @@ def split_text(text: str, chunk_size: int) -> list[str]: ...
 - [ ] AI responses > 12 000 chars on Slack delivered as a `files_upload_v2` snippet with a note replacing the placeholder.
 - [ ] `split_text()` never drops characters; `"".join(split_text(t, n)) == t` for all inputs.
 - [ ] Streaming preview window unchanged (still clips to `MAX_OUTPUT_CHARS`).
-- [ ] All 10 `TestSplitText` unit tests pass.
+- [ ] All 8 `TestSplitText` unit tests pass.
 
 ## Files Changed
 
@@ -102,9 +102,14 @@ def split_text(text: str, chunk_size: int) -> list[str]: ...
 |---|---|---|
 | OQ1 | Should `_TG_MAX_CHUNKS` and `_SLACK_SNIPPET_THRESHOLD` be configurable via env vars? | Open |
 | OQ2 | Should the streaming preview truncate from the *head* instead of the tail (show the latest content, which is current behaviour)? | Accepted — tail is correct UX for streaming |
+| OQ3 | *Security* — `_deliver_slack()` Block Kit multi-block path (3 001–12 000 chars) sends chunks via `client.chat_postMessage(**kwargs)` directly, bypassing `_reply()`/`_edit()` which apply `self._redactor.redact()`. Secrets in AI responses could leak in multi-section Slack messages. Fix: apply `self._redactor.redact(chunk)` to each block's text, or redact the full text before splitting. | Open |
+| OQ4 | *Security* — Non-streaming paths bypass delivery functions entirely. `_run_ai_pipeline` (Telegram) sends via `reply_text()` and the Slack non-streaming branch sends via `_reply()` — neither uses `_deliver_telegram()`/`_deliver_slack()`. If `summarize_if_long()` produces output > 4 096 chars (e.g. the AI ignores the length instruction), Telegram will reject the API call. Consider routing non-streaming final delivery through the same functions. | Open |
+| OQ5 | *Spec accuracy* — AC 9 says "All 10 `TestSplitText` unit tests pass" but only 8 tests exist: `test_short_text_returned_as_single_chunk`, `test_exact_chunk_size_not_split`, `test_splits_at_paragraph_boundary`, `test_splits_at_sentence_boundary`, `test_splits_at_newline`, `test_hard_cuts_when_no_boundary`, `test_no_data_loss`, `test_empty_string`. Corrected to 8 in this review. | Fixed |
+| OQ6 | *Resilience* — Both delivery functions catch all exceptions with bare `except Exception` and log at WARNING/DEBUG. If `reply_document()` or `files_upload_v2` fails after the "Response is too long" note is sent, the user sees the note but never receives the file, and the full response is silently lost. Consider a fallback (e.g. re-try, or append first N chars inline). | Open |
 
 ## Team Review
 
 | Reviewer | Round | Score | Notes |
 |---|---|---|---|
 | GateCode | R1 | — | Author |
+| GateSec | R1 | 8/10 | Redaction bypass in Slack multi-block path (OQ3), non-streaming paths skip delivery functions (OQ4), test count corrected 10→8 (OQ5), silent file-upload failure (OQ6). Streaming redaction and file-upload redaction verified correct. `split_text` is sound — no injection or data-loss vectors. |
