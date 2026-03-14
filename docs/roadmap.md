@@ -1,6 +1,6 @@
 # AgentGate — Roadmap
 
-> Last updated: 2026-03-14
+> Last updated: 2026-03-15
 
 A lean, prioritized list of work for AgentGate. Each item is a short name, one-line description, and a link to a feature document under `docs/features/`.
 
@@ -12,7 +12,7 @@ If adding a new item, create a feature document using `docs/features/_template.m
 
 | # | Item | Detail |
 |---|------|--------|
-| 1.4 | Split AI config — separate Copilot / Codex / Direct API fields in `AIConfig` | [→ features/split-aiconfig.md](features/split-aiconfig.md) |
+| 1.4 | Split AI config — separate Copilot / Codex / Direct API fields in `AIConfig` | [→ features/aiconfig-split.md](features/aiconfig-split.md) |
 
 ---
 
@@ -29,6 +29,8 @@ If adding a new item, create a feature document using `docs/features/_template.m
 | 2.11 | Voice transcription — local Whisper provider | [→ features/whisper-local.md](features/whisper-local.md) |
 | 2.12 | Voice transcription — Google Speech-to-Text provider | [→ features/whisper-google.md](features/whisper-google.md) |
 | 2.13 | Lightweight web dashboard — read-only HTTP status page in the container | [→ features/web-dashboard.md](features/web-dashboard.md) |
+| 2.14 | Prometheus metrics endpoint — expose request/error/latency metrics via `/metrics` | [→ features/metrics-endpoint.md](features/metrics-endpoint.md) |
+| 2.15 | Token/cost tracking — capture OpenAI usage payloads, surface spend via `/gate status` | [→ features/token-cost-tracking.md](features/token-cost-tracking.md) |
 
 ---
 
