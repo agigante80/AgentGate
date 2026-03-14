@@ -14,6 +14,9 @@ When using GitHub MCP tools, always use `owner: "agigante80"` and `repo: "AgentG
 # Lint
 ruff check src/
 
+# Lint docs (checks roadmap/feature-spec sync)
+python scripts/lint_docs.py
+
 # Run all tests
 pytest tests/ -v --tb=short
 
@@ -31,7 +34,7 @@ pytest tests/ --cov=src --cov-report=term-missing
 
 AgentGate is an async Python bot (Telegram **or** Slack) that acts as a gateway to pluggable AI backends. Each deployment is one Docker container per project repo.
 
-**Startup flow** (`src/main.py`): validate config → clone GitHub repo → auto-install deps → init SQLite history DB → create AI backend → start bot (Telegram or Slack) → send 🟢 Ready.
+**Startup flow** (`src/main.py`): validate config → clone GitHub repo → auto-install deps → init SQLite history DB → init audit log → create AI backend → start bot (Telegram or Slack) → send 🟢 Ready.
 
 **Config** (`src/config.py`): Pydantic `BaseSettings` split into six sub-configs (`TelegramConfig`, `SlackConfig`, `GitHubConfig`, `BotConfig`, `AIConfig`, `VoiceConfig`). All settings come from env vars. `Settings.load()` constructs them and is the only entry point. `TelegramConfig` fields are optional (default `""`) — validation that they're present happens in `_validate_config()` in `main.py`. Module-level `REPO_DIR` and `DB_PATH` constants are defined here — always import these instead of hardcoding `/repo` or `/data`.
 
@@ -39,7 +42,7 @@ AgentGate is an async Python bot (Telegram **or** Slack) that acts as a gateway 
 - `common.py` — shared helpers used by both bots: `build_prompt()` (injects history for stateless backends), `save_to_history()`, `is_allowed_slack()`, `thinking_ticker()` (async background task that edits the "Thinking…" message with elapsed time; started by both bots during `_run_ai_pipeline()`).
 - `slack.py` — `SlackBot` class using `slack-bolt[async]` in Socket Mode. Message events with prefix parsing (e.g. `gate run`, `gate sync`). Streaming via `client.chat_update(ts=…)`. Confirmation dialogs via Block Kit Actions. Voice via file download with auth header.
 
-**Bot handlers** (`src/bot.py`): all Telegram handlers live in `_BotHandlers`. Every handler method is guarded by `@_requires_auth` (checks `TG_CHAT_ID` and optional `ALLOWED_USERS`). Utility commands use the configurable prefix (default `gate`); everything else is forwarded to the AI.
+**Bot handlers** (`src/bot.py`): all Telegram handlers live in `_BotHandlers`. Constructor signature: `_BotHandlers(settings, backend, storage, start_time, audit)`. Every handler method is guarded by `@_requires_auth` (checks `TG_CHAT_ID` and optional `ALLOWED_USERS`). Utility commands use the configurable prefix (default `gate`); everything else is forwarded to the AI.
 
 **Platform selection**: `PLATFORM=telegram` (default) uses `src/bot.py`; `PLATFORM=slack` uses `src/platform/slack.py::SlackBot`. Both call the same AI backends, history, executor, and repo modules.
 - `adapter.py` defines the `AICLIBackend` ABC: `send()`, `stream()` (yields chunks; default yields `send()` at once), `clear_history()`, `close()` (release PTY/process resources), and the `is_stateful` class-level flag. Also defines `SubprocessMixin` for backends that spawn child processes in `REPO_DIR`.
@@ -51,6 +54,8 @@ AgentGate is an async Python bot (Telegram **or** Slack) that acts as a gateway 
 **Stateful vs stateless backends** (`src/bot.py → forward_to_ai`): if `backend.is_stateful` is `True`, the raw prompt is sent directly. If `False`, the last `HISTORY_TURNS` (default `10`) history exchanges from SQLite are prepended via `history.build_context()` before sending. Set `HISTORY_TURNS=0` to disable injection only (history is still stored).
 
 **CI/CD** (`.github/workflows/ci-cd.yml`): single unified pipeline. Jobs: `version` → `lint` + `test` (parallel) → `docker-publish` + `security-scan` → `release` → `summary`. On `develop`: publishes `:develop` Docker tag. On `main`: version-bump check, publishes `:latest`, creates a GitHub Release. Multi-platform builds (amd64 + arm64). `workflow_dispatch` supports `skip_tests` and `skip_docker_publish` inputs.
+
+**Audit log** (`src/audit.py`): `AuditLog` ABC with `SQLiteAuditLog` (writes to `AUDIT_DB_PATH = /data/audit.db`) and `NullAuditLog` (no-op). Constructed in `main.py` based on `AUDIT_ENABLED` (default `true`) and injected into `_BotHandlers` and `SlackBot`. Design mirrors `history.py` — ABC + SQLite, async-first, exception-swallowing. **Callers must redact sensitive data before calling `audit.record()`**. Records platform, chat_id, user_id, action, detail, status, and duration_ms.
 
 **History** (`src/history.py`): `ConversationStorage` ABC with `SQLiteStorage` concrete implementation (async SQLite at `/data/history.db`). `SQLiteStorage` is constructed in `main.py` (`SQLiteStorage(DB_PATH)`, `await storage.init()`) and injected into `_BotHandlers` and `SlackBot` constructors. `build_context()` remains a module-level pure function. Stores exchanges per `chat_id`; the number injected per prompt is controlled by `HISTORY_TURNS` (default `10`). Only used by stateless backends; stateful backends track context themselves.
 
