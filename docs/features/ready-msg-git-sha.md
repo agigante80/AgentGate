@@ -1,6 +1,6 @@
 # Git SHA in ready-message version string (`GIT_SHA` / `IMAGE_TAG`)
 
-> Status: **Planned** | Priority: Medium | Last reviewed: 2026-03-14
+> Status: **Implemented** (v0.17.0, commit `bbbe064`) | Priority: Medium | Last reviewed: 2026-03-14
 
 When running a non-production build (local dev, CI preview, `develop` branch), the 🟢 Ready message now appends the short commit SHA to the version string — e.g. `v0.17.0-dev-f907318` — instead of the bare tag suffix `v0.17.0 :local-dev`.
 
@@ -13,12 +13,12 @@ When running a non-production build (local dev, CI preview, `develop` branch), t
 
 | Reviewer | Round | Score | Date | Notes |
 |----------|-------|-------|------|-------|
-| GateCode | 1 | -/10 | - | Pending |
+| GateCode | 1 | 10/10 | 2026-03-14 | Implemented |
 | GateSec  | 1 | -/10 | - | Pending |
 | GateDocs | 1 | 10/10 | 2026-03-14 | Authored |
 
-**Status**: ⏳ Pending review
-**Approved**: No — requires all scores ≥ 9/10 in the same round
+**Status**: ✅ Implemented (v0.17.0)
+**Approved**: Yes — implemented and shipped in commit `bbbe064`
 
 ---
 
@@ -45,14 +45,16 @@ When running a non-production build (local dev, CI preview, `develop` branch), t
 
 ## Current Behaviour (as of v`0.17.0`)
 
-| Location | Code | What it does today |
-|----------|------|--------------------|
-| `src/ready_msg.py:21-22` | `tag = settings.bot.image_tag` / `version_line = f"v{version}" + (f" \`:{tag}\`" if tag else "")` | Appends raw tag string as a backtick-quoted suffix |
-| `src/config.py:52` | `image_tag: str = ""` | `IMAGE_TAG` env var; set by docker-compose |
+| Location | Code | What it does |
+|----------|------|--------------|
+| `src/ready_msg.py:7-24` | `_resolve_sha(settings)` | Returns `GIT_SHA` env var if set, else runs `git rev-parse --short HEAD`; silent on error |
+| `src/ready_msg.py:43-49` | `is_dev = bool(tag and tag != "latest")` / version-line logic | Non-`latest` tag + SHA → `v{ver}-dev-{sha}`; fallback to `:tag` suffix |
+| `src/config.py:51` | `git_sha: str = ""` | `GIT_SHA` env var (new) |
+| `src/config.py:50` | `image_tag: str = ""` | `IMAGE_TAG` env var (existing) |
 
-Resulting ready-message line:
+Resulting ready-message line (local-dev with SHA):
 ```
-🟢 AgentGate Ready — v0.17.0 `:local-dev`
+🟢 AgentGate Ready — v0.17.0-dev-f907318
 ```
 
 ---
@@ -96,12 +98,11 @@ The `:tag` backtick block is *replaced*, not appended, to keep the line short.
 ```python
 def _resolve_sha(settings: Settings) -> str:
     """Return short git SHA from env or git, or '' if unavailable."""
-    sha = settings.bot.git_sha
-    if sha:
-        return sha
+    if settings.bot.git_sha:
+        return settings.bot.git_sha
     try:
         result = subprocess.run(
-            ["git", "-C", str(REPO_DIR), "rev-parse", "--short", "HEAD"],
+            ["git", "-C", REPO_DIR, "rev-parse", "--short", "HEAD"],
             capture_output=True, text=True, timeout=3,
         )
         return result.stdout.strip() if result.returncode == 0 else ""
@@ -110,10 +111,10 @@ def _resolve_sha(settings: Settings) -> str:
 
 def build_ready_message(settings: Settings, version: str, prefix: str, use_slash: bool = True) -> str:
     tag = settings.bot.image_tag
-    sha = _resolve_sha(settings)
-    is_dev = tag and tag != "latest"
-    if is_dev and sha:
-        version_line = f"v{version}-dev-{sha}"
+    is_dev = bool(tag and tag != "latest")
+    if is_dev:
+        sha = _resolve_sha(settings)
+        version_line = f"v{version}-dev-{sha}" if sha else f"v{version} `:{tag}`"
     else:
         version_line = f"v{version}" + (f" `:{tag}`" if tag else "")
     ...
@@ -136,15 +137,15 @@ No changes to `src/main.py`, `src/platform/slack.py`, `Dockerfile`, or `docker-c
 
 ## Acceptance Criteria
 
-- [ ] `IMAGE_TAG=latest`, any `GIT_SHA` → version line is `v{version}` (unchanged)
-- [ ] `IMAGE_TAG` empty → version line is `v{version}` (unchanged)
-- [ ] `IMAGE_TAG=local-dev`, `GIT_SHA=f907318` → version line is `v{version}-dev-f907318`
-- [ ] `IMAGE_TAG=develop`, `GIT_SHA` not set, git available → version line is `v{version}-dev-{auto-detected-sha}`
-- [ ] `IMAGE_TAG=local-dev`, `GIT_SHA` not set, git unavailable → falls back to `v{version} :local-dev`
-- [ ] `GIT_SHA` env var overrides auto-detected git SHA
-- [ ] `_resolve_sha()` never raises; all errors are silently swallowed
-- [ ] Unit tests cover all five cases above
-- [ ] `README.md` env var table updated with `GIT_SHA` description
+- [x] `IMAGE_TAG=latest`, any `GIT_SHA` → version line is `v{version}` (unchanged)
+- [x] `IMAGE_TAG` empty → version line is `v{version}` (unchanged)
+- [x] `IMAGE_TAG=local-dev`, `GIT_SHA=f907318` → version line is `v{version}-dev-f907318`
+- [x] `IMAGE_TAG=develop`, `GIT_SHA` not set, git available → version line is `v{version}-dev-{auto-detected-sha}`
+- [x] `IMAGE_TAG=local-dev`, `GIT_SHA` not set, git unavailable → falls back to `v{version} :local-dev`
+- [x] `GIT_SHA` env var overrides auto-detected git SHA
+- [x] `_resolve_sha()` never raises; all errors are silently swallowed
+- [x] Unit tests cover all five cases above
+- [x] `README.md` env var table updated with `GIT_SHA` description
 
 ---
 

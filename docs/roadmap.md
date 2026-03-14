@@ -31,7 +31,6 @@ If adding a new item, create a feature document using `docs/features/_template.m
 | 2.13 | Lightweight web dashboard — read-only HTTP status page in the container | [→ features/web-dashboard.md](features/web-dashboard.md) |
 | 2.14 | Prometheus metrics endpoint — expose request/error/latency metrics via `/metrics` | [→ features/metrics-endpoint.md](features/metrics-endpoint.md) |
 | 2.15 | Token/cost tracking — capture OpenAI usage payloads, surface spend via `/gate status` | [→ features/token-cost-tracking.md](features/token-cost-tracking.md) |
-| 2.16 | Git SHA in ready-message version string — show `v0.17.0-dev-f907318` for non-production builds | [→ features/ready-msg-git-sha.md](features/ready-msg-git-sha.md) |
 
 ---
 
