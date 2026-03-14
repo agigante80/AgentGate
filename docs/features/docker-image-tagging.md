@@ -13,12 +13,12 @@ Formalise the Docker image tagging convention so users can pull predictable, wel
 
 | Reviewer | Round | Score | Date | Notes |
 |----------|-------|-------|------|-------|
-| GateCode | 1 | 9/10 | 2026-03-14 | Implementation matches spec exactly. Minor: open Q1 (pinned tag mutability) is a real risk on CI re-runs; Q4 (docker-compose example) worth addressing pre-approval. |
+| GateCode | 1 | 9/10 | 2026-03-14 | YAML snippets accurate (cosmetic line-continuation differences only). Two gaps: (a) `org.opencontainers.image.source` label mentioned in Security section but absent from the build-push YAML snippet; (b) `cache-from`/`cache-to` GHA layer caching present in live workflow but omitted from snippet. Publish gate table is _correct_ — `always()` wrapper + OR-clause in the live condition means develop truly bypasses lint/test (not just advisory). `skip_docker_publish` manual-dispatch input and the `develop-latest` rolling GitHub pre-release (produced by the pipeline on every develop push) are both undocumented — added as OQ5 below. |
 | GateSec  | 1 | 10/10 | 2026-03-14 | Authored |
 | GateDocs | 1 | 9/10 | 2026-03-14 | Tag matrix and version-string table are clear and accurate. User Guide is comprehensive but missing a `docker login ghcr.io` note for registry pulls. OQ4 (`docker-compose.yml.example` registry snippet) should be resolved before approval; OQ1 (tag immutability) can be a follow-up CI task. |
 
-**Status**: ⏳ Pending GateCode review
-**Approved**: No — requires all scores ≥ 9/10 in the same round
+**Status**: ✅ Approved
+**Approved**: Yes — all scores ≥ 9/10 (Round 1)
 
 ---
 
@@ -145,6 +145,7 @@ The tagging strategy is fully implemented in `.github/workflows/ci-cd.yml`. No a
     labels: |
       org.opencontainers.image.version=${{ needs.version.outputs.version }}
       org.opencontainers.image.revision=${{ github.sha }}
+      org.opencontainers.image.source=${{ github.repositoryUrl }}
 ```
 
 ### Publish gate conditions
@@ -273,3 +274,4 @@ No new CI/CD env vars. The following `BotConfig` fields in `src/config.py` (line
 2. **Image signing / SBOM** — Should we add Sigstore/cosign signing or SBOM generation (`docker/build-push-action` supports `sbom: true`)? This would enable `cosign verify` for supply-chain validation. Not blocking but increasingly expected for open-source projects.
 3. **Tag cleanup policy** — Old `{ver}-dev-{sha}` tags accumulate indefinitely in ghcr.io. Consider a scheduled workflow to prune dev tags older than N days, keeping only the latest M per minor version.
 4. **`docker-compose.yml.example` update** — Should the example be updated to show an `image:` line (commented out) alongside `build: .` so users see how to pull from the registry? Currently it only demonstrates local builds.
+5. **`develop-latest` rolling GitHub pre-release** — The pipeline creates/overwrites a `develop-latest` git tag and GitHub pre-release on every `develop` push, pointing to the current `{ver}-dev-{sha}` image. This artifact is visible on the GitHub Releases page and in `docker pull` discovery, but is not documented in this spec or the User Guide. Should it be? If so, does it warrant its own pull alias (`:develop-latest`) or is the rolling `:develop` tag sufficient?
