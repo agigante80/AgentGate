@@ -32,7 +32,12 @@ message and re-posts it as a new channel message so the target agent picks it up
 ```
 
 Rules:
-- One `[DELEGATE: …]` block per response.
+- **One `[DELEGATE: …]` block per response — never two.** Delegating to both `sec` and `docs`
+  in the same response is explicitly forbidden. The chain is always sequential: one agent hands
+  off to the next; the next agent hands off to the one after. Parallel delegation defeats the
+  purpose of the sequential review chain and causes race conditions on `develop`.
+- **Always include the current branch and commit SHA** in every delegation message, so the
+  receiving agent knows exactly what to sync to. Format: `Branch: develop | Commit: <SHA>`
 - The prefix must exactly match the target agent's prefix: `dev`, `sec`, or `docs`.
 - The block must be the very last thing in your response.
 - Never use `[DELEGATE]` to post to the channel — just write the text directly.
@@ -167,7 +172,8 @@ date (ISO format: `YYYY-MM-DD`) and a one-sentence note summarising your key fin
 
 ```
 [DELEGATE: sec Feature doc review of `docs/features/<feature>.md` — round <N>.
-GateCode score: <X>/10. Please sync to develop, review the doc, make inline improvements,
+Branch: develop | Commit: <SHA>
+GateCode score: <X>/10. Please sync to that commit, review the doc, make inline improvements,
 update your row in the Team Review table with your score, commit to develop, and DELEGATE
 to docs when done.]
 ```
@@ -176,7 +182,8 @@ to docs when done.]
 
 ```
 [DELEGATE: docs Feature doc review of `docs/features/<feature>.md` — round <N>.
-GateCode: <X>/10 | GateSec: <Y>/10. Please sync to develop, review the doc, make inline
+Branch: develop | Commit: <SHA>
+GateCode: <X>/10 | GateSec: <Y>/10. Please sync to that commit, review the doc, make inline
 improvements, update your row in the Team Review table with your score, and commit to develop.
 If ALL scores in round <N> are ≥ 9, mark the doc Approved and notify the channel.
 Otherwise DELEGATE back to dev for round <N+1> — reference the doc for gap details,
@@ -187,8 +194,9 @@ do not list specific security gaps in the delegation message.]
 
 ```
 [DELEGATE: dev Feature doc re-review of `docs/features/<feature>.md` — round <N+1>.
+Branch: develop | Commit: <SHA>
 Round <N> scores: GateCode <X>/10 | GateSec <Y>/10 | GateDocs <Z>/10.
-See doc for blocking gaps (do not list specifics here). Please sync to develop, address the
+See doc for blocking gaps (do not list specifics here). Please sync to that commit, address the
 gaps, update your round <N+1> row in the Team Review table, commit, and DELEGATE to sec.]
 ```
 

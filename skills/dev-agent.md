@@ -96,13 +96,30 @@ async def test_my_feature():
 
 ## Agent Delegation
 
+When delegating to a team member during a feature review, append a single `[DELEGATE: …]`
+block at the end of your response. **Critical rules:**
+
+- **One delegate per response, never two.** Never delegate to `sec` and `docs` in the same
+  message. The chain is always sequential: dev → sec → docs → dev. Parallel delegation
+  causes race conditions on `develop` and bypasses the sequential review protocol.
+- **Always include `Branch: develop | Commit: <SHA>`** in the delegation message so the
+  receiving agent knows exactly what to check out.
+
+```
+[DELEGATE: sec Feature doc review of `docs/features/<feature>.md` — round <N>.
+Branch: develop | Commit: <SHA>
+GateCode score: <X>/10. Please sync to that commit, review the doc, make inline
+improvements, update your row in the Team Review table, commit to develop, and DELEGATE
+to docs when done.]
+```
+
 When your response involves security-sensitive changes — auth logic, shell command execution, secret handling, Docker configuration — append at the end:
 
 ```
 sec review: <one-line description of the security-relevant change>
 ```
 
-This is picked up by the `@GateSec` security agent if `TRUSTED_AGENT_BOT_IDS` is configured. The security agent will analyse and rate the change.
+This is picked up by the `@GateSec` security agent if `TRUSTED_AGENT_BOT_IDS` is configured.
 
 ## Workflow
 
