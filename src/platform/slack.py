@@ -300,15 +300,18 @@ class SlackBot:
             return
 
         if len(text) <= _SLACK_SNIPPET_THRESHOLD:
-            # Multi-block: split into section blocks and send as one message
-            chunks = split_text(text, _SLACK_BLOCK_LIMIT)
+            # Multi-block: split into section blocks and send as one message.
+            # Redact the full text first so every chunk and the fallback
+            # notification text are free of secrets before being sent.
+            redacted = self._redactor.redact(text)
+            chunks = split_text(redacted, _SLACK_BLOCK_LIMIT)
             blocks = [
                 {"type": "section", "text": {"type": "mrkdwn", "text": chunk}}
                 for chunk in chunks
             ]
             kwargs: dict = {
                 "channel": channel,
-                "text": text[:_SLACK_BLOCK_LIMIT],  # fallback text for notifications
+                "text": redacted[:_SLACK_BLOCK_LIMIT],  # fallback text for notifications
                 "blocks": blocks,
             }
             if thread_ts:
@@ -318,13 +321,13 @@ class SlackBot:
                     await client.chat_postMessage(**kwargs)
                 except Exception:
                     logger.warning("Slack multi-block post failed; falling back to plain text")
-                    await self._reply(client, channel, text[:_SLACK_BLOCK_LIMIT], thread_ts)
+                    await self._reply(client, channel, redacted[:_SLACK_BLOCK_LIMIT], thread_ts)
             else:
                 try:
                     await client.chat_update(ts=existing_ts, **kwargs)
                 except Exception:
                     logger.debug("Slack multi-block update failed; falling back to plain text")
-                    await self._edit(client, channel, existing_ts, text[:_SLACK_BLOCK_LIMIT])
+                    await self._edit(client, channel, existing_ts, redacted[:_SLACK_BLOCK_LIMIT])
             return
 
         # File upload for very large responses
