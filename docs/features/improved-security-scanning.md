@@ -15,11 +15,11 @@ caught before merge.
 
 | Reviewer | Round | Score | Date | Notes |
 |----------|-------|-------|------|-------|
-| GateCode | 1 | -/10 | - | Pending |
+| GateCode | 1 | 9/10 | 2026-03-14 | Problem analysis airtight; YAML snippets verified against live workflow. Two additions: CodeQL scheduled-scan trigger + pip-audit SARIF syntax pre-validation. See OQ9 and OQ10. |
 | GateSec  | 1 | -/10 | - | Pending |
 | GateDocs | 1 | 9/10 | 2026-03-14 | Comprehensive, accurate CI refs (lines verified). One inconsistency: Step 4 pip-audit snippet uses `\|\| true` (never fails), contradicting the Axis 4 recommendation of "fail on any". Fix before implementation. Roadmap entry added. |
 
-**Status**: ⏳ Pending review
+**Status**: ⏳ In review (1/3 complete)
 **Approved**: No — requires all scores ≥ 9/10 in the same round
 
 ---
@@ -677,6 +677,21 @@ unchanged.
 8. **Multi-stage Docker build** — the most effective long-term noise reduction. Should
    be a separate feature spec: analyse which tools (`go`, `gcc`, `make`) are needed at
    runtime vs build-time, then restructure the Dockerfile. *Not in scope for this spec.*
+
+9. **CodeQL scheduled scan** — CodeQL's own documentation recommends adding a weekly
+   scheduled scan on the default branch (in addition to push/PR triggers) to catch
+   vulnerabilities introduced via dependency updates between pushes. The spec's
+   `codeql.yml` YAML snippet omits this. Add a `schedule: - cron: '0 6 * * 1'`
+   trigger to the CodeQL workflow.
+   *Proposed answer*: add the weekly schedule to `codeql.yml` — low effort, best
+   practice alignment.
+
+10. **pip-audit SARIF command syntax** — the spec shows `pip-audit --format sarif` but
+    the actual flag for pip-audit ≥ 2.7 is `pip-audit -r requirements.txt -f sarif -o
+    pip-audit-results.sarif`. Pre-validate the exact syntax in the implementation step
+    before merging — a broken CI command would silently skip the upload.
+    *Proposed answer*: use `pip install pip-audit && pip-audit -r requirements.txt -f
+    sarif -o pip-audit-results.sarif` and test against the latest pip-audit release.
 
 ---
 
