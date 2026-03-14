@@ -53,7 +53,7 @@ _DELEGATE_RE = re.compile(r"\[DELEGATE:\s*(\w+)\s+(.*?)\]", re.DOTALL)
 
 # Sub-commands that delegated messages must NOT start with (RCE prevention)
 _BLOCKED_DELEGATION_SUBS = {
-    "run", "sync", "git", "diff", "log", "restart", "clear", "confirm",
+    "run", "sync", "git", "diff", "log", "restart", "clear", "confirm", "init",
 }
 
 # Commands intentionally allowed through delegation (safe / read-only)
@@ -67,7 +67,7 @@ _MAX_DELEGATIONS = 3
 
 # Known utility subcommands — shared by trusted-bot routing, broadcast routing, and _dispatch
 _KNOWN_SUBS = {
-    "run", "sync", "git", "diff", "log", "status", "clear", "restart", "confirm", "info", "help",
+    "run", "sync", "git", "diff", "log", "status", "clear", "restart", "confirm", "info", "help", "init",
 }
 
 
@@ -654,6 +654,7 @@ class SlackBot:
             "confirm": self._cmd_confirm,
             "info": self._cmd_info,
             "help": self._cmd_help,
+            "init": self._cmd_init,
         }
         handler = table.get(sub)
         if handler is None:
@@ -839,6 +840,24 @@ class SlackBot:
             action="command", detail={"sub": "clear"},
         )
 
+    async def _cmd_init(
+        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None
+    ) -> None:
+        """Clear history and forward `/init` to the AI with no prior context.
+
+        History is wiped first so that build_prompt() injects no exchanges,
+        ensuring copilot receives the literal `/init` slash command rather than
+        a poisoned-history prompt that causes the AI to mimic past init responses.
+        """
+        if self._settings.bot.history_enabled:
+            await self._history.clear(channel)
+        self._backend.clear_history()
+        await self._audit.record(
+            platform="slack", chat_id=channel,
+            action="command", detail={"sub": "init"},
+        )
+        await self._run_ai_pipeline(say, client, "/init", channel, thread_ts=thread_ts)
+
     async def _cmd_restart(
         self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None
     ) -> None:
@@ -874,6 +893,7 @@ class SlackBot:
             f"`{p} log [n]` — tail last n container log lines (default 20)\n"
             f"`{p} status` — check if AI is busy\n"
             f"`{p} clear` — clear conversation history\n"
+            f"`{p} init` — clear history and run `/init` in the AI session\n"
             f"`{p} restart` — restart AI backend session\n"
             f"`{p} confirm [on|off]` — toggle/query confirmation prompts\n"
             f"`{p} info` — project & bot info\n"

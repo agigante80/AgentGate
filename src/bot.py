@@ -472,6 +472,7 @@ class _BotHandlers:
             "restart": self.cmd_restart,
             "confirm": self.cmd_confirm,
             "info":    self.cmd_info,
+            "init":    self.cmd_init,
         }
 
         handler = dispatch.get(sub)
@@ -502,6 +503,7 @@ class _BotHandlers:
             f"`/{p} log` `[n]` — tail last n container log lines (default 20)\n"
             f"`/{p} status` — check if AI is busy\n"
             f"`/{p} clear` — clear conversation history\n"
+            f"`/{p} init` — clear history and run `/init` in the AI session\n"
             f"`/{p} restart` — restart AI backend session\n"
             f"`/{p} confirm` `[on|off]` — toggle/query confirmation prompts\n"
             f"`/{p} info` — show ready message (version, repo, AI, uptime)\n"
@@ -552,6 +554,25 @@ class _BotHandlers:
             platform="telegram", chat_id=chat_id, user_id=user_id,
             action="command", detail={"sub": "clear"},
         )
+
+    @_requires_auth
+    async def cmd_init(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """Clear history and forward `/init` to the AI with no prior context.
+
+        History is wiped first so that _build_context() injects no exchanges,
+        ensuring copilot receives the literal `/init` slash command rather than
+        a poisoned-history prompt that causes the AI to mimic past init responses.
+        """
+        chat_id = str(update.effective_chat.id)
+        user_id = str(update.effective_user.id) if update.effective_user else None
+        if self._settings.bot.history_enabled:
+            await self._history.clear(chat_id)
+        self._backend.clear_history()
+        await self._audit.record(
+            platform="telegram", chat_id=chat_id, user_id=user_id,
+            action="command", detail={"sub": "init"},
+        )
+        await self._run_ai_pipeline(update, "/init", chat_id)
 
     @_requires_auth
     async def cmd_restart(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -656,6 +677,7 @@ def build_app(settings: Settings, backend: AICLIBackend, storage: ConversationSt
     app.add_handler(CommandHandler(f"{p}log", h.cmd_log))
     app.add_handler(CommandHandler(f"{p}status", h.cmd_status))
     app.add_handler(CommandHandler(f"{p}clear", h.cmd_clear))
+    app.add_handler(CommandHandler(f"{p}init", h.cmd_init))
     app.add_handler(CommandHandler(f"{p}restart", h.cmd_restart))
     app.add_handler(CommandHandler(f"{p}confirm", h.cmd_confirm))
     app.add_handler(CommandHandler(f"{p}help", h.cmd_help))

@@ -806,5 +806,5 @@ class TestBuildApp:
             MockApp.builder.return_value.token.return_value.build.return_value = mock_app_instance
             build_app(settings, backend, _make_storage(), 0.0, NullAuditLog())
 
-        # 12 CommandHandlers + 1 CallbackQueryHandler + 2 MessageHandlers = 16
-        assert mock_app_instance.add_handler.call_count == 16
+        # 13 CommandHandlers + 1 CallbackQueryHandler + 2 MessageHandlers = 17
+        assert mock_app_instance.add_handler.call_count == 17
