@@ -101,8 +101,11 @@ def check_config_coverage(readme_text: str) -> tuple[list[str], list[str]]:
     return errors, []
 
 
-def _parse_env_example() -> tuple[set[str], set[str]]:
+def _parse_env_example(config_vars: set[str]) -> tuple[set[str], set[str]]:
     """Return (declared_vars, passthrough_vars) from .env.example.
+
+    Accepts the pre-extracted *config_vars* set to avoid redundant calls to
+    ``extract_config_env_vars()`` across Check 6 and Check 7.
 
     Parses both uncommented and commented-out variable lines.  Lines that
     contain ``# passthrough:`` are added to *passthrough_vars* instead of
@@ -116,7 +119,6 @@ def _parse_env_example() -> tuple[set[str], set[str]]:
     passthroughs: set[str] = set()
     if not ENV_EXAMPLE_FILE.is_file():
         return declared, passthroughs
-    config_vars = extract_config_env_vars()
     for line in ENV_EXAMPLE_FILE.read_text().splitlines():
         stripped = line.strip().lstrip("#").strip()
         if "=" not in stripped:
@@ -136,7 +138,7 @@ def _parse_env_example() -> tuple[set[str], set[str]]:
 
 def check_env_example_coverage(config_vars: set[str]) -> tuple[list[str], list[str]]:
     """Check 6: .env.example has no stale entries not present in src/config.py."""
-    declared, _passthroughs = _parse_env_example()
+    declared, _passthroughs = _parse_env_example(config_vars)
     errors: list[str] = []
     for var in sorted(declared - config_vars):
         errors.append(
@@ -157,7 +159,7 @@ def check_compose_coverage(config_vars: set[str]) -> tuple[list[str], list[str]]
     """
     if not COMPOSE_EXAMPLE_FILE.is_file():
         return [], []
-    declared, passthroughs = _parse_env_example()
+    declared, passthroughs = _parse_env_example(config_vars)
     all_known = declared | passthroughs | config_vars
     errors: set[str] = set()
     for line in COMPOSE_EXAMPLE_FILE.read_text().splitlines():
