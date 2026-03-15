@@ -15,11 +15,73 @@ Block Kit "Cancel" button interrupt the running pipeline cleanly and notify the 
 
 | Reviewer | Round | Score | Date | Notes |
 |----------|-------|-------|------|-------|
-| GateCode | 1 | -/10 | - | Pending |
+| GateCode | 1 | 6/10 | 2026-03-15 | 6 blockers/gaps — see R1 findings below |
 | GateSec  | 1 | -/10 | - | Pending |
 | GateDocs | 1 | -/10 | - | Pending |
 
-**Status**: ⏳ Pending review
+**Status**: ⏳ In review — GateCode R1 findings must be addressed before GateSec/GateDocs rounds
+
+### GateCode R1 Findings (2026-03-15)
+
+**Score: 6/10** — Solid structure and threat analysis, but six implementation gaps prevent direct handoff to code.
+
+#### 🔴 Blocker 1 — `CodexBackend.is_stateful` is `False`, not `True`
+
+Prerequisite Q3 and Architecture Notes both say "Stateful backends (CodexBackend, DirectAPIBackend)". This is factually wrong. `CodexBackend` never sets `is_stateful`; it inherits the default `False` from `AICLIBackend` (confirmed in `src/ai/codex.py` — no `is_stateful` override). Consequence: the history-inconsistency risk in Edge Case 2 does not apply to CodexBackend. The spec's argument for calling `backend.clear_history()` after cancel only applies to `DirectAPIBackend`. Fix: correct every occurrence of "CodexBackend is stateful" throughout the spec.
+
+#### 🔴 Blocker 2 — `_handle_cancel` undefined for Slack text command
+
+Step 3h adds `"cancel": self._handle_cancel` to the Slack `_dispatch` table, but `_handle_cancel` is never defined anywhere in the spec. Only `_on_cancel_ai` (the Block Kit button handler) is specced. The Slack text-command path needs its own `_cmd_cancel` (or `_handle_cancel`) method with code sample, analogous to the Telegram `cmd_cancel` in Step 2d.
+
+#### 🔴 Blocker 3 — `_KNOWN_SUBS` not updated (critical routing bug)
+
+`_KNOWN_SUBS` (slack.py line 69) is the gating set — only subcommands in it are routed to `_dispatch()`. If `"cancel"` is absent from `_KNOWN_SUBS`, `gate cancel` falls through to the AI pipeline instead of the cancel handler. The spec's Files table and Step 3 do not mention updating `_KNOWN_SUBS`. Add `"cancel"` to the set and document it explicitly.
+
+#### 🔴 Blocker 4 — `asyncio.TimeoutError` handler not updated for `shield` (correctness bug)
+
+Open Question 7 correctly identifies that with `asyncio.shield(ai_task)` in the pipeline, an `AI_TIMEOUT_SECS` expiry cancels only the shield future — the underlying `ai_task` keeps running. OQ7 says "the timeout path should call `_cancel_active_task()` too." But Step 2c's code sample does not update the `except asyncio.TimeoutError` block. The existing handler just returns:
+```python
+except asyncio.TimeoutError:
+    await msg.edit_text(f"⚠️ Request cancelled after {cfg.ai_timeout_secs}s. ...")
+    return  # ← ai_task is still running!
+```
+With shield in place, `return` here leaks the task. The implementation step must show the updated `TimeoutError` handler calling `await self._cancel_active_task(chat_id)` (or at minimum `ai_task.cancel()`). Mirror fix required in `slack.py`.
+
+#### 🟡 Gap 5 — `asyncio.ensure_future` in Step 2c should be `asyncio.create_task`
+
+Step 2c uses `asyncio.ensure_future(...)`. The entire codebase uses `asyncio.create_task(...)`. `ensure_future` is deprecated for coroutines in Python 3.10+. Change to `create_task` for consistency.
+
+#### 🟡 Gap 6 — Streaming path (Step 4) has no code sample
+
+Step 4 says "mirror the task tracking in the streaming helpers" and calls it "the most complex part." But it provides zero code. The key challenge: `_stream_to_telegram` is a module-level function — it cannot access `self._active_tasks`. The refactor belongs in the *caller* inside `_run_ai_pipeline`:
+```python
+# In _run_ai_pipeline streaming branch:
+stream_task = asyncio.create_task(
+    _stream_to_telegram(update, self._backend, prompt, ...)
+)
+self._active_tasks[chat_id] = stream_task
+try:
+    response = await asyncio.wait_for(asyncio.shield(stream_task), timeout=... or None)
+except asyncio.CancelledError:
+    await update.effective_message.reply_text("⚠️ Request cancelled.")
+    return
+except asyncio.TimeoutError:
+    await self._cancel_active_task(chat_id)
+    return
+finally:
+    self._active_tasks.pop(chat_id, None)
+```
+Add a code sample for both platforms and add streaming-specific tests to the Test Plan:
+- `test_cancelled_error_during_streaming_sends_user_message`
+- `test_inflight_guard_rejects_while_streaming`
+
+#### ℹ️ Minor — `test_close_is_callable_on_all_backends` is already guaranteed by the ABC
+
+`close()` is defined on `AICLIBackend` with a default no-op body — it is always callable. This contract test adds no signal. Replace with `test_cancel_calls_backend_close` (verify `backend.close()` is invoked after cancel regardless of backend type).
+
+#### ℹ️ Minor — Edge Case 2 (`clear_history` after cancel) left open
+
+The spec proposes calling `backend.clear_history()` after cancel but ends with "Needs confirmation." `_cancel_active_task()` in Step 2b does not call it. Make a decision and close the OQ: either add the call to the implementation step, or explicitly document "user must run `gate clear` to reset history" as the accepted trade-off.
 **Approved**: No — requires all scores ≥ 9/10 in the same round
 
 ---
