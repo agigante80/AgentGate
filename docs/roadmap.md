@@ -12,6 +12,7 @@ If adding a new item, create a feature document using `docs/features/_template.m
 
 | # | Item | Detail |
 |---|------|--------|
+| 1.1 | Persistent thinking message — fix non-streaming path to preserve "🤖 Thought for Xs" | [→ features/thinking-persist.md](features/thinking-persist.md) |
 
 ---
 
