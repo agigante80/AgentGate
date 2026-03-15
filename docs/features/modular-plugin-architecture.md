@@ -26,9 +26,13 @@ begins implementation.
 | GateSec  | 2     | 8/10  | 2026-03-15 (cd13e43) | R1 OQs resolved: OQ9 (registry hijack → ValueError default), OQ11 (NullRepoService standalone), OQ12 (InMemoryStorage bounded), OQ14 (accepted + logged), OQ15 (find_spec pattern), OQ16 (hardcoded list). OQ10 partially resolved (repr=False). OQ13 mitigated (test coverage). 2 new: OQ17 (platform import inconsistency with Step 5a), OQ18 (COMMANDS list no uniqueness check). |
 | GateDocs | 2     | 7/10  | 2026-03-15 | 2 blockers fixed: (1) Step 5b `main.py` sample replaced bare `try/except ImportError: pass` with `_load_platforms()` matching the OQ15-compliant pattern from Step 5a — OQ17 resolved; (2) `register_command()` in Step 4a now raises `ValueError` on duplicate `name` — OQ18 resolved. 4 gaps addressed: test rows added for OQ17 and OQ18, `.github/copilot-instructions.md` added to Files table, duplicate GateSec security-additions test rows consolidated. |
 
-| GateDocs | 3     | 8/10  | 2026-03-15 | GateCode R3 verified ✅. 2 stale wording gaps fixed: (1) Step 5b extraction note read "must be extracted" — GateCode R3 already completed the extraction to `src/_loader.py`; updated to past tense; (2) OQ17 still listed `src/registry.py` as an alternative — settled to `src/_loader.py` to match Files table and code samples. Spec is implementation-ready: all blockers resolved, all OQs documented (OQ10 accepted with repr=False, OQ13 mitigated with test coverage). |
+| GateDocs | 3     | 8/10  | 2026-03-15 | GateCode R3 verified ✅. 2 stale wording gaps fixed: (1) Step 5b extraction note read "must be extracted" — GateCode R3 already completed the extraction to `src/_loader.py`; updated to past tense; (2) OQ17 still listed `src/registry.py` as an alternative — settled to `src/_loader.py` to match Files table and code samples. Spec is implementation-ready: all blockers resolved, all OQs documented. |
 
-**Status**: ⏳ In review — round 3
+| GateCode | 4     | 9/10  | 2026-03-15 | 3 gaps fixed: (1) `RuntimeService` design/impl mismatch — dropped from `Services` dataclass in Design Space; added note that dep detection runs at startup, not via handlers; (2) version bump stale (`0.19.0`) — updated to `0.21.0` / dynamic derivation note; (3) `test_all_sub_configs_implement_secret_provider` referenced in OQ13 text but missing from Test Plan — added to `tests/unit/test_config.py` additions table. |
+| GateSec  | 4     | -/10  | -          | Pending |
+| GateDocs | 4     | -/10  | -          | Pending |
+
+**Status**: ⏳ In review — round 4
 **Approved**: No — requires all scores ≥ 9/10 in the same round
 
 ---
@@ -229,10 +233,16 @@ Tight coupling; monkeypatching required in tests.
 class Services:
     shell: ShellService          # wraps executor.run_shell
     repo: RepoService            # wraps src/repo.py functions
-    runtime: RuntimeService      # wraps src/runtime.py
     redactor: SecretRedactor
     transcriber: Transcriber | None
 ```
+
+> **Note on `RuntimeService`**: an early draft included `runtime: RuntimeService` here, but
+> dep detection (`runtime.py`) runs once at startup — before handlers are created — and is
+> never called by user-facing handlers. Wrapping it in a `Services` field would add
+> complexity with no concrete benefit. `RuntimeService` is therefore _not_ implemented in
+> this spec. If a fork needs to swap the dep-detection behaviour, it should register a
+> custom detector via `register_detector()` (Axis 5) rather than replacing `RuntimeService`.
 
 Both `TelegramAdapter` and `SlackAdapter` receive a `Services` instance. Tests pass a
 mock `Services`. Forks can swap `RepoService` with a `LocalRepoService` (no git clone)
@@ -1081,6 +1091,7 @@ No new runtime or dev dependencies.
 | `test_telegram_config_secret_values` | Returns `bot_token` when set, empty list when not |
 | `test_slack_config_secret_values` | Returns both tokens when set |
 | `test_ai_config_secret_values` | Returns `ai_api_key` and `codex.codex_api_key` (nested field) |
+| `test_all_sub_configs_implement_secret_provider` | Every sub-config on `Settings` satisfies `isinstance(x, SecretProvider)` — CI enforcement of OQ13 |
 
 ### `tests/integration/test_startup.py` additions
 
@@ -1175,7 +1186,11 @@ the sub-config — never edit `_collect_secrets()` in `redact.py`.
 
 ## Version Bump
 
-No env vars renamed or removed. All changes are internal. → **MINOR** bump: `0.18.x` → `0.19.0`
+No env vars renamed or removed. All changes are internal. → **MINOR** bump.
+
+Current `VERSION` as of this spec: `0.20.0`. Next release: `0.21.0`.
+_(Merge-time: if another MINOR feature lands first, this becomes `0.22.0` — always derive from
+the `VERSION` file at merge time, not from a hardcoded target here.)_
 
 ---
 
@@ -1326,7 +1341,7 @@ No env vars renamed or removed. All changes are internal. → **MINOR** bump: `0
 - [ ] `.github/copilot-instructions.md` updated with registry and `Services` patterns.
 - [ ] `README.md` updated with `STORAGE_BACKEND` and `AUDIT_BACKEND` env var rows.
 - [ ] `docs/roadmap.md` item 2.16 added.
-- [ ] `VERSION` bumped to `0.19.0` before merge to `main`.
+- [ ] `VERSION` bumped to `0.21.0` (or `VERSION + 0.1.0` if another MINOR lands first) before merge to `main`.
 - [ ] `.env.example` updated with commented entries for `STORAGE_BACKEND` and `AUDIT_BACKEND`.
 - [ ] `docker-compose.yml.example` updated with matching commented entries.
 - [ ] Feature works transparently on both Telegram and Slack — no behaviour change for
