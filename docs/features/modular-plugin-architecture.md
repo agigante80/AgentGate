@@ -24,7 +24,7 @@ begins implementation.
 | GateDocs | 1     | 6/10  | 2026-03-15 | 5 blockers fixed (OQ9 code/test mismatch, OQ10/11 code/criteria mismatch, `vars(settings)` Pydantic incompatibility, `AIConfig.codex` wrong reference, InMemoryStorage code/test desync). 6 gaps addressed (`.env.example` added, OQ14 test, OQ15 AC, COMMANDS dedup note, OQ16 comment corrected, `remote-control-fork-project.md` added to Files table). |
 | GateCode | 2     | 8/10  | 2026-03-15 | 4 gaps fixed inline: (1) Slack uses `_cmd_*` naming — Milestone 4 now requires an explicit rename step so `handler_attr` lookup works on both adapters; (2) `StorageConfig` sub-config added to Milestone 5c and Config Variables; (3) `_load_backends()` code sample updated to be OQ15-compliant (distinguishes deleted file vs missing dep); (4) dangling `RepoServiceABC` comment fixed — `NullRepoService` implements the same duck-typed interface with no inheritance. Added missing `test_validate_command_symmetry` to test plan. |
 | GateSec  | 2     | 8/10  | 2026-03-15 (cd13e43) | R1 OQs resolved: OQ9 (registry hijack → ValueError default), OQ11 (NullRepoService standalone), OQ12 (InMemoryStorage bounded), OQ14 (accepted + logged), OQ15 (find_spec pattern), OQ16 (hardcoded list). OQ10 partially resolved (repr=False). OQ13 mitigated (test coverage). 2 new: OQ17 (platform import inconsistency with Step 5a), OQ18 (COMMANDS list no uniqueness check). |
-| GateDocs | 2     | -/10  | -          | Pending |
+| GateDocs | 2     | 7/10  | 2026-03-15 | 2 blockers fixed: (1) Step 5b `main.py` sample replaced bare `try/except ImportError: pass` with `_load_platforms()` matching the OQ15-compliant pattern from Step 5a — OQ17 resolved; (2) `register_command()` in Step 4a now raises `ValueError` on duplicate `name` — OQ18 resolved. 4 gaps addressed: test rows added for OQ17 and OQ18, `.github/copilot-instructions.md` added to Files table, duplicate GateSec security-additions test rows consolidated. |
 
 **Status**: ⏳ In review — round 2
 **Approved**: No — requires all scores ≥ 9/10 in the same round
@@ -741,6 +741,13 @@ def register_command(
     destructive: bool = False,
 ) -> "Callable":
     def decorator(fn: "Callable") -> "Callable":
+        # OQ18: raise on duplicate command names, same convention as Registry.register()
+        existing = {c.name for c in COMMANDS}
+        if name in existing:
+            raise ValueError(
+                f"Command {name!r} is already registered. "
+                "Apply @register_command once per command name (in bot.py only)."
+            )
         COMMANDS.append(CommandDef(
             name=name,
             handler_attr=fn.__name__,
@@ -874,22 +881,38 @@ class SlackAdapter(SlackBot): ...  # or rename SlackBot → SlackAdapter
 ```python
 from src.registry import platform_registry
 import importlib
+import importlib.util
 
-for mod in ("src.bot", "src.platform.slack"):
-    try: importlib.import_module(mod)
-    except ImportError: pass
+def _load_platforms() -> None:
+    """Import each platform module so its @platform_registry.register() decorator fires.
 
+    OQ17 fix: uses the same find_spec + _module_file_exists() pattern as _load_backends()
+    to distinguish "fork deleted the file" (skip silently) from "missing pip dependency"
+    (re-raise with an actionable message). A missing slack-bolt with src/platform/slack.py
+    present raises ImportError with instructions instead of a confusing ValueError later.
+    """
+    for mod in ("src.bot", "src.platform.slack"):
+        rel_path = mod.replace(".", "/") + ".py"
+        if importlib.util.find_spec(mod) is None and not _module_file_exists(rel_path):
+            continue  # file deleted by fork — skip silently
+        try:
+            importlib.import_module(mod)
+        except ImportError as exc:
+            raise ImportError(
+                f"Failed to import platform module '{mod}'. "
+                f"Is the required package installed? Original error: {exc}"
+            ) from exc
+
+_load_platforms()
 adapter = platform_registry.create(
     settings.platform, settings, backend, storage, services, start_time, audit
 )
 await adapter.start()
 ```
 
-> ⚠️ **OQ17** — This platform import block still uses the old `try/except ImportError: pass`
-> pattern. It should use the same OQ15-compliant `find_spec` + `_module_file_exists()`
-> approach as `_load_backends()` in Step 5a. A missing `slack-bolt` dependency with
-> `src/platform/slack.py` present would be silently swallowed, producing a confusing
-> `ValueError: unknown key 'slack'` instead of an actionable installation error.
+> `_module_file_exists()` is the same helper defined in `factory.py` (Step 5a) — extract
+> it to `src/registry.py` or a shared `src/_loader.py` so both `_load_backends()` and
+> `_load_platforms()` can reuse it without duplication.
 
 #### Step 5c — Register storage and audit backends
 
@@ -990,6 +1013,7 @@ register_detector("Cargo.toml", ["cargo", "build"])
 | `docs/features/remote-control-fork-project.md` | **Create** | New spec (from `_template.md`); list modular-plugin-architecture as a prerequisite in Prerequisite Questions |
 | `.env.example` | **Edit** | Add commented entries for `STORAGE_BACKEND` and `AUDIT_BACKEND` |
 | `docker-compose.yml.example` | **Edit** | Add commented entries for `STORAGE_BACKEND` and `AUDIT_BACKEND` |
+| `.github/copilot-instructions.md` | **Edit** | Add registry, `Services`, command registry, and `SecretProvider` patterns to Architecture section |
 
 ---
 
@@ -1037,6 +1061,7 @@ No new runtime or dev dependencies.
 | `test_destructive_flag` | `CommandDef.destructive=True` is preserved |
 | `test_validate_command_symmetry_passes` | `_validate_command_symmetry()` does not raise when both adapters expose all shared-platform handler methods |
 | `test_validate_command_symmetry_raises_on_missing_handler` | `_validate_command_symmetry()` raises `AttributeError` (or equivalent) when a shared-platform command has no matching `handler_attr` on one adapter |
+| `test_register_command_duplicate_name_raises` | Calling `@register_command("run", ...)` a second time raises `ValueError` (OQ18) |
 
 ### `tests/unit/test_redact.py` additions
 
@@ -1062,43 +1087,10 @@ No new runtime or dev dependencies.
 | `test_backend_registry_loaded` | After `_load_backends()`, `"copilot"`, `"codex"`, `"api"` are in `backend_registry` |
 | `test_storage_registry_default` | `storage_registry.create("sqlite", ...)` returns `SQLiteStorage` |
 | `test_storage_registry_memory` | `storage_registry.create("memory", ...)` returns `InMemoryStorage` |
+| `test_platform_load_missing_dep_raises` | `_load_platforms()` re-raises `ImportError` with actionable message when platform file exists but required package (e.g. `slack-bolt`) is not installed (OQ17) |
+| `test_platform_load_deleted_file_skipped` | `_load_platforms()` skips silently when a platform file is absent (fork use case) (OQ17) |
 
 
-### `tests/unit/test_registry.py` security additions (GateSec)
-
-| Test | What it checks |
-|------|----------------|
-| `test_register_duplicate_key_raises` | Registering same key twice raises `ValueError` (OQ9 fix) |
-| `test_register_force_overwrites_silently` | `register(..., force=True)` replaces without error and emits a `WARNING` log — intentional fork override path |
-
-### `tests/unit/test_services.py` security additions (GateSec)
-
-| Test | What it checks |
-|------|----------------|
-| `test_null_repo_service_has_no_token_attr` | `NullRepoService` has no `.token` attribute — does not inherit `RepoService` (OQ11) |
-| `test_repo_service_token_not_public` | `RepoService` constructor uses `token=` kwarg; `repr()` does not expose the credential — `field(repr=False)` confirmed (OQ10) |
-
-### `tests/unit/test_runtime.py` additions (OQ14)
-
-| Test | What it checks |
-|------|----------------|
-| `test_register_detector_appears_in_detectors` | `register_detector("Cargo.toml", ["cargo","build"])` adds the pair to `_DETECTORS` |
-| `test_register_detector_logged_at_startup` | All registered detectors are logged at `INFO` level during startup for auditability (OQ14 mitigation) |
-
-### `tests/unit/test_redact.py` security additions (GateSec)
-
-| Test | What it checks |
-|------|----------------|
-| `test_all_sub_configs_implement_secret_provider` | Every `BaseSettings` sub-class in `config.py` satisfies `SecretProvider` protocol (OQ13) |
-| `test_collect_secrets_uses_model_fields` | `_collect_secrets` iterates via `settings.model_fields` (Pydantic v2 API), not `__dict__` |
-
-### `tests/unit/test_storage_memory.py` security additions (GateSec)
-
-| Test | What it checks |
-|------|----------------|
-| `test_memory_storage_respects_max_entries` | After `max_entries_per_chat` exchanges, oldest are evicted |
-| `test_memory_storage_chat_isolation` | `get_history("chat_a")` never returns data from `"chat_b"` |
-| `test_memory_storage_default_max_is_finite` | Default `max_entries_per_chat` is 200 (not unbounded) |
 ### `tests/contract/test_backends_contract.py` — no change
 
 Backend contract tests already run on all registered backends; once backends are registered
@@ -1292,23 +1284,19 @@ No env vars renamed or removed. All changes are internal. → **MINOR** bump: `0
     (line 368) documents this as a security invariant.
 
 
-17. **OQ17 — Platform import pattern inconsistency (Step 5b)** — Step 5a
-    (`_load_backends()`) uses the OQ15-compliant `find_spec` + `_module_file_exists()`
-    approach to distinguish deleted files from broken imports. However, Step 5b
-    (platform registration in `main.py`) still uses the old `try: importlib.import_module(mod)
-    except ImportError: pass` pattern. If `slack-bolt` is not installed but
-    `src/platform/slack.py` exists, the `ImportError` is silently swallowed and the
-    operator gets a confusing `ValueError: unknown key 'slack'` instead of
-    "install slack-bolt". *Apply the same `_load_backends()` pattern to platform,
-    storage, and audit module loading.* Severity: 🟡 MEDIUM.
+17. **OQ17 — Platform import pattern inconsistency (Step 5b)** — ✅ *RESOLVED in R2 (GateDocs).*
+    Step 5b now uses a `_load_platforms()` function matching the OQ15-compliant
+    `find_spec` + `_module_file_exists()` pattern from Step 5a. A missing `slack-bolt`
+    with `src/platform/slack.py` present now re-raises `ImportError` with an actionable
+    message instead of being silently swallowed. The `_module_file_exists()` helper is
+    extracted to a shared location (`src/registry.py` or `src/_loader.py`) so both
+    `_load_backends()` and `_load_platforms()` reuse it without duplication.
 
-18. **OQ18 — `COMMANDS` list allows duplicate command names** — `register_command()`
-    appends to a plain `list[CommandDef]` with no uniqueness check on `name`. Two
-    modules registering `name="run"` silently create duplicate entries. Unlike
-    `Registry.register()` (which now raises `ValueError` per OQ9), the command
-    registry has no guard. `_validate_command_symmetry()` checks handler presence
-    but not name uniqueness. *Add a duplicate-name check in `register_command()`,
-    raising `ValueError` if `name` is already in `COMMANDS`.* Severity: 🟡 LOW.
+18. **OQ18 — `COMMANDS` list allows duplicate command names** — ✅ *RESOLVED in R2 (GateDocs).*
+    `register_command()` now checks `{c.name for c in COMMANDS}` before appending and
+    raises `ValueError` if `name` is already present. Consistent with `Registry.register()`
+    (which raises on duplicate keys per OQ9). Tests `test_register_command_duplicate_name_raises`
+    added to `tests/unit/test_command_registry.py`.
 ---
 
 ## Acceptance Criteria
