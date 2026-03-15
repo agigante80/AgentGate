@@ -20,10 +20,10 @@ begins implementation.
 | Reviewer | Round | Score | Date       | Notes |
 |----------|-------|-------|------------|-------|
 | GateCode | 1     | -/10  | -          | Pending |
-| GateSec  | 1     | -/10  | -          | Pending |
+| GateSec  | 1     | 6/10  | 2026-03-15 (9130578) | 8 OQs added (OQ9–OQ16): registry hijack, token exposure, InMemoryStorage bounds, SecretProvider gap, ImportError swallowing, detector injection, discovery mechanism. See inline `⚠️` annotations. |
 | GateDocs | 1     | -/10  | -          | Pending |
 
-**Status**: ⏳ Pending review
+**Status**: ⏳ In review
 **Approved**: No — requires all scores ≥ 9/10 in the same round
 
 ---
@@ -287,6 +287,7 @@ Change `_DETECTORS` from a module-level constant to a registry that can be exten
 _DETECTORS: list[tuple[str, list[str]]] = []
 
 def register_detector(manifest: str, cmd: list[str]):
+    # ⚠️ OQ14 — no validation on cmd; arbitrary command injection if called by untrusted code
     _DETECTORS.append((manifest, cmd))
 
 # Built-in registrations (called at module level):
@@ -341,7 +342,7 @@ End-to-end startup flow after refactor:
 
 ```
 main() → Settings.load() → _validate_config()
-       → _load_registries()      # imports all src/ai/*, src/platform/*, src/storage/*
+       → _load_registries()      # ⚠️ OQ16 — imports all src/ai/*, src/platform/*, src/storage/*; verify hardcoded list, not glob
        → services = _build_services(settings)   # Services dataclass
        → storage  = storage_registry.create(settings.storage.backend)
        → audit    = audit_registry.create(...)
@@ -434,6 +435,7 @@ class Registry:
         """Decorator — register a class or factory function under *key*."""
         def decorator(cls_or_fn: Callable) -> Callable:
             if key in self._map:
+                # ⚠️ OQ9 — overwrite-on-duplicate allows backend hijacking; raise instead
                 logger.warning("Registry %r: overwriting key %r", self._name, key)
             self._map[key] = cls_or_fn
             return cls_or_fn
@@ -522,6 +524,10 @@ class VoiceConfig(BaseSettings):
 
 > **Effect**: adding a new secret-bearing field only requires updating `secret_values()`
 > on its sub-config — `redact.py` never needs editing again.
+>
+> ⚠️ OQ13 — `SecretProvider` is opt-in; no static or runtime check enforces that sub-configs
+> implement `secret_values()`. A new sub-config without it silently excludes its secrets
+> from redaction.
 
 ---
 
@@ -571,7 +577,7 @@ class ShellService:
 @dataclass
 class RepoService:
     """Wraps src/repo.py. A fork can replace this with NullRepoService."""
-    token: str
+    token: str       # ⚠️ OQ10 — raw credential stored as public attribute; consider hiding
     repo_name: str
     branch: str
 
@@ -595,7 +601,7 @@ class RepoService:
 @dataclass
 class NullRepoService(RepoService):
     """No-op repo service for forks that manage their own source directory."""
-    token: str = ""
+    token: str = ""     # ⚠️ OQ11 — inherits public token attr; misconfig stores unused credential
     repo_name: str = ""
     branch: str = ""
 
@@ -739,7 +745,7 @@ def _load_backends() -> None:
         try:
             importlib.import_module(mod)
         except ImportError:
-            pass  # fork deleted this backend — skipped
+            pass  # ⚠️ OQ15 — also swallows ModuleNotFoundError from missing pip deps
 
 def create_backend(ai: AIConfig) -> AICLIBackend:
     _load_backends()
@@ -792,6 +798,7 @@ class SQLiteStorage(ConversationStorage): ...
 @storage_registry.register("memory")
 class InMemoryStorage(ConversationStorage):
     """Volatile in-memory storage. For testing and forks without a /data volume."""
+    # ⚠️ OQ12 — no size limit, no TTL; unbounded memory growth in multi-user scenarios
     def __init__(self, *_): self._store: dict[str, list] = {}
     async def init(self): pass
     async def add_exchange(self, chat_id, user_msg, ai_msg):
@@ -933,6 +940,33 @@ No new runtime or dev dependencies.
 | `test_storage_registry_default` | `storage_registry.create("sqlite", ...)` returns `SQLiteStorage` |
 | `test_storage_registry_memory` | `storage_registry.create("memory", ...)` returns `InMemoryStorage` |
 
+
+### `tests/unit/test_registry.py` security additions (GateSec)
+
+| Test | What it checks |
+|------|----------------|
+| `test_register_duplicate_key_raises` | Registering same key twice raises `ValueError` (OQ9 fix) |
+| `test_registry_not_extensible_after_freeze` | After startup, `registry.register()` raises if freeze-on-boot is implemented |
+
+### `tests/unit/test_services.py` security additions (GateSec)
+
+| Test | What it checks |
+|------|----------------|
+| `test_null_repo_service_discards_token` | `NullRepoService(token="secret").token` is empty or inaccessible (OQ11) |
+| `test_repo_service_token_not_in_repr` | `repr(RepoService(...))` does not contain the raw token value (OQ10) |
+
+### `tests/unit/test_redact.py` security additions (GateSec)
+
+| Test | What it checks |
+|------|----------------|
+| `test_all_sub_configs_implement_secret_provider` | Every `BaseSettings` sub-class in `config.py` satisfies `SecretProvider` protocol (OQ13) |
+
+### `tests/unit/test_storage_memory.py` security additions (GateSec)
+
+| Test | What it checks |
+|------|----------------|
+| `test_memory_storage_respects_max_entries` | `InMemoryStorage` evicts oldest entries when limit reached (OQ12) |
+| `test_memory_storage_chat_isolation` | `get_history("chat_a")` never returns data from `"chat_b"` |
 ### `tests/contract/test_backends_contract.py` — no change
 
 Backend contract tests already run on all registered backends; once backends are registered
@@ -1047,6 +1081,78 @@ No env vars renamed or removed. All changes are internal. → **MINOR** bump: `0
    `STORAGE_BACKEND=memory` via env — the in-memory backend eliminates the need for
    temp-file fixtures in most startup tests.
 
+9. **OQ9 — Registry key overwrite enables backend hijacking** — `Registry.register()`
+   logs a warning but *allows* overwriting an existing key. If `_load_registries()` imports
+   modules in sequence and a later import re-registers an existing key (e.g., a fork's
+   `custom_copilot.py` registers `"copilot"` over the real one), the legitimate backend is
+   silently replaced. Combined with `pip install -e .` on the user's repo (runtime.py line 12),
+   which can inject packages into `sys.path`, this creates a backend-hijacking vector.
+   **Recommendation**: raise `ValueError` on duplicate keys by default; add an explicit
+   `force=True` parameter for intentional overrides. Severity: 🔴 HIGH.
+
+10. **OQ10 — `Services.repo.token` exposes raw credential as public attribute** —
+    `RepoService` stores `github_repo_token` as a plain public `str` attribute. Since
+    `Services` is injected into every platform adapter, every handler method can read
+    `self._services.repo.token` directly. While `self._settings.github.github_repo_token`
+    is equally accessible today, the `Services` dataclass is explicitly designed to be
+    passed around freely and is the *recommended* interface post-refactor. Consider using
+    a private attribute with a getter, or passing the token only at `clone()`/`configure_auth()`
+    call sites. Severity: 🟡 MEDIUM.
+
+11. **OQ11 — `NullRepoService` inherits `token` attribute** — `NullRepoService` subclasses
+    `RepoService` and defaults `token=""`, but the attribute is still public. A fork
+    misconfiguration (e.g., `REPO_PROVIDER=none` while `REPO_TOKEN` is set) would store
+    the token in `NullRepoService` where it's never used for cloning but is accessible to
+    every handler via `services.repo.token`. **Recommendation**: override `__init__` to
+    discard the token, or don't inherit from `RepoService` — use the same ABC instead.
+    Severity: 🟡 MEDIUM.
+
+12. **OQ12 — `InMemoryStorage` unbounded growth / no isolation** — The proposed
+    `InMemoryStorage` uses `dict[str, list]` with no TTL, no maximum size, and no
+    per-chat memory cap. In a multi-user production fork, memory grows without bound.
+    Additionally, `InMemoryStorage` survives `gate restart` (OQ4 acknowledges this) while
+    the backend is re-created, leading to history/state inconsistency.
+    **Recommendation**: add `max_entries_per_chat: int = 1000` constructor parameter;
+    document `STORAGE_BACKEND=memory` as test-only in the env var description.
+    Severity: 🟡 MEDIUM.
+
+13. **OQ13 — `SecretProvider` opt-in gap** — The `SecretProvider` protocol is
+    `@runtime_checkable` and `_collect_secrets` uses `isinstance()`. If a new sub-config
+    class holds secrets but forgets to implement `secret_values()`, its secrets are
+    silently excluded from redaction — the same class of bug that caused the v0.13.0
+    `CODEX_API_KEY` leak. The problem is moved, not solved.
+    **Recommendation**: add a startup assertion in `_collect_secrets` that all sub-config
+    classes satisfy `isinstance(attr, SecretProvider)`, or add a unit test that enumerates
+    sub-configs and asserts the protocol. Severity: 🟡 MEDIUM.
+
+14. **OQ14 — `register_detector()` no command validation** — The function accepts arbitrary
+    `cmd: list[str]`. While `_DETECTORS` is currently a module-level constant (pre-existing
+    risk), making it extensible at runtime via `register_detector()` widens the attack
+    surface: any imported code can register arbitrary commands that execute at startup via
+    `asyncio.create_subprocess_exec`. **Recommendation**: validate commands against an
+    allowlist of known package managers, or log all registered detectors at startup for
+    auditability. Severity: 🟡 MEDIUM.
+
+15. **OQ15 — `_load_registries()` swallows `ModuleNotFoundError`** — `except ImportError: pass`
+    is intended to handle "fork deleted this backend file" but `ModuleNotFoundError` (a
+    subclass of `ImportError`) is also caught. If a backend has a missing pip dependency
+    (e.g., `import anthropic` fails in `direct.py`), the backend is silently skipped rather
+    than raising a clear installation error. The operator gets a confusing `ValueError:
+    unknown key 'api'` at `registry.create()` time.
+    **Recommendation**: catch `ImportError`, check if the module file exists on disk, and
+    re-raise if it does (indicating a dependency issue, not a deleted file). Or use
+    `importlib.util.find_spec()` first to distinguish "file missing" from "import failed".
+    Severity: 🟡 MEDIUM.
+
+16. **OQ16 — `_load_registries()` discovery mechanism unspecified** — The startup flow
+    comment says "imports all src/ai/\*, src/platform/\*, src/storage/\*" but the code sample
+    shows a hardcoded list of module paths. If the implementation uses filesystem glob/scan
+    instead of a hardcoded list, a file planted in `src/ai/` by a malicious repo checkout
+    (in dev environments where `REPO_DIR` overlaps with the application directory) could be
+    auto-discovered and imported. **Recommendation**: always use a hardcoded module list in
+    `_load_registries()`, never `os.listdir()` or `pkgutil.iter_modules()`. Document this
+    as a security invariant. Severity: 🟡 MEDIUM.
+
 ---
 
 ## Acceptance Criteria
@@ -1059,6 +1165,11 @@ No env vars renamed or removed. All changes are internal. → **MINOR** bump: `0
       and the container starts without `ImportError` (provided the deleted subsystem is not
       selected via env var). *(Verified manually.)*
 - [ ] All existing env vars, commands, and default behaviours are preserved.
+- [ ] `Registry.register()` raises on duplicate keys by default (OQ9).
+- [ ] `RepoService.token` is not exposed as a public attribute or in `repr()` (OQ10).
+- [ ] `InMemoryStorage` enforces a per-chat entry limit (OQ12).
+- [ ] `_load_registries()` uses a hardcoded module list, not filesystem discovery (OQ16).
+- [ ] All `BaseSettings` sub-classes implement `SecretProvider` (OQ13 — enforced by test).
 - [ ] `docs/guides/feature-review-process.md` includes the Modularity Checklist.
 - [ ] `.github/copilot-instructions.md` updated with registry and `Services` patterns.
 - [ ] `README.md` updated with `STORAGE_BACKEND` and `AUDIT_BACKEND` env var rows.
