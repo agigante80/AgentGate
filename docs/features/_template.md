@@ -370,27 +370,19 @@ Example env var row:
 
 ### `.env.example` and `docker-compose.yml.example`
 
-`README.md` is the canonical, complete reference for all environment variables. The example files contain **essential vars only** — those without which the bot cannot start and that have no safe automatic default.
-
 For every new env var introduced by this feature:
 
-- [ ] Add the variable to the `README.md` *Environment Variables* table — this is **mandatory for all new vars** (default value + one-liner description).
-- [ ] Add a commented entry to `.env.example` **only if** the var is essential (bot fails to start without it and no safe default exists).
-- [ ] Add a matching commented entry to `docker-compose.yml.example` **only if** the same essentiality criterion is met.
-- [ ] Verify existing vars that this feature changes (renamed, removed, or new defaults) are updated in all files that reference them.
+- [ ] Add a commented entry to `.env.example` with a sensible example value and a one-line description.
+- [ ] Add a matching commented entry to `docker-compose.yml.example` under the appropriate platform block.
+- [ ] Verify existing vars that this feature changes (renamed, removed, or new defaults) are updated in both files.
 
-Example `README.md` table row:
-```markdown
-| `NEW_VAR_ONE` | `true` | Enable [feature name]. Set `false` to disable. |
-```
-
-Example `.env.example` entry (essential vars only):
+Example `.env.example` entry:
 ```bash
 # Enable [feature name]. Set to false to disable. (default: true)
 # NEW_VAR_ONE=true
 ```
 
-Example `docker-compose.yml.example` entry (essential vars only):
+Example `docker-compose.yml.example` entry:
 ```yaml
 # NEW_VAR_ONE=true   # Enable [feature name]
 ```
@@ -478,9 +470,8 @@ If a stretch goal or follow-up iteration was identified during implementation, a
 - [ ] `pytest tests/ -v --tb=short` passes with no failures or errors.
 - [ ] `ruff check src/` reports no new linting issues.
 - [ ] `README.md` is updated (features bullet, env var table, commands table — both Telegram and Slack sections).
-- [ ] `README.md` *Environment Variables* table includes every new env var with default value and one-liner description.
-- [ ] `.env.example` updated **only** for essential new vars (bot fails to start without them; no safe default).
-- [ ] `docker-compose.yml.example` updated **only** for essential new vars (same criterion as above).
+- [ ] `.env.example` updated with commented entries for all new env vars.
+- [ ] `docker-compose.yml.example` updated with commented entries for all new env vars.
 - [ ] `docs/roadmap.md` entry is marked done (✅).
 - [ ] `docs/features/[this-file].md` status changed to `Implemented`.
 - [ ] `.github/copilot-instructions.md` updated if a new module/pattern was added.

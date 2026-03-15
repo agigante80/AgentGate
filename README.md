@@ -124,7 +124,7 @@ Destructive shell commands (`push`, `merge`, `rm`, `force`) require inline confi
 
 ## Environment Variables
 
-Full reference below — every variable, its default, and a one-liner. For a minimal getting-started config, copy `.env.example`.
+Copy `.env.example` — it documents every variable with examples.
 
 ### Platform
 
@@ -441,7 +441,7 @@ Destructive shell commands (`push`, `merge`, `rm`, `force`) require inline confi
 
 ## Environment Variables
 
-Full reference below — every variable, its default, and a one-liner. For a minimal getting-started config, copy `.env.example`.
+Copy `.env.example` — it documents every variable with examples.
 
 ### Platform
 
