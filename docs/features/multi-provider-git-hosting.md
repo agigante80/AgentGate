@@ -15,7 +15,7 @@ Allow AgentGate to clone, sync, and interact with repositories hosted on GitLab,
 |----------|-------|-------|------|-------|
 | GateCode | 1 | -/10 | - | Pending |
 | GateSec  | 1 | -/10 | - | Pending |
-| GateDocs | 1 | -/10 | - | Pending |
+| GateDocs | 1 | 7/10 | 2026-03-15 | Strong design; 4 issues: (1) Azure template contradicts OQ1 escape-hatch deferral — template in Step 2 should be removed or flagged; (2) REPO_CLONE_URL table claims token auto-injection but code returns URL verbatim; (3) COPILOT_GITHUB_TOKEN separation not visually prominent enough in Architecture Notes; (4) Documentation Updates missing .env.example/.docker-compose.yml.example items and has wrong roadmap entry number (2.14 vs actual 2.15). |
 
 **Status**: ⏳ Pending review
 **Approved**: No — requires all scores ≥ 9/10 in the same round
@@ -213,15 +213,16 @@ Redaction:
 
 ## Architecture Notes
 
+> ⚠️ **`COPILOT_GITHUB_TOKEN` is not the same as your repo token.** `COPILOT_GITHUB_TOKEN` authenticates the Copilot CLI subprocess with GitHub — not with the repo host. Even if `REPO_PROVIDER=gitlab`, users running `AI_CLI=copilot` still need a valid `COPILOT_GITHUB_TOKEN` pointed at GitHub. These are two completely independent credentials. This distinction must appear prominently in README and in the startup ready message for non-GitHub providers.
+
 - **`is_stateful` flag** — Not affected. Provider selection is purely a startup/clone concern.
 - **`REPO_DIR` and `DB_PATH`** — always import from `src/config.py`; never hardcode `/repo` or `/data`.
-- **`COPILOT_GITHUB_TOKEN` is separate** — This authenticates the Copilot CLI with GitHub, not the repo host. Even with `REPO_PROVIDER=gitlab`, users who use `AI_CLI=copilot` still need `COPILOT_GITHUB_TOKEN` pointing at GitHub. Document this clearly.
 - **`gh` CLI** — Remains installed in the Docker image. Non-GitHub users will receive a "not authenticated" error if they call `gate run gh …`. We add a warning in the startup ready message when `REPO_PROVIDER != github`.
 - **Platform symmetry** — `gate info` changes in `src/bot.py` must be mirrored in `src/platform/slack.py`.
 - **Auth guard** — All Telegram handlers remain decorated with `@_requires_auth`. No new handlers in this feature.
 - **`configure_git_auth()`** — Currently sets `url.https://x-token-auth:<token>@github.com/.insteadOf https://github.com/`. Must be generalised to use the provider's hostname. Signature changes to `configure_git_auth(token, host, username="")`.
 - **Bitbucket two-part auth** — Bitbucket app passwords require `<username>:<app-password>`. `BITBUCKET_USERNAME` must be validated at startup (non-empty when `REPO_PROVIDER=bitbucket`).
-- **Azure URL structure** — `dev.azure.com/<org>/<project>/_git/<repo>`. The `GITHUB_REPO` field for Azure should contain `<project>/_git/<repo>` and `AZURE_ORG` contains the org prefix. Alternatively, users can set `REPO_CLONE_URL` to bypass construction entirely.
+- **Azure URL structure** — `dev.azure.com/<org>/<project>/_git/<repo>`. For v1, Azure is handled exclusively via `REPO_CLONE_URL` (see OQ1). Do _not_ rely on the `_CLONE_URL_TEMPLATES["azure"]` entry — it is retained only as a structural placeholder and is incomplete. Remove or annotate it with `# NOTE: Azure template construction is deferred — use REPO_CLONE_URL` before merging.
 
 ---
 
@@ -231,7 +232,7 @@ Redaction:
 |---------|------|---------|-------------|
 | `REPO_PROVIDER` | `str` | `"github"` | Git hosting provider. One of: `github`, `gitlab`, `bitbucket`, `azure`. |
 | `REPO_HOST` | `str` | `""` | Override hostname for self-hosted instances (e.g., `gitlab.mycompany.com`). Empty = use provider default. |
-| `REPO_CLONE_URL` | `str` | `""` | Full clone URL override. Token injected as `x-token-auth`. Takes precedence over template construction. |
+| `REPO_CLONE_URL` | `str` | `""` | Full clone URL override. Embed credentials directly in the URL — no token injection is applied. Takes precedence over template construction. *Required for Azure in v1.* |
 | `BITBUCKET_USERNAME` | `str` | `""` | Required when `REPO_PROVIDER=bitbucket`. Bitbucket username for app-password auth. |
 | `AZURE_ORG` | `str` | `""` | Required when `REPO_PROVIDER=azure`. Azure DevOps organisation name. |
 
@@ -240,7 +241,7 @@ Existing env vars that remain valid for all providers (semantics generalised):
 | Env var | Generalised meaning |
 |---------|---------------------|
 | `GITHUB_REPO_TOKEN` | Repo host token / PAT / app-password (any provider) |
-| `GITHUB_REPO` | Repo identifier: `owner/repo` (GitHub/GitLab/Bitbucket) or `project/_git/repo` (Azure) |
+| `GITHUB_REPO` | Repo identifier: `owner/repo` (GitHub/GitLab/Bitbucket). Azure users: use `REPO_CLONE_URL` instead (see OQ1). |
 | `BRANCH` | Branch name (unchanged) |
 
 > **Naming note**: `GITHUB_REPO_TOKEN` and `GITHUB_REPO` retain their names for backward compatibility. Documentation must clearly state they apply to all providers.
@@ -472,15 +473,35 @@ Add env var rows:
 |---------|---------|-------------|
 | `REPO_PROVIDER` | `github` | Git hosting provider: `github`, `gitlab`, `bitbucket`, or `azure`. |
 | `REPO_HOST` | _(provider default)_ | Override hostname for self-hosted GitLab/Bitbucket instances. |
-| `REPO_CLONE_URL` | `""` | Full clone URL override (token injected automatically). |
+| `REPO_CLONE_URL` | `""` | Full clone URL override. When set, no token injection is applied — embed credentials directly. |
 | `BITBUCKET_USERNAME` | `""` | Required when `REPO_PROVIDER=bitbucket`. |
 | `AZURE_ORG` | `""` | Required when `REPO_PROVIDER=azure`. |
+
+Update existing rows so descriptions reflect provider-agnostic meaning:
+- `GITHUB_REPO_TOKEN` → "Repo host token / PAT / app-password (any provider)"
+- `GITHUB_REPO` → "Repo identifier: `owner/repo` (GitHub / GitLab / Bitbucket); Azure users should set `REPO_CLONE_URL` instead"
+- `BRANCH` → description unchanged (already generic)
+
+### `.env.example`
+
+Add commented-out entries for new vars:
+```bash
+# REPO_PROVIDER=github       # github | gitlab | bitbucket | azure
+# REPO_HOST=                 # self-hosted override hostname
+# REPO_CLONE_URL=            # full clone URL (Azure users: use this)
+# BITBUCKET_USERNAME=        # required when REPO_PROVIDER=bitbucket
+# AZURE_ORG=                 # required when REPO_PROVIDER=azure
+```
+
+### `docker-compose.yml.example`
+
+No new entries required (lean format — refer to README for full variable list).
 
 ### `docs/roadmap.md`
 
 Add:
 ```markdown
-| 2.14 | Multi-provider git hosting — GitLab, Bitbucket, Azure DevOps | [→ features/multi-provider-git-hosting.md](features/multi-provider-git-hosting.md) |
+| 2.15 | Multi-provider git hosting — GitLab, Bitbucket, Azure DevOps | [→ features/multi-provider-git-hosting.md](features/multi-provider-git-hosting.md) |
 ```
 
 ---
