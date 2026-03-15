@@ -22,10 +22,11 @@ Keeps the four key user-facing reference files — `README.md`, `.env.example`, 
 | Reviewer | Round | Score | Date | Notes |
 |----------|-------|-------|------|-------|
 | GateCode | 1 | 7/10 | 2026-03-15 | Two spec bugs fixed inline: (1) `_parse_env_example()` missing `re.match` guard for non-var tokens; (2) Check 7 direction inverted — must flag stale compose entries, not require all `.env.example` vars in compose. Checks 6+7 implemented in `lint_docs.py`; passthrough markers added to `.env.example`. |
-| GateSec  | 1 | -/10 | - | Findings generated (F1–F5); score not recorded (message truncated). GateCode R2 addressed F2, F3, F4. F1 and F5 status unknown. |
+| GateSec  | 1 | 7/10 | 2026-03-15 | 5 findings (F1–F5): F1 comment-line parsing, F2 passthrough injection, F3 no path traversal (clear), F4 substring false-positives, F5 completeness gap. Originally committed at `0d74f8a`; row overwritten by later edits. |
 | GateCode | 2 | 8/10 | 2026-03-15 | Three bugs fixed from GateSec R1 findings: (F2) passthrough injection — a `# passthrough:` marker on a real config var now overrides to declared so stale detection is preserved; (F3) compose comment line matching — `_COMPOSE_VAR_RE` now skips `#`-prefixed lines, eliminating 9 false negatives from YAML example blocks; (F4) execution flow Step 5 direction mismatch corrected — Check 7 is stale-compose direction (not `.env.example → compose` coverage). Architecture Notes updated. All 7 checks pass, 538 tests green. |
 | GateDocs | 1 | -/10 | - | Pending |
 | GateCode | 3 | 8/10 | 2026-03-15 | Fixed Edge Case 3 (wrong direction — described coverage, not stale detection); fleshed out Step 6 with formal definition content spec for `skills/docs-agent.md`; corrected version bump note (0.18.x → current+1); tightened AC for `skills/docs-agent.md` definition. GateSec R1 F1 and F5 still unresolved — sec to verify scope on next pass. |
+| GateSec  | 3 | 9/10 | 2026-03-15 | All 5 R1 findings resolved — verified against spec and implementation. F1 regex guard in place, F2 intersection check operational, F4 word-boundary regex + comment exclusion, F5 `all_known` properly used. One non-blocking nit (triple `extract_config_env_vars()` call). No new security concerns. |
 
 **Status**: ⏳ Pending review
 **Approved**: No — requires all scores ≥ 9/10 in the same round
@@ -462,6 +463,28 @@ When complete, add to `docs/roadmap.md`:
 ```markdown
 | 2.15 | ✅ Docs align-sync — README de-dup, .env.example & docker-compose coverage lint | [→ features/docs-align-sync.md](features/docs-align-sync.md) |
 ```
+
+---
+
+## GateSec R3 Findings (2026-03-15)
+
+*Score: 9/10* — All 5 R1 findings verified resolved against both the spec and the live `scripts/lint_docs.py` implementation. No new security concerns.
+
+### R1 Finding Resolution Status
+
+| # | R1 Finding | Status | Resolution |
+|---|-----------|--------|------------|
+| F1 | Comment-line false-positive in `_parse_env_example()` | ✅ Resolved | `re.match(r'^[A-Z][A-Z0-9_]*$', var)` guard added (spec Step 4 + implementation). Non-var tokens with `=` are now skipped. |
+| F2 | Passthrough marker trivially injectable | ✅ Resolved | `var not in config_vars` intersection check — a `# passthrough:` marker on a real config var is overridden to `declared`, preserving stale detection (spec Step 4 + Architecture Notes). |
+| F3 | No path traversal / injection risk | ✅ Clear | Was already clean — `ENV_EXAMPLE_FILE` and `COMPOSE_EXAMPLE_FILE` are hardcoded `Path` constants. No user input influences paths. |
+| F4 | Substring match false-positives in compose check | ✅ Resolved | `_COMPOSE_VAR_RE = re.compile(r'\b([A-Z][A-Z0-9_]{2,})=')` — proper regex extraction with word-boundary and 3-char minimum. Comment lines (`#`-prefixed) excluded from parsing. |
+| F5 | Completeness gap (`all_known` unused) | ✅ Resolved | `all_known = declared | passthroughs | config_vars` is used in Check 7. Check 6 is correctly stale-only by design (curated list). Bidirectional concern was a misread of the original spec's intent. |
+
+### New Observations (non-blocking)
+
+- 🟢 *Performance nit*: `extract_config_env_vars()` is called 3× per lint run — once in `main()`, once inside each `_parse_env_example()` invocation from Check 6 and Check 7. Consider accepting `config_vars` as a parameter to `_parse_env_example()` during implementation to avoid redundant file reads. Not a security concern.
+- 🟢 *Example tokens clean*: `.env.example` uses `github_pat_xxxxxxxxxxxx`, `ghp_xxxxxxxxxxxx`, `sk-xxxxxxxxxxxx` — no real credentials in example files.
+- 🟢 *No new attack surface*: no runtime code changes, no new handlers, no subprocess calls, no user input paths. Pure docs-tooling.
 
 ---
 
