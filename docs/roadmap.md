@@ -1,6 +1,6 @@
 # AgentGate — Roadmap
 
-> Last updated: 2026-03-15 (roadmap-sync: removed 2 implemented features — docs-align-sync, request-cancellation)
+> Last updated: 2026-03-15 (roadmap-sync: removed 3 implemented features — docs-align-sync, request-cancellation, thinking-persist)
 
 A lean, prioritized list of work for AgentGate. Each item is a short name, one-line description, and a link to a feature document under `docs/features/`.
 
@@ -12,7 +12,6 @@ If adding a new item, create a feature document using `docs/features/_template.m
 
 | # | Item | Detail |
 |---|------|--------|
-| 1.1 | Persistent thinking message — fix non-streaming path to preserve "🤖 Thought for Xs" | [→ features/thinking-persist.md](features/thinking-persist.md) |
 
 ---
 

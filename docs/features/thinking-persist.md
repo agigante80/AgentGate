@@ -1,6 +1,6 @@
 # Persistent Thinking Message (`THINKING_SHOW_ELAPSED`)
 
-> Status: **Approved** | Priority: Medium | Last reviewed: 2026-03-15
+> Status: **Implemented** | Priority: Medium | Last reviewed: 2026-03-15
 
 Fix the non-streaming message lifecycle so the "⏳ Still thinking…" placeholder persists with its final elapsed time instead of being silently overwritten by the AI response.
 
