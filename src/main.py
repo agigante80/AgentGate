@@ -2,7 +2,6 @@ import asyncio
 import logging
 import os
 import pathlib
-import signal
 import sys
 import time
 
@@ -11,9 +10,7 @@ from src.ai.factory import create_backend
 from src import runtime
 from src.config import REPO_DIR, DB_PATH, AUDIT_DB_PATH
 from src.audit import AuditLog
-from src.history import SQLiteStorage
 from src.logging_setup import configure_logging
-from src.ready_msg import build_ready_message
 from src._loader import _module_file_exists
 from src.services import Services, ShellService, RepoService
 from src.registry import storage_registry, audit_registry, platform_registry
@@ -82,57 +79,6 @@ def _load_platforms() -> None:
                 f"Failed to import platform module '{mod}'. "
                 f"Is the required package installed? Original error: {exc}"
             ) from exc
-
-
-async def _startup_telegram(settings: Settings, backend, storage: SQLiteStorage, start_time: float, audit: AuditLog) -> None:
-    from src.bot import build_app, _prefix
-
-    loop = asyncio.get_running_loop()
-    stop_event = asyncio.Event()
-
-    def _handle_sigterm(*_):
-        logger.info("Received SIGTERM, shutting down…")
-        backend.close()
-        loop.call_soon_threadsafe(stop_event.set)
-
-    signal.signal(signal.SIGTERM, _handle_sigterm)
-
-    app = build_app(settings, backend, storage, start_time, audit)
-    p = _prefix(settings)
-    ready_msg = build_ready_message(settings, _read_version(), p)
-
-    async with app:
-        await app.bot.send_message(
-            chat_id=settings.telegram.chat_id,
-            text=ready_msg,
-            parse_mode="Markdown",
-        )
-        _HEALTH_FILE.touch()
-        await app.start()
-        await app.updater.start_polling(drop_pending_updates=True)
-        logger.info("Telegram bot is running. Press Ctrl+C to stop.")
-        await stop_event.wait()
-
-
-async def _startup_slack(settings: Settings, backend, storage: SQLiteStorage, start_time: float, audit: AuditLog) -> None:
-    from src.platform.slack import SlackBot
-
-    loop = asyncio.get_running_loop()
-    stop_event = asyncio.Event()
-
-    bot = SlackBot(settings, backend, storage, audit=audit, start_time=start_time)
-
-    def _handle_sigterm(*_):
-        logger.info("Received SIGTERM, shutting down…")
-        backend.close()
-        loop.call_soon_threadsafe(stop_event.set)
-
-    signal.signal(signal.SIGTERM, _handle_sigterm)
-
-    await bot.send_ready_message()
-    _HEALTH_FILE.touch()
-    logger.info("Slack bot is running. Press Ctrl+C to stop.")
-    await bot.run_async()
 
 
 async def _install_commit_msg_hook() -> None:
