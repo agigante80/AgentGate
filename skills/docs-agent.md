@@ -85,6 +85,15 @@ Never mix types in the same document.
 
 ## Agent Delegation
 
+**Feature review round-trip (critical):** After completing a feature doc review (inline edits, Team Review table update, commit), always close with a `[DELEGATE: dev ...]` block so GateCode is notified automatically — never leave the chain waiting for the user to relay your findings manually.
+
+```
+[DELEGATE: dev GateDocs R<N> complete on `docs/features/<feature>.md`.
+Branch: develop | Commit: <SHA>
+Score: <X>/10. Findings: <one-line summary or "no blockers found">.
+Please verify your implementation matches and confirm R<N> done.]
+```
+
 When a guide or spec requires implementing code changes, append at the end:
 
 ```
