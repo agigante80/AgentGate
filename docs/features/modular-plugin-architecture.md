@@ -26,7 +26,9 @@ begins implementation.
 | GateSec  | 2     | 8/10  | 2026-03-15 (cd13e43) | R1 OQs resolved: OQ9 (registry hijack → ValueError default), OQ11 (NullRepoService standalone), OQ12 (InMemoryStorage bounded), OQ14 (accepted + logged), OQ15 (find_spec pattern), OQ16 (hardcoded list). OQ10 partially resolved (repr=False). OQ13 mitigated (test coverage). 2 new: OQ17 (platform import inconsistency with Step 5a), OQ18 (COMMANDS list no uniqueness check). |
 | GateDocs | 2     | 7/10  | 2026-03-15 | 2 blockers fixed: (1) Step 5b `main.py` sample replaced bare `try/except ImportError: pass` with `_load_platforms()` matching the OQ15-compliant pattern from Step 5a — OQ17 resolved; (2) `register_command()` in Step 4a now raises `ValueError` on duplicate `name` — OQ18 resolved. 4 gaps addressed: test rows added for OQ17 and OQ18, `.github/copilot-instructions.md` added to Files table, duplicate GateSec security-additions test rows consolidated. |
 
-**Status**: ⏳ In review — round 2
+| GateDocs | 3     | 8/10  | 2026-03-15 | GateCode R3 verified ✅. 2 stale wording gaps fixed: (1) Step 5b extraction note read "must be extracted" — GateCode R3 already completed the extraction to `src/_loader.py`; updated to past tense; (2) OQ17 still listed `src/registry.py` as an alternative — settled to `src/_loader.py` to match Files table and code samples. Spec is implementation-ready: all blockers resolved, all OQs documented (OQ10 accepted with repr=False, OQ13 mitigated with test coverage). |
+
+**Status**: ⏳ In review — round 3
 **Approved**: No — requires all scores ≥ 9/10 in the same round
 
 ---
@@ -910,10 +912,9 @@ adapter = platform_registry.create(
 await adapter.start()
 ```
 
-> `_module_file_exists()` is defined in `factory.py` (Step 5a) and must be extracted to
-> `src/_loader.py` before Step 5b can import it — see import added to the code sample above.
-> Both `_load_backends()` (in `factory.py`) and `_load_platforms()` (in `main.py`) then
-> `from src._loader import _module_file_exists`. Add `src/_loader.py` to Files to Create/Change.
+> `_module_file_exists()` is defined in `src/_loader.py` (extracted in GateCode R3).
+> Both `_load_backends()` (in `factory.py`) and `_load_platforms()` (in `main.py`) import it via
+> `from src._loader import _module_file_exists` — see imports in the code samples above and below.
 
 #### Step 5c — Register storage and audit backends
 
@@ -1293,7 +1294,7 @@ No env vars renamed or removed. All changes are internal. → **MINOR** bump: `0
     `find_spec` + `_module_file_exists()` pattern from Step 5a. A missing `slack-bolt`
     with `src/platform/slack.py` present now re-raises `ImportError` with an actionable
     message instead of being silently swallowed. The `_module_file_exists()` helper is
-    extracted to a shared location (`src/registry.py` or `src/_loader.py`) so both
+    extracted to `src/_loader.py` (GateCode R3) so both
     `_load_backends()` and `_load_platforms()` reuse it without duplication.
 
 18. **OQ18 — `COMMANDS` list allows duplicate command names** — ✅ *RESOLVED in R2 (GateDocs).*
