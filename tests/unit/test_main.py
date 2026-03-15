@@ -156,7 +156,7 @@ async def test_startup_calls_slack_branch():
          patch("src.repo.configure_git_auth", new=AsyncMock()), \
          patch("src.main.runtime.install_deps", new=AsyncMock(return_value="ok")), \
          patch("src.registry.storage_registry.create", return_value=MagicMock(init=AsyncMock())), \
-         patch("src.registry.audit_registry.create", return_value=MagicMock(init=AsyncMock())), \
+         patch("src.registry.audit_registry.create", return_value=MagicMock(init=AsyncMock(), verify=AsyncMock(return_value=True))), \
          patch("src.main.create_backend", return_value=MagicMock()), \
          patch("src.main._load_platforms"), \
          patch("src.registry.platform_registry.create", return_value=mock_adapter) as mock_create:
@@ -195,7 +195,7 @@ async def test_startup_calls_telegram_branch():
          patch("src.repo.configure_git_auth", new=AsyncMock()), \
          patch("src.main.runtime.install_deps", new=AsyncMock(return_value="ok")), \
          patch("src.registry.storage_registry.create", return_value=MagicMock(init=AsyncMock())), \
-         patch("src.registry.audit_registry.create", return_value=MagicMock(init=AsyncMock())), \
+         patch("src.registry.audit_registry.create", return_value=MagicMock(init=AsyncMock(), verify=AsyncMock(return_value=True))), \
          patch("src.main.create_backend", return_value=MagicMock()), \
          patch("src.main._load_platforms"), \
          patch("src.registry.platform_registry.create", return_value=mock_adapter) as mock_create:

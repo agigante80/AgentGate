@@ -174,3 +174,25 @@ async def test_sqlite_audit_no_delete_or_update(ready_audit):
     assert not hasattr(ready_audit, "delete")
     assert not hasattr(ready_audit, "update")
     assert not hasattr(ready_audit, "clear")
+
+
+# ── verify() ─────────────────────────────────────────────────────────────────
+
+async def test_sqlite_audit_verify_succeeds(ready_audit):
+    """verify() must return True when the audit DB is functional."""
+    assert await ready_audit.verify() is True
+    # Sentinel record should be readable
+    entries = await ready_audit.get_entries(action="audit_verify")
+    assert len(entries) >= 1
+
+
+async def test_sqlite_audit_verify_fails_on_broken_db():
+    """verify() must return False when the DB path is invalid."""
+    bad = SQLiteAuditLog(Path("/nonexistent/path/audit.db"))
+    assert await bad.verify() is False
+
+
+async def test_null_audit_verify_returns_true():
+    """NullAuditLog.verify() must return True (no-op backend is always OK)."""
+    null = NullAuditLog()
+    assert await null.verify() is True

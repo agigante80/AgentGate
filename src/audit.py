@@ -76,6 +76,22 @@ class AuditLog(ABC):
         """
         ...
 
+    async def verify(self) -> bool:
+        """Smoke-test the audit pipeline at startup.
+
+        Writes a sentinel record and reads it back to confirm the full
+        write → read path is functional.  Returns ``True`` on success.
+
+        This would have caught the ``961daf2`` SlackBot param-order bug
+        where ``self._audit`` was silently assigned a ``float`` instead
+        of an ``AuditLog`` instance, breaking all Slack audit logging.
+
+        The default implementation returns ``True`` (suitable for
+        ``NullAuditLog``).  ``SQLiteAuditLog`` overrides with a real
+        round-trip check.
+        """
+        return True
+
     @abstractmethod
     async def get_entries(
         self,
@@ -150,6 +166,25 @@ class SQLiteAuditLog(AuditLog):
                 await db.commit()
         except Exception:
             logger.exception("Failed to write audit entry: action=%s chat=%s", action, chat_id)
+
+    async def verify(self) -> bool:
+        """Write a sentinel record and read it back to confirm the pipeline works."""
+        try:
+            await self.record(
+                platform="system",
+                chat_id="startup",
+                action="audit_verify",
+                detail={"msg": "startup smoke test"},
+                status="ok",
+            )
+            entries = await self.get_entries(action="audit_verify", limit=1)
+            if not entries:
+                logger.error("Audit verify: write succeeded but read returned nothing")
+                return False
+            return True
+        except Exception:
+            logger.exception("Audit verification failed")
+            return False
 
     async def get_entries(
         self,
