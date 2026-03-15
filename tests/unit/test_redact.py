@@ -128,6 +128,19 @@ class TestPatternRedaction:
         text = "No secrets here. Just normal text."
         assert redactor.redact(text) == text
 
+    def test_short_sk_strings_not_redacted(self):
+        settings = _make_settings()
+        redactor = SecretRedactor(settings)
+        short_strings = [
+            "sk-test",
+            "sk-proj-short",
+            "sk-org-abc",
+            "sk-ant-api03-brief",
+            "config key sk-mode is fine",
+        ]
+        for text in short_strings:
+            assert redactor.redact(text) == text, f"Short sk- string was incorrectly redacted: {text!r}"
+
 
 class TestKnownValueRedaction:
     def test_known_value_redacted(self):
