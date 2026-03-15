@@ -15,7 +15,8 @@ Allow AgentGate to clone, sync, and interact with repositories hosted on GitLab,
 |----------|-------|-------|------|-------|
 | GateCode | 1 | 8/10 | 2026-03-15 | OQ9/10/11/12/13/14/15 resolved in code samples. -1 OQ16 (git filter attack) accepted as pre-existing. -1 OQ11 REPO_USER per-provider format not enforced by Pydantic (runtime only). |
 | GateSec  | 1 | 5/10 | 2026-03-15 | 2 blockers (OQ9, OQ10). See OQ9–OQ16 below. Commit `2db3bdd` |
-| GateDocs | 1 | 7/10 | 2026-03-15 | 4 spec gaps fixed: missing `_AUTH_USERS` def, unused validation regexes, wrong test file for OQ14 test, inaccurate OQ16 mitigation. +`.env.example` added to Doc Updates. |
+| GateDocs | 1 | 7/10 | 2026-03-15 | 4 spec gaps fixed: missing `_AUTH_USERS` def, unused validation regexes, wrong test file for OQ14 test, inaccurate OQ16 mitigation. +`.env.example` added to Doc Updates. Commit `d73a0ce` |
+| GateCode | 2 | — | 2026-03-15 | All GateDocs R1 fixes verified correct. Added 3 missing test cases to test plan: `test_bitbucket_user_re_rejects_invalid`, `test_azure_org_re_rejects_invalid` (OQ11 regex coverage), `test_configure_git_auth_token_with_special_chars` (OQ13 security test). |
 
 **Status**: ⏳ Pending review
 **Approved**: No — requires all scores ≥ 9/10 in the same round
@@ -505,6 +506,9 @@ await repo.configure_git_auth(settings.repo.repo_token, host, user)
 | `test_build_clone_url_rejects_file_protocol` | `REPO_CLONE_URL=file:///…` raises `ValueError` (OQ9) |
 | `test_repo_host_rejects_url_injection` | `REPO_HOST=evil.com/../../` is rejected (OQ10) |
 | `test_repo_user_url_encoded` | `REPO_USER` with special chars is safely encoded (OQ11) |
+| `test_bitbucket_user_re_rejects_invalid` | `_BITBUCKET_USER_RE` rejects usernames containing `@` or `/` (OQ11) |
+| `test_azure_org_re_rejects_invalid` | `_AZURE_ORG_RE` rejects org names containing `@` or `/` (OQ11) |
+| `test_configure_git_auth_token_with_special_chars` | Token containing `@` and `:` is URL-encoded in the git config URL; raw token must not appear verbatim in the configured URL (OQ13 security test) |
 
 ### `tests/unit/test_redact.py` additions *(GateSec R1)*
 
