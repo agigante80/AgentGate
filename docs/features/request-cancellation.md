@@ -17,10 +17,10 @@ Block Kit "Cancel" button interrupt the running pipeline cleanly and notify the 
 |----------|-------|-------|------|-------|
 | GateCode | 1 | 6/10 | 2026-03-15 | 6 blockers/gaps — see R1 findings below |
 | GateCode | 2 | 7/10 | 2026-03-15 | 2 blockers, 3 gaps — addressed by GateDocs |
-| GateSec  | 1 | -/10 | - | Pending |
+| GateSec  | 1 | 7/10 | 2026-03-15 | 5 findings (1 blocker, 3 medium, 1 low) — see GateSec R1 below |
 | GateDocs | 1 | -/10 | - | Pending |
 
-**Status**: ⏳ In review — GateDocs addressed R2 findings; ready for GateSec R1
+**Status**: ⏳ In review — GateSec R1 complete; awaiting GateDocs R1
 
 ### GateCode R2 Findings (2026-03-15)
 
@@ -77,6 +77,56 @@ Step 4b says "mirror the same pattern" for the Slack streaming branch without an
 #### 🟡 Gap 5 — Double notification on user-initiated cancel (undocumented UX behaviour)
 
 When `cmd_cancel` → `_cancel_active_task()` cancels a task, the pipeline's `except asyncio.CancelledError` block fires and edits the "Thinking…" placeholder to "⚠️ Request cancelled." Simultaneously, `cmd_cancel` sends its own `reply_text("⚠️ Request cancelled.")`. The user sees two notifications: the placeholder is edited and a new reply appears. This is not wrong, but it is intentional UX behaviour that should be documented. Add an Architecture Note or Edge Case entry clarifying: "the pipeline's `CancelledError` handler edits the thinking placeholder in-place; `cmd_cancel` sends a separate reply confirming receipt. Both are expected."
+
+---
+
+### GateSec R1 Findings (2026-03-15)
+
+**Score: 7/10** — Auth guards are solid on both platforms. No injection, no plaintext secret exposure, no auth bypass. One blocker (race between `backend.close()` and new requests) and four design-level concerns that should be resolved before implementation.
+
+#### 🔴 Finding 1 — `backend.close()` in `_cancel_active_task()` races with new requests
+
+`_cancel_active_task()` (Step 2b) calls `task.cancel()`, then `await asyncio.wait_for(asyncio.shield(task), timeout=...)`, then unconditionally calls `self._backend.close()` followed by `self._backend.clear_history()`. The `await` yields control to the event loop. During this yield, another coroutine (e.g. a new prompt arriving in the same or different chat) can call `backend.send()`, spawning a new subprocess or HTTP request. When `_cancel_active_task` resumes, `backend.close()` fires against the backend instance — potentially disrupting the *new* request, not the cancelled one.
+
+Today this is a latent bug because `close()` is a no-op for all current backends (`CopilotSession.close()` is `pass`, `CodexBackend` and `DirectAPIBackend` inherit the ABC default no-op). But the spec's intent is for `close()` to "kill subprocess if any" — once a backend implements a real `close()`, this race becomes a live bug.
+
+*Remediation options:*
+1. Guard the `close()` call: after the grace period, check whether a *new* task now exists in `_active_tasks[chat_id]`. If so, skip `close()` — the backend is already serving a new request.
+2. Move to a per-request cleanup model instead of per-instance: the `CancelledError` handler inside `CopilotSession.send()` already calls `proc.kill()` on the *specific* subprocess. This is the correct level of granularity. Document that `backend.close()` is a defence-in-depth fallback, not the primary cleanup mechanism, and add the guard from option 1.
+
+#### 🟡 Finding 2 — `clear_history()` is chat-agnostic (cross-chat data loss)
+
+`_cancel_active_task()` calls `self._backend.clear_history()` after cancel. For `DirectAPIBackend` (`is_stateful = True`), this clears `self._messages` — the *entire* conversation history across all chats, not just the cancelled chat's history. In a Slack deployment where multiple channels use the same bot instance, cancelling one channel's request wipes all channels' conversation context.
+
+This is not a data *leakage* issue (no information crosses tenant boundaries), but it is unexpected data *loss*. The spec's Edge Case 2 correctly identifies the inconsistency problem but the proposed fix (`clear_history()`) is overly broad.
+
+*Remediation:* Add an Architecture Note documenting this trade-off explicitly: "`clear_history()` after cancel resets *all* conversation context for `DirectAPIBackend`, not just the cancelled chat. This is acceptable for single-tenant single-channel deployments. Multi-channel deployments using `DirectAPIBackend` should be aware that a cancel in one channel resets context everywhere." Alternatively, defer `clear_history()` and document "user must run `gate clear` manually to reset history after cancel" as the accepted trade-off — this gives the user control over when context is cleared.
+
+#### 🟡 Finding 3 — Audit gap: `user_id=None` on Slack text-command cancel
+
+Step 3h's `_handle_cancel` records `user_id=None` in the audit log because the `_dispatch` calling convention does not pass `user_id`. This means a security-relevant action (cancelling an AI request) has no attribution in the audit trail when invoked via text command.
+
+The asymmetry is notable: Block Kit button cancel (`_on_cancel_ai`) *does* have `user_id` via `body["user"]["id"]`. So the audit trail varies by invocation method for the same action.
+
+*Impact:* An administrator investigating a suspicious cancellation cannot determine who initiated it if the text-command path was used. This is a gap in forensic capability.
+
+*Remediation:* The `_dispatch` caller in `slack.py` (approx. line 635-665) has access to the Slack event payload, which includes `user_id`. Thread `user_id` through to `_dispatch` as a keyword argument. This is a broader fix that benefits all dispatch-routed commands, not just cancel. If that refactor is out of scope for this feature, add a comment in `_handle_cancel` documenting the gap and create a follow-up ticket for the `_dispatch` signature change.
+
+#### 🟡 Finding 4 — In-flight guard + no default timeout = channel-blocking DoS
+
+The in-flight guard (Step 2c/3c) rejects any new prompt while a request is in-flight for the same `chat_id`/`channel`. Combined with `AI_TIMEOUT_SECS=0` (the default — no timeout), a stuck backend request blocks the *entire* channel indefinitely. The only recourse is `gate cancel`, but if the authorized user is unavailable or unaware, the channel remains blocked.
+
+On Slack, this is per-channel: one stuck request in `#team-dev` blocks all team members in that channel. On Telegram group chats, same effect.
+
+*Remediation:* Add an Architecture Note recommending `AI_TIMEOUT_SECS > 0` when the in-flight guard is active. Consider adding a hard ceiling (e.g. 30 minutes) even when `AI_TIMEOUT_SECS=0` — this is a safety net against indefinite blocking. Alternatively, document this as an accepted risk for v1 and require operators to set a timeout.
+
+#### 🟢 Finding 5 — `backend.close()` semantic mismatch (low risk, design note)
+
+The spec uses `backend.close()` as a per-cancel cleanup mechanism, but the ABC documents it as "Release resources (e.g. PTY process). Override in backends that hold external state." This is a lifecycle method intended for shutdown, not for per-request cancellation. Calling `close()` on every cancel means a backend author who implements `close()` to tear down a connection pool or release a license would inadvertently destroy shared state on every cancel.
+
+Today this is a no-op for all backends. But the semantic mismatch creates a maintenance trap.
+
+*Remediation:* Add a one-line comment in `_cancel_active_task()` clarifying that `close()` is used here as a defence-in-depth subprocess cleanup, not a full lifecycle shutdown. If a dedicated `cancel()` method is added to the ABC in the future, this should be replaced. Alternatively, note in the ABC docstring for `close()` that it may be called after cancel and must be re-entrant (safe to call multiple times, backend must remain usable after).
 
 ---
 
@@ -412,6 +462,20 @@ User sends "gate cancel" (or clicks Slack Cancel button)
 - **Single-tenant model** — `backend.close()` kills the subprocess for the entire bot instance.
   This is acceptable because each AgentGate container is one project / one bot. Document this
   explicitly in config as a known trade-off.
+- **`clear_history()` is chat-agnostic** _(GateSec R1)_ — `backend.clear_history()` after cancel
+  clears `DirectAPIBackend._messages` for *all* conversations, not just the cancelled chat.
+  Multi-channel Slack deployments should be aware that a cancel resets context everywhere.
+  Acceptable for single-tenant single-channel deployments.
+- **`backend.close()` is defence-in-depth** _(GateSec R1)_ — The primary cancellation mechanism
+  is `task.cancel()` which propagates `CancelledError` into the backend (e.g. `CopilotSession.send()`
+  catches it and calls `proc.kill()`). `backend.close()` in `_cancel_active_task()` is a fallback
+  for backends that don't handle `CancelledError` internally. It is *not* a full lifecycle
+  shutdown — the backend must remain usable after `close()`. Future backend authors must ensure
+  `close()` is re-entrant and does not destroy shared connection pools.
+- **Recommend `AI_TIMEOUT_SECS > 0`** _(GateSec R1)_ — The in-flight guard rejects new prompts
+  while a request is active. With `AI_TIMEOUT_SECS=0` (default), a stuck backend request blocks
+  the entire chat/channel indefinitely. Operators should set `AI_TIMEOUT_SECS` to a reasonable
+  value (e.g. `300`) when using this feature. A future enhancement could add a hard ceiling.
 - **asyncio_mode = auto** — all `async def test_*` functions in `tests/` run without
   `@pytest.mark.asyncio`.
 - **Streaming path** — `_stream_to_telegram` is a module-level function and cannot access
@@ -470,8 +534,12 @@ async def _cancel_active_task(self, chat_id: str) -> bool:
             asyncio.shield(task),
             timeout=self._settings.bot.cancel_timeout_secs,
         )
-    self._backend.close()
-    self._backend.clear_history()  # Reset DirectAPIBackend in-memory history after cancel
+    # Guard: skip close() if a new task was registered during the grace period —
+    # close() is instance-wide and would disrupt the new request. (GateSec R1 Finding 1)
+    current = self._active_tasks.get(chat_id)
+    if current is None or current is task:
+        self._backend.close()
+        self._backend.clear_history()  # Reset DirectAPIBackend in-memory history after cancel
     return True
 ```
 
@@ -667,6 +735,8 @@ async def _handle_cancel(
     (slack.py:665: await handler(args, say, client, channel, thread_ts=thread_ts)).
     Audit is recorded with user_id=None for text-command cancels; Block Kit button
     cancels (_on_cancel_ai) have user_id available via body["user"]["id"].
+    GateSec R1 Finding 3: this creates a non-attributable audit record for a
+    security-relevant action. Follow-up: thread user_id through _dispatch().
     """
     cancelled = await self._cancel_active_task(channel)
     msg = "⚠️ Request cancelled." if cancelled else "ℹ️ No request in progress."
