@@ -22,9 +22,10 @@ Keeps the four key user-facing reference files — `README.md`, `.env.example`, 
 | Reviewer | Round | Score | Date | Notes |
 |----------|-------|-------|------|-------|
 | GateCode | 1 | 7/10 | 2026-03-15 | Two spec bugs fixed inline: (1) `_parse_env_example()` missing `re.match` guard for non-var tokens; (2) Check 7 direction inverted — must flag stale compose entries, not require all `.env.example` vars in compose. Checks 6+7 implemented in `lint_docs.py`; passthrough markers added to `.env.example`. |
-| GateSec  | 1 | -/10 | - | Pending |
+| GateSec  | 1 | -/10 | - | Findings generated (F1–F5); score not recorded (message truncated). GateCode R2 addressed F2, F3, F4. F1 and F5 status unknown. |
 | GateCode | 2 | 8/10 | 2026-03-15 | Three bugs fixed from GateSec R1 findings: (F2) passthrough injection — a `# passthrough:` marker on a real config var now overrides to declared so stale detection is preserved; (F3) compose comment line matching — `_COMPOSE_VAR_RE` now skips `#`-prefixed lines, eliminating 9 false negatives from YAML example blocks; (F4) execution flow Step 5 direction mismatch corrected — Check 7 is stale-compose direction (not `.env.example → compose` coverage). Architecture Notes updated. All 7 checks pass, 538 tests green. |
 | GateDocs | 1 | -/10 | - | Pending |
+| GateCode | 3 | 8/10 | 2026-03-15 | Fixed Edge Case 3 (wrong direction — described coverage, not stale detection); fleshed out Step 6 with formal definition content spec for `skills/docs-agent.md`; corrected version bump note (0.18.x → current+1); tightened AC for `skills/docs-agent.md` definition. GateSec R1 F1 and F5 still unresolved — sec to verify scope on next pass. |
 
 **Status**: ⏳ Pending review
 **Approved**: No — requires all scores ≥ 9/10 in the same round
@@ -359,7 +360,12 @@ errors.extend(compose_errors)
 
 ### Step 6 — Update `skills/docs-agent.md`
 
-Add formal definition of `docs align-sync` alongside `docs roadmap-sync`.
+Replace the `*(To be defined…)*` placeholder under `### \`docs align-sync\`` with a formal definition alongside `docs roadmap-sync`. The definition must include:
+
+- **When to run**: whenever any of `README.md`, `.env.example`, `docker-compose.yml.example`, or `src/config.py` changes.
+- **Steps**: mirror the execution flow in §Recommended Solution (Steps 1–7 above).
+- **Expected output**: `python scripts/lint_docs.py` exits 0; commit message `docs(align-sync): sync README, .env.example, docker-compose.yml.example`.
+- **Passthrough guidance**: how to add `# passthrough: <reason>` to vars intentionally absent from `src/config.py`.
 
 ---
 
@@ -445,7 +451,7 @@ to confirm no existing tests regress.
 
 This feature fixes a README bug and adds lint checks with no user-visible config changes.
 
-**Expected bump**: PATCH → `0.18.x + 1`
+**Expected bump**: PATCH → `current + 1` (i.e. `0.19.1` if `request-cancellation` merges first as `0.19.0`, or whichever PATCH follows the last merged minor bump). No user-visible config changes.
 
 ---
 
@@ -465,7 +471,7 @@ When complete, add to `docs/roadmap.md`:
 
 2. **"Important" vs "minor" config vars in `.env.example`** — *Resolved by design*: `.env.example` is a curated editorial list maintained by the docs agent, not an exhaustive mirror of `src/config.py`. Minor tunables (`STREAM_THROTTLE_SECS`, `HISTORY_TURNS`, etc.) are intentionally absent. Check 6 only flags *stale* entries (vars removed from `config.py`), not missing ones. `README.md` is the authoritative full list.
 
-3. **`docker-compose.yml.example` scope** — Check 7 verifies that `.env.example` vars appear *somewhere* in the compose file (including comments). It does not validate YAML structure. This is intentional — the compose example is mostly a comment block.
+3. **`docker-compose.yml.example` scope** — Check 7 flags *stale* `VAR=` assignments in the compose file's non-comment lines — i.e. vars that no longer appear in `src/config.py` or `.env.example`. It does **not** require every `.env.example` var to appear in compose (the direction is stale-compose, not coverage). It does not validate YAML structure. Comment lines are explicitly excluded to avoid false positives from illustrative YAML examples.
 
 4. **CI timing** — Checks 6 and 7 will fail CI if `.env.example` or `docker-compose.yml.example` goes stale after this feature ships. That is the desired behaviour, but the team should expect a first-run failure if the files are not fully updated before merging.
 
@@ -487,7 +493,7 @@ When complete, add to `docs/roadmap.md`:
 - [ ] `python scripts/lint_docs.py` exits 0 (all 7 checks pass) from the repo root.
 - [ ] `pytest tests/ -v --tb=short` passes with no failures.
 - [ ] `ruff check src/` reports no new issues (no src changes, but confirm clean).
-- [ ] `skills/docs-agent.md` formally defines `docs align-sync`.
+- [ ] `skills/docs-agent.md` `docs align-sync` definition includes: trigger conditions, execution steps, expected output format, and passthrough guidance.
 - [ ] `docs/roadmap.md` updated with item 2.15.
 - [ ] `docs/features/docs-align-sync.md` status changed to `Implemented` after merge to `main`.
 - [ ] PR merged to `develop` first; CI green; then merged to `main`.
