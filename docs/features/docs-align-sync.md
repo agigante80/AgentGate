@@ -4,6 +4,14 @@
 
 Keeps the four key user-facing reference files — `README.md`, `.env.example`, `docker-compose.yml.example`, and `scripts/lint_docs.py` — in sync with the actual source-of-truth (`src/config.py` and `docs/roadmap.md`).
 
+*Authoritative contract:*
+
+| File | Role |
+|------|------|
+| `README.md` | *Full* list of every env var, its default value, and a one-liner description. Single source of truth for operators. |
+| `.env.example` | *Curated* — important vars only. Enough for a self-hoster to get started. Not exhaustive. |
+| `docker-compose.yml.example` | *Mirrors `.env.example`* — the same important vars, in the compose `environment:` block. |
+
 ---
 
 ## Team Review
@@ -40,9 +48,10 @@ Keeps the four key user-facing reference files — `README.md`, `.env.example`, 
 
 1. **README duplication** — `README.md` is ~660 lines but the meaningful content ends around line 341. The entire document then repeats verbatim (with slight variation), meaning readers and search tools see everything twice. Maintaining it is error-prone.
 2. **README features section drift** — The "Features" bullet list in `README.md` describes what the product does, but it is maintained by hand. As roadmap items ship or are added, the list goes stale.
-3. **`.env.example` drift** — Variables are added to `src/config.py` without corresponding updates to `.env.example`, leaving new self-hosters without any starter template entry.
-4. **`docker-compose.yml.example` drift** — Same problem: the compose example references key vars in comments, but those comments go stale as new important vars are added.
-5. **No lint check enforces `.env.example` or `docker-compose.yml.example` coverage** — `scripts/lint_docs.py` currently has 5 checks; none cover these two files. Drift is only caught by a human.
+3. **README env var table incomplete** — `README.md` must be the *full* reference: every env var from `src/config.py`, its default value, and a one-liner description. Currently entries are missing or lack defaults.
+4. **`.env.example` drift** — The file is meant to be a curated starter template (important vars only). Stale entries (vars removed from `src/config.py`) accumulate silently and confuse new users.
+5. **`docker-compose.yml.example` drift** — Must mirror `.env.example` (same curated important vars). Additions/removals to `.env.example` are not propagated.
+6. **No lint check enforces `.env.example` or `docker-compose.yml.example` coverage** — `scripts/lint_docs.py` currently has 5 checks; none cover these two files. Drift is only caught by a human.
 
 ---
 
@@ -51,10 +60,10 @@ Keeps the four key user-facing reference files — `README.md`, `.env.example`, 
 | Layer | Location | Current behaviour |
 |-------|----------|-------------------|
 | `lint_docs.py` | `scripts/lint_docs.py` (checks 1–4) | Validates spec statuses, roadmap links, and cross-references. |
-| `lint_docs.py` | `scripts/lint_docs.py:check_config_coverage()` | Check 5: every `src/config.py` env var must appear in `README.md`. Passes today. |
-| `README.md` | `README.md:1–660` | Full document appears twice; second copy starts after the `## License` section. |
-| `.env.example` | `.env.example:1–38` | 13 variables; hand-maintained. No automated check for drift. |
-| `docker-compose.yml.example` | `docker-compose.yml.example:1–42` | References key vars in comments; hand-maintained. No automated check. |
+| `lint_docs.py` | `scripts/lint_docs.py:check_config_coverage()` | Check 5: every `src/config.py` env var must appear in `README.md`. Passes today. Does not verify defaults or descriptions. |
+| `README.md` | `README.md:1–660` | Full document appears twice; second copy starts after the `## License` section. Env var table lacks defaults and per-var descriptions. |
+| `.env.example` | `.env.example:1–38` | 13 variables; hand-maintained. Intended as a curated starter (important vars only), but no automated check removes stale entries. |
+| `docker-compose.yml.example` | `docker-compose.yml.example:1–42` | References key vars; hand-maintained. No automated check that it mirrors `.env.example`. |
 | Skills | `skills/docs-agent.md` | `docs align-sync` command not yet formally defined. |
 
 > **Key gap**: No automated enforcement ensures that `.env.example`, `docker-compose.yml.example`, and the README features list stay aligned with code. Drift is the default outcome.
@@ -156,22 +165,26 @@ docs agent receives: docs align-sync
 │          Compare against active roadmap items (docs/roadmap.md)
 │          Add missing bullets; flag/remove stale ones
 │
-├─ Step 3: Run lint check 6 — .env.example coverage
-│          For each env var in src/config.py:
-│            if not in .env.example AND not "minor/internal":
-│              report drift
+├─ Step 3: Refresh README.md env var table (full list)
+│          For each var in src/config.py:
+│            ensure README row exists with: var name | default | one-liner description
+│          This is the ONLY place all vars must appear
+│
+├─ Step 4: Run lint check 6 — .env.example hygiene
+│          .env.example is a CURATED list (important vars only — docs agent decides)
 │          For each var in .env.example (non-passthrough):
-│            if not in src/config.py:
-│              report stale entry
+│            if not in src/config.py → report stale entry (var was removed from code)
+│          ⚠ Check 6 does NOT require every config.py var to appear in .env.example
+│            (that is intentional — minor/internal vars are excluded from .env.example)
 │
-├─ Step 4: Run lint check 7 — docker-compose.yml.example coverage
-│          For each "important" var in .env.example:
-│            if not referenced in docker-compose.yml.example comment block:
-│              report drift
+├─ Step 5: Run lint check 7 — docker-compose.yml.example mirrors .env.example
+│          For each var in .env.example (non-passthrough):
+│            if not referenced in docker-compose.yml.example → report drift
+│          docker-compose.yml.example must stay in sync with .env.example, not with config.py
 │
-├─ Step 5: Apply fixes (docs agent edits files based on lint output)
+├─ Step 6: Apply fixes (docs agent edits files based on lint output)
 │
-└─ Step 6: Commit with message: "docs(align-sync): sync README, .env.example, docker-compose.yml.example"
+└─ Step 7: Commit with message: "docs(align-sync): sync README, .env.example, docker-compose.yml.example"
 ```
 
 ---
@@ -179,6 +192,9 @@ docs agent receives: docs align-sync
 ## Architecture Notes
 
 - **`lint_docs.py` is report-only** — it exits 0 or 1 and prints violations. It never modifies files. Fixes are applied by the docs agent after reading the lint output.
+- **README is the single source of truth for env vars** — every var from `src/config.py` must appear in `README.md` with its default value and a one-liner description. This is enforced by Check 5 (existing) and extended in Step 3.
+- **`.env.example` is curated, not exhaustive** — it contains only the vars a typical self-hoster *must* configure. Minor tunables (e.g. `STREAM_THROTTLE_SECS`) are intentionally omitted. The docs agent decides what is "important"; lint only enforces that no *stale* (removed) var remains.
+- **`docker-compose.yml.example` mirrors `.env.example`** — not `src/config.py`. Both curated files stay in sync with each other.
 - **`REPO_DIR` / `DB_PATH`** — not involved; this feature is pure filesystem (docs tree only).
 - **No platform symmetry required** — this is a docs-agent-only command; no `bot.py` / `slack.py` changes.
 - **No `@_requires_auth` guard** — not a bot handler.
@@ -206,7 +222,23 @@ The docs agent reads `README.md`, identifies the duplication boundary (the first
 
 ---
 
-### Step 2 — Add passthrough markers to `.env.example`
+### Step 2 — Refresh `README.md` env var table (full list, with defaults + descriptions)
+
+`README.md` must contain a table with *every* var from `src/config.py`, formatted as:
+
+```markdown
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PLATFORM` | `telegram` | Which bot platform to use (`telegram` or `slack`). |
+| `AI_CLI` | `copilot` | AI backend to use (`copilot`, `codex`, or `api`). |
+...
+```
+
+The docs agent scans `src/config.py` for all field definitions and reconciles the README table — adding missing rows, updating stale defaults, and ensuring every row has a non-empty description. Check 5 (existing) enforces presence; this step also enforces defaults and descriptions.
+
+---
+
+### Step 3 — Add passthrough markers to `.env.example`
 
 For every variable in `.env.example` that is intentionally absent from `src/config.py`, add an inline comment:
 
@@ -215,9 +247,11 @@ COPILOT_GITHUB_TOKEN=github_pat_xxxxxxxxxxxx   # passthrough: forwarded to copil
 # REPO_HOST_PATH=/host/path                     # passthrough: Docker Compose bind-mount only
 ```
 
+> Note: `.env.example` is a *curated* file — it contains only the vars a self-hoster needs to touch. Minor internal tunables (e.g. `STREAM_THROTTLE_SECS`, `HISTORY_TURNS`) are intentionally excluded. The docs agent maintains this curation editorially; lint only guards against stale entries.
+
 ---
 
-### Step 3 — Extend `scripts/lint_docs.py` with Check 6
+### Step 4 — Extend `scripts/lint_docs.py` with Check 6
 
 Add `check_env_example_coverage()` function:
 
@@ -242,9 +276,12 @@ def _parse_env_example() -> tuple[set[str], set[str]]:
 
 
 def check_env_example_coverage(config_vars: set[str]) -> tuple[list[str], list[str]]:
-    """Check 6: .env.example covers important config.py vars; no stale entries."""
+    """Check 6: .env.example has no stale entries (vars no longer in config.py).
+
+    NOTE: .env.example is intentionally a curated subset — not every config var
+    must appear here. Only stale (removed) vars are flagged.
+    """
     declared, passthroughs = _parse_env_example()
-    all_known = declared | passthroughs
     errors: list[str] = []
 
     # Stale entries: in .env.example (non-passthrough) but not in config.py
@@ -266,7 +303,7 @@ errors.extend(env_errors)
 
 ---
 
-### Step 4 — Extend `scripts/lint_docs.py` with Check 7
+### Step 5 — Extend `scripts/lint_docs.py` with Check 7
 
 Add `check_compose_coverage()` function:
 
@@ -274,7 +311,10 @@ Add `check_compose_coverage()` function:
 COMPOSE_EXAMPLE_FILE = Path("docker-compose.yml.example")
 
 def check_compose_coverage() -> tuple[list[str], list[str]]:
-    """Check 7: docker-compose.yml.example references all vars in .env.example."""
+    """Check 7: docker-compose.yml.example references all vars in .env.example.
+
+    Compose mirrors .env.example (curated important vars), not src/config.py.
+    """
     if not COMPOSE_EXAMPLE_FILE.is_file():
         return [], []
     declared, _ = _parse_env_example()
@@ -293,13 +333,13 @@ Wire into `main()` after check 6.
 
 ---
 
-### Step 5 — Update `skills/docs-agent.md`
+### Step 6 — Update `skills/docs-agent.md`
 
 Add formal definition of `docs align-sync` alongside `docs roadmap-sync`.
 
 ---
 
-### Step 6 — Add `docs-align-sync` to `docs/roadmap.md`
+### Step 7 — Add `docs-align-sync` to `docs/roadmap.md`
 
 Add row 2.15 to the roadmap table.
 
@@ -309,8 +349,9 @@ Add row 2.15 to the roadmap table.
 
 | File | Action | Summary of change |
 |------|--------|-------------------|
-| `README.md` | **Edit** | De-duplicate (merge best-of-both into ≈ 340–380 lines) |
-| `.env.example` | **Edit** | Add `# passthrough: <reason>` markers to non-config vars |
+| `README.md` | **Edit** | De-duplicate (merge best-of-both into ≈ 340–380 lines); add full env var table with defaults + one-liner descriptions |
+| `.env.example` | **Edit** | Add `# passthrough: <reason>` markers to non-config vars; curate to important vars only |
+| `docker-compose.yml.example` | **Edit** | Mirror `.env.example` important vars; remove any no-longer-present entries |
 | `scripts/lint_docs.py` | **Edit** | Add Check 6 (`_parse_env_example`, `check_env_example_coverage`) and Check 7 (`check_compose_coverage`) |
 | `skills/docs-agent.md` | **Edit** | Formally define `docs align-sync` command |
 | `docs/roadmap.md` | **Edit** | Add item 2.15 linking to this file |
@@ -358,15 +399,17 @@ to confirm no existing tests regress.
 
 - De-duplicate the file (Step 1).
 - Refresh the Features bullet list to match current `docs/roadmap.md` active items.
+- Add (or update) the full env var reference table: every var from `src/config.py`, its default, and a one-liner description. This is the *only* file that must list all vars.
 
 ### `.env.example`
 
 - Add `# passthrough: <reason>` to `COPILOT_GITHUB_TOKEN` and `REPO_HOST_PATH`.
+- Keep only the most important vars — the ones a self-hoster must configure to get started. Remove or comment out internal tunables.
 
 ### `docker-compose.yml.example`
 
-- Verify all vars present in `.env.example` (non-passthrough) are referenced in comments.
-- Add missing references as needed.
+- Verify it mirrors the curated vars in `.env.example` (not the full `src/config.py` list).
+- Add missing references; remove entries no longer in `.env.example`.
 
 ### `skills/docs-agent.md`
 
@@ -396,7 +439,7 @@ When complete, add to `docs/roadmap.md`:
 
 1. **README merge conflict** — The two copies of `README.md` differ in subtle ways (feature bullet wording, Quick Start examples). The docs agent must diff them manually and choose the best content — this cannot be automated. Risk: low, since the merge is a one-time operation.
 
-2. **"Important" vs "minor" config vars in `.env.example`** — Not every var in `src/config.py` warrants an entry in `.env.example` (e.g. internal tunables like `STREAM_THROTTLE_SECS`). Check 6 currently reports *all* non-passthrough vars absent from `.env.example`. A future refinement could add a `# internal` marker to suppress those warnings; for now, the docs agent uses judgement.
+2. **"Important" vs "minor" config vars in `.env.example`** — *Resolved by design*: `.env.example` is a curated editorial list maintained by the docs agent, not an exhaustive mirror of `src/config.py`. Minor tunables (`STREAM_THROTTLE_SECS`, `HISTORY_TURNS`, etc.) are intentionally absent. Check 6 only flags *stale* entries (vars removed from `config.py`), not missing ones. `README.md` is the authoritative full list.
 
 3. **`docker-compose.yml.example` scope** — Check 7 verifies that `.env.example` vars appear *somewhere* in the compose file (including comments). It does not validate YAML structure. This is intentional — the compose example is mostly a comment block.
 
@@ -412,7 +455,10 @@ When complete, add to `docs/roadmap.md`:
 
 - [ ] `README.md` contains no duplicate content; `wc -l README.md` is ≤ 400.
 - [ ] `README.md` Features section accurately reflects active roadmap items.
+- [ ] `README.md` env var table contains *every* var from `src/config.py` with its default value and a one-liner description.
+- [ ] `.env.example` contains only the most important vars (curated starter set); internal tunables are absent.
 - [ ] `.env.example` has `# passthrough: <reason>` on all non-config vars.
+- [ ] `docker-compose.yml.example` mirrors exactly the vars in `.env.example` (curated list only, not all of `src/config.py`).
 - [ ] `scripts/lint_docs.py` has Check 6 and Check 7 implemented and wired into `main()`.
 - [ ] `python scripts/lint_docs.py` exits 0 (all 7 checks pass) from the repo root.
 - [ ] `pytest tests/ -v --tb=short` passes with no failures.
