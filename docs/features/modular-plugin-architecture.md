@@ -1,6 +1,6 @@
 # Modular Plugin Architecture (pre-work for forks and cherry-pick)
 
-> Status: **Planned** | Priority: High | Last reviewed: 2026-03-15
+> Status: **Approved** | Priority: High | Last reviewed: 2026-03-15
 
 Refactor AgentGate's internals so that every major subsystem (platforms, AI backends,
 commands, storage, services) is registered through a stable extension API rather than
@@ -30,10 +30,10 @@ begins implementation.
 
 | GateCode | 4     | 9/10  | 2026-03-15 | 3 gaps fixed: (1) `RuntimeService` design/impl mismatch — dropped from `Services` dataclass in Design Space; added note that dep detection runs at startup, not via handlers; (2) version bump stale (`0.19.0`) — updated to `0.21.0` / dynamic derivation note; (3) `test_all_sub_configs_implement_secret_provider` referenced in OQ13 text but missing from Test Plan — added to `tests/unit/test_config.py` additions table. |
 | GateSec  | 4     | 9/10  | 2026-03-15 | All R1/R2 findings resolved; GateCode R4 fixes verified (RuntimeService dropped, OQ13 CI test added); no new security gaps |
-| GateDocs | 4     | -/10  | -          | Pending |
+| GateDocs | 4     | 9/10  | 2026-03-15 | Added `README.md` to Files table (was missing despite being in ACs and Documentation Updates); all R4 findings verified. |
 
-**Status**: ⏳ In review — round 4
-**Approved**: No — requires all scores ≥ 9/10 in the same round
+**Status**: ✅ Approved — round 4, all scores ≥ 9
+**Approved**: Yes — ready to implement
 
 ---
 
@@ -1027,6 +1027,7 @@ register_detector("Cargo.toml", ["cargo", "build"])
 | `.env.example` | **Edit** | Add commented entries for `STORAGE_BACKEND` and `AUDIT_BACKEND` |
 | `docker-compose.yml.example` | **Edit** | Add commented entries for `STORAGE_BACKEND` and `AUDIT_BACKEND` |
 | `.github/copilot-instructions.md` | **Edit** | Add registry, `Services`, command registry, and `SecretProvider` patterns to Architecture section |
+| `README.md` | **Edit** | Add `STORAGE_BACKEND` and `AUDIT_BACKEND` rows to the env var table |
 
 ---
 
