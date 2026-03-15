@@ -19,11 +19,11 @@ Block Kit "Cancel" button interrupt the running pipeline cleanly and notify the 
 | GateCode | 2 | 7/10 | 2026-03-15 | 2 blockers, 3 gaps — addressed by GateDocs |
 | GateSec  | 1 | 7/10 | 2026-03-15 | 5 findings (1 blocker, 3 medium, 1 low) — see GateSec R1 below |
 | GateDocs | 1 | 9/10 | 2026-03-15 | Applied 4 inline fixes (test files table, AC slash-command wording, redundant contract test, modularity-debt note); doc is implementation-ready from docs perspective |
-| GateCode | 2 | -/10 | - | Pending |
+| GateCode | 3 | 9/10 | 2026-03-15 | All 5 Round 1 Blocking Gaps resolved — see GateCode R3 below |
 | GateSec  | 2 | -/10 | - | Pending |
 | GateDocs | 2 | -/10 | - | Pending |
 
-**Status**: ⏳ Round 1 complete — GateCode 7/10, GateSec 7/10, GateDocs 9/10; scores below gate; proceeding to round 2
+**Status**: ⏳ Round 2 in progress — GateCode R3 9/10 (all 5 Round 1 Blocking Gaps resolved); GateSec R2 and GateDocs R2 pending
 
 ### Round 1 Blocking Gaps (for Round 2 addressal)
 
@@ -94,6 +94,50 @@ Step 4b says "mirror the same pattern" for the Slack streaming branch without an
 #### 🟡 Gap 5 — Double notification on user-initiated cancel (undocumented UX behaviour)
 
 When `cmd_cancel` → `_cancel_active_task()` cancels a task, the pipeline's `except asyncio.CancelledError` block fires and edits the "Thinking…" placeholder to "⚠️ Request cancelled." Simultaneously, `cmd_cancel` sends its own `reply_text("⚠️ Request cancelled.")`. The user sees two notifications: the placeholder is edited and a new reply appears. This is not wrong, but it is intentional UX behaviour that should be documented. Add an Architecture Note or Edge Case entry clarifying: "the pipeline's `CancelledError` handler edits the thinking placeholder in-place; `cmd_cancel` sends a separate reply confirming receipt. Both are expected."
+
+---
+
+### GateCode R3 Findings (2026-03-15)
+
+**Score: 9/10** — All 5 Round 1 Blocking Gaps (from GateSec R1) fully resolved. Spec is
+implementation-ready from a code perspective. One minor residual note below (score cap).
+
+#### ✅ Gap 1 — `backend.close()` race — resolved
+
+`_cancel_active_task()` Step 2b already includes the guard (`if current is None or current is
+task`). Updated: (a) Recommended Solution pseudocode now explicitly shows the guard condition;
+(b) Architecture Note expanded to name the guard pattern and confirm both `close()` and
+`clear_history()` sit inside it.
+
+#### ✅ Gap 2 — `clear_history()` chat-agnostic trade-off — resolved
+
+Architecture Note now states the chosen v1 stance explicitly: call `clear_history()` after
+cancel (inside the race guard). Rationale documented: inconsistent half-written history is
+worse than a clean slate for the primary single-tenant use case. Multi-channel `DirectAPIBackend`
+trade-off acknowledged.
+
+#### ✅ Gap 3 — Audit `user_id=None` follow-up — resolved
+
+Added Edge Case 9 documenting the gap and formally closing it as out-of-scope for v1 with a
+rationale. Added an Acceptance Criterion: "Follow-up issue created: 'Thread user_id through
+_dispatch() for full audit attribution on Slack text commands.'"
+
+#### ✅ Gap 4 — `AI_TIMEOUT_SECS=0` hard ceiling — resolved
+
+Architecture Note now formally accepts indefinite blocking as a v1 risk for single-operator
+deployments, and defers the hard-ceiling enhancement with rationale.
+
+#### ✅ Gap 5 — `src/ai/adapter.py` missing from Files table — resolved
+
+Added `src/ai/adapter.py` to the Files table with description: update `AICLIBackend.close()`
+docstring with the re-entrance contract.
+
+#### 🟡 Residual — score cap at 9/10
+
+One point held back: the `_handle_cancel` docstring mentions a follow-up ticket but no issue
+number yet exists (it will be created on merge, per the new AC). No blocker; GateSec should
+confirm the re-entrance contract wording in the Architecture Note is sufficient before
+approving.
 
 ---
 
@@ -451,7 +495,9 @@ User sends "gate cancel" (or clicks Slack Cancel button)
        ├─ Lookup task = _active_tasks.get(chat_id)
        ├─ If None or done → "No request in progress."
        └─ Else: task.cancel(); await shield(task) up to CANCEL_TIMEOUT_SECS;
-                backend.close(); audit.record(..., status="cancelled")
+                if no new task registered for chat_id during grace period:
+                    backend.close(); backend.clear_history()  ← guarded, not unconditional
+                audit.record(..., status="cancelled")
                 → "⚠️ Request cancelled."
 ```
 
@@ -479,20 +525,36 @@ User sends "gate cancel" (or clicks Slack Cancel button)
 - **Single-tenant model** — `backend.close()` kills the subprocess for the entire bot instance.
   This is acceptable because each AgentGate container is one project / one bot. Document this
   explicitly in config as a known trade-off.
-- **`clear_history()` is chat-agnostic** _(GateSec R1)_ — `backend.clear_history()` after cancel
-  clears `DirectAPIBackend._messages` for *all* conversations, not just the cancelled chat.
-  Multi-channel Slack deployments should be aware that a cancel resets context everywhere.
-  Acceptable for single-tenant single-channel deployments.
-- **`backend.close()` is defence-in-depth** _(GateSec R1)_ — The primary cancellation mechanism
-  is `task.cancel()` which propagates `CancelledError` into the backend (e.g. `CopilotSession.send()`
-  catches it and calls `proc.kill()`). `backend.close()` in `_cancel_active_task()` is a fallback
-  for backends that don't handle `CancelledError` internally. It is *not* a full lifecycle
-  shutdown — the backend must remain usable after `close()`. Future backend authors must ensure
-  `close()` is re-entrant and does not destroy shared connection pools.
-- **Recommend `AI_TIMEOUT_SECS > 0`** _(GateSec R1)_ — The in-flight guard rejects new prompts
-  while a request is active. With `AI_TIMEOUT_SECS=0` (default), a stuck backend request blocks
-  the entire chat/channel indefinitely. Operators should set `AI_TIMEOUT_SECS` to a reasonable
-  value (e.g. `300`) when using this feature. A future enhancement could add a hard ceiling.
+- **`clear_history()` is chat-agnostic — chosen v1 stance** _(GateSec R1 Finding 2)_ —
+  `backend.clear_history()` after cancel clears `DirectAPIBackend._messages` for *all*
+  conversations, not just the cancelled chat. Multi-channel Slack deployments should be aware
+  that a cancel in one channel resets context everywhere.
+  *Chosen approach*: call `clear_history()` automatically after cancel (inside the same race
+  guard as `close()` in Step 2b). Rationale: an inconsistent half-written history is worse than
+  a blank slate; the user can re-establish context by simply continuing the conversation. This
+  is acceptable for the single-tenant single-channel primary use case. Operators running
+  multi-channel `DirectAPIBackend` deployments should note this trade-off — they can always
+  set `AI_CLI=copilot` or `codex` (stateless) to avoid it.
+- **`backend.close()` is defence-in-depth, guarded** _(GateSec R1 Finding 1)_ — The primary
+  cancellation mechanism is `task.cancel()` which propagates `CancelledError` into the backend
+  (e.g. `CopilotSession.send()` catches it and calls `proc.kill()`). `backend.close()` in
+  `_cancel_active_task()` is a fallback for backends that don't handle `CancelledError` internally.
+  It is *not* a full lifecycle shutdown — the backend must remain usable after `close()`. Future
+  backend authors must ensure `close()` is re-entrant and does not destroy shared connection pools.
+  Critically, `backend.close()` (and `backend.clear_history()`) are called *only inside a guard*:
+  `if current is None or current is task` — where `current = self._active_tasks.get(chat_id)`.
+  If a new request arrived during the grace-period `await`, `current` will be a different task
+  and the guard skips `close()`, preventing disruption of the new request. Both `close()` and
+  `clear_history()` are inside this guard (see Step 2b code sample).
+- **Recommend `AI_TIMEOUT_SECS > 0`** _(GateSec R1 Finding 4)_ — The in-flight guard rejects
+  new prompts while a request is active. With `AI_TIMEOUT_SECS=0` (default), a stuck backend
+  request blocks the entire chat/channel indefinitely.
+  *Accepted v1 risk*: indefinite blocking is explicitly accepted for single-operator deployments
+  where the operator knows they can `gate cancel` at any time. Operators should set
+  `AI_TIMEOUT_SECS` to a reasonable value (e.g. `300`) for unattended or shared deployments.
+  A hard ceiling (e.g. 30-minute fallback even when `AI_TIMEOUT_SECS=0`) is deferred to a
+  future enhancement — it requires UI/UX decisions (user notification, partial response, etc.)
+  that are out of scope for v1.
 - **asyncio_mode = auto** — all `async def test_*` functions in `tests/` run without
   `@pytest.mark.asyncio`.
 - **Streaming path** — `_stream_to_telegram` is a module-level function and cannot access
@@ -889,6 +951,7 @@ argument must be threaded through so replies land in the correct thread. The in-
 | File | Action | Summary of change |
 |------|--------|-------------------|
 | `src/config.py` | **Edit** | Add `cancel_timeout_secs: int = Field(5, env="CANCEL_TIMEOUT_SECS")` to `BotConfig` |
+| `src/ai/adapter.py` | **Edit** | Update `AICLIBackend.close()` docstring: re-entrance requirement — must be safe to call after cancel and leave the backend usable for subsequent requests. |
 | `src/bot.py` | **Edit** | Add `_active_tasks` dict, `_cancel_active_task()`, `cmd_cancel`, in-flight guard in `_run_ai_pipeline`, `CancelledError` handling, dispatch registration, `CommandHandler` in `build_app()` |
 | `src/platform/slack.py` | **Edit** | Mirror all of the above; add `"cancel"` to `_KNOWN_SUBS` (routing gate); add `_THINKING_BLOCKS` with Cancel button; add `_on_cancel_ai` handler; add `_handle_cancel` text-command handler; register `cancel_ai` action |
 | `README.md` | **Edit** | Feature bullet, `CANCEL_TIMEOUT_SECS` env var row, `gate cancel` command row |
@@ -1050,6 +1113,16 @@ Run `pytest tests/ --cov=src --cov-report=term-missing`. Target: all branches of
    `_run_ai_pipeline` prevents the `AI_TIMEOUT_SECS` wait from cancelling the underlying task —
    the task is then explicitly cancelled via `_cancel_active_task()` in the `TimeoutError` handler.
 
+9. **Audit attribution gap for Slack text-command cancel** — `_handle_cancel` (Step 3h) records
+   `user_id=None` because the `_dispatch()` calling convention does not pass `user_id`. This
+   creates a non-attributable audit record for a security-relevant action when cancellation is
+   triggered via text command (Block Kit button cancel via `_on_cancel_ai` does have `user_id`).
+   *Out of scope for v1*: threading `user_id` through `_dispatch()` is a cross-cutting change that
+   benefits all dispatch-routed commands (not just cancel) and should be done as a dedicated
+   refactor. The gap is documented in the `_handle_cancel` docstring (Step 3h). A follow-up issue
+   should be created when this feature is merged: "Thread user_id through _dispatch() for full
+   audit attribution on Slack text commands."
+
 ---
 
 ## Acceptance Criteria
@@ -1070,5 +1143,6 @@ Run `pytest tests/ --cov=src --cov-report=term-missing`. Target: all branches of
 - [ ] `VERSION` bumped to `0.19.0` before merge PR to `main`.
 - [ ] Feature works on both **Telegram** and **Slack**.
 - [ ] Feature works with all backends (`copilot`, `codex`, `api`).
-- [ ] Edge cases 1–8 above are resolved and either handled in code or documented as accepted trade-offs.
+- [ ] Edge cases 1–9 above are resolved and either handled in code or documented as accepted trade-offs.
+- [ ] Follow-up issue created: "Thread user_id through _dispatch() for full audit attribution on Slack text commands."
 - [ ] PR is merged to `develop` first; CI is green; then merged to `main`.
