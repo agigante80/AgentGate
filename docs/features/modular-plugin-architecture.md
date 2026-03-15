@@ -22,7 +22,7 @@ begins implementation.
 | GateCode | 1     | 7/10  | 2026-03-15 | 4 implementation bugs fixed: (1) `force=True` was silent — added `logger.warning()` on overwrite; (2) `_token` dataclass field breaks `__init__` kwarg and falsely claimed "not in repr()" — changed to `token: str = field(repr=False)`; (3) `AIConfig.secret_values()` used `self.codex_api_key` (flat, non-existent) — fixed to `self.codex.codex_api_key` (nested); (4) `_collect_secrets` used `__dict__`/`vars()` — changed to Pydantic v2 idiomatic `model_fields` iteration. OQ3 clarified: `commands/registry.py` defines the decorator; `bot.py` applies it — "shared definitions.py" option removed (circular import). |
 | GateSec  | 1     | 6/10  | 2026-03-15 (9130578) | 8 OQs added (OQ9–OQ16): registry hijack, token exposure, InMemoryStorage bounds, SecretProvider gap, ImportError swallowing, detector injection, discovery mechanism. See inline `⚠️` annotations. |
 | GateDocs | 1     | 6/10  | 2026-03-15 | 5 blockers fixed (OQ9 code/test mismatch, OQ10/11 code/criteria mismatch, `vars(settings)` Pydantic incompatibility, `AIConfig.codex` wrong reference, InMemoryStorage code/test desync). 6 gaps addressed (`.env.example` added, OQ14 test, OQ15 AC, COMMANDS dedup note, OQ16 comment corrected, `remote-control-fork-project.md` added to Files table). |
-| GateCode | 2     | 8/10  | 2026-03-15 | 4 gaps fixed inline: (1) Slack uses `_cmd_*` naming — Milestone 4 now requires an explicit rename step so `handler_attr` lookup works on both adapters; (2) `StorageConfig` sub-config added to Milestone 5c and Config Variables; (3) `_load_backends()` code sample updated to be OQ15-compliant (distinguishes deleted file vs missing dep); (4) dangling `RepoServiceABC` comment fixed — `NullRepoService` implements the same duck-typed interface with no inheritance. Added missing `test_validate_command_symmetry` to test plan. |
+| GateCode | 3     | 9/10  | 2026-03-15 | GateDocs R2 blockers verified ✅. One residual gap fixed: Step 5b code sample called `_module_file_exists()` without an import — would be a `NameError` at runtime. Fix: (1) extracted `_module_file_exists()` from `factory.py` inline definition into a new `src/_loader.py` module; (2) updated both Step 5a (`factory.py`) and Step 5b (`main.py`) samples to `from src._loader import _module_file_exists`; (3) extraction note updated to reference `src/_loader.py` concretely; (4) `src/_loader.py` added to Files to Create/Change; (5) two unit tests added for `_module_file_exists` in isolation. Step 4a OQ18 duplicate-check verified correct as-written. |
 | GateSec  | 2     | 8/10  | 2026-03-15 (cd13e43) | R1 OQs resolved: OQ9 (registry hijack → ValueError default), OQ11 (NullRepoService standalone), OQ12 (InMemoryStorage bounded), OQ14 (accepted + logged), OQ15 (find_spec pattern), OQ16 (hardcoded list). OQ10 partially resolved (repr=False). OQ13 mitigated (test coverage). 2 new: OQ17 (platform import inconsistency with Step 5a), OQ18 (COMMANDS list no uniqueness check). |
 | GateDocs | 2     | 7/10  | 2026-03-15 | 2 blockers fixed: (1) Step 5b `main.py` sample replaced bare `try/except ImportError: pass` with `_load_platforms()` matching the OQ15-compliant pattern from Step 5a — OQ17 resolved; (2) `register_command()` in Step 4a now raises `ValueError` on duplicate `name` — OQ18 resolved. 4 gaps addressed: test rows added for OQ17 and OQ18, `.github/copilot-instructions.md` added to Files table, duplicate GateSec security-additions test rows consolidated. |
 
@@ -823,6 +823,8 @@ class CopilotBackend(AICLIBackend): ...
 Replace `factory.py`'s `if/elif` chain with:
 
 ```python
+from src._loader import _module_file_exists   # shared helper — also used by main.py Step 5b
+
 def _load_backends() -> None:
     """Import each backend module so its @backend_registry.register() decorator fires.
 
@@ -847,16 +849,13 @@ def _load_backends() -> None:
             ) from exc
 
 
-def _module_file_exists(rel_path: str) -> bool:
-    """Return True if the module file exists on disk (relative to the package root)."""
-    import os
-    return os.path.exists(os.path.join(os.path.dirname(__file__), "..", "..", rel_path))
-
-
 def create_backend(ai: AIConfig) -> AICLIBackend:
     _load_backends()
     return backend_registry.create(ai.ai_cli, ai)
 ```
+
+> `src/_loader.py` is a new thin module containing only `_module_file_exists()`. Both
+> `factory.py` and `main.py` import it — keeping the logic DRY and testable in isolation.
 
 #### Step 5b — Register platforms
 
@@ -880,6 +879,7 @@ class SlackAdapter(SlackBot): ...  # or rename SlackBot → SlackAdapter
 
 ```python
 from src.registry import platform_registry
+from src._loader import _module_file_exists   # shared helper (Step 5a extraction)
 import importlib
 import importlib.util
 
@@ -910,9 +910,10 @@ adapter = platform_registry.create(
 await adapter.start()
 ```
 
-> `_module_file_exists()` is the same helper defined in `factory.py` (Step 5a) — extract
-> it to `src/registry.py` or a shared `src/_loader.py` so both `_load_backends()` and
-> `_load_platforms()` can reuse it without duplication.
+> `_module_file_exists()` is defined in `factory.py` (Step 5a) and must be extracted to
+> `src/_loader.py` before Step 5b can import it — see import added to the code sample above.
+> Both `_load_backends()` (in `factory.py`) and `_load_platforms()` (in `main.py`) then
+> `from src._loader import _module_file_exists`. Add `src/_loader.py` to Files to Create/Change.
 
 #### Step 5c — Register storage and audit backends
 
@@ -997,7 +998,8 @@ register_detector("Cargo.toml", ["cargo", "build"])
 | `src/ai/copilot.py` | **Edit** | `@backend_registry.register("copilot")` |
 | `src/ai/codex.py` | **Edit** | `@backend_registry.register("codex")` |
 | `src/ai/direct.py` | **Edit** | `@backend_registry.register("api")` |
-| `src/ai/factory.py` | **Edit** | Replace `if/elif` with registry lookup + `_load_backends()` |
+| `src/_loader.py` | **Create** | `_module_file_exists()` shared helper — imported by `factory.py` and `main.py` |
+| `src/ai/factory.py` | **Edit** | Replace `if/elif` with registry lookup + `_load_backends()`; import `_module_file_exists` from `src._loader` |
 | `src/history.py` | **Edit** | `@storage_registry.register("sqlite"/"memory")` |
 | `src/audit.py` | **Edit** | `@audit_registry.register("sqlite"/"null")` |
 | `src/runtime.py` | **Edit** | Replace `_DETECTORS` constant with `register_detector()` + export |
@@ -1085,6 +1087,8 @@ No new runtime or dev dependencies.
 |------|----------------|
 | `test_platform_registry_loaded` | After `_load_registries()`, `"telegram"` and `"slack"` are in `platform_registry` |
 | `test_backend_registry_loaded` | After `_load_backends()`, `"copilot"`, `"codex"`, `"api"` are in `backend_registry` |
+| `test_module_file_exists_present` | `_module_file_exists("src/ai/copilot.py")` returns `True` for a real file |
+| `test_module_file_exists_absent` | `_module_file_exists("src/ai/nonexistent.py")` returns `False` |
 | `test_storage_registry_default` | `storage_registry.create("sqlite", ...)` returns `SQLiteStorage` |
 | `test_storage_registry_memory` | `storage_registry.create("memory", ...)` returns `InMemoryStorage` |
 | `test_platform_load_missing_dep_raises` | `_load_platforms()` re-raises `ImportError` with actionable message when platform file exists but required package (e.g. `slack-bolt`) is not installed (OQ17) |
