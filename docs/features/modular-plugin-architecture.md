@@ -21,7 +21,7 @@ begins implementation.
 |----------|-------|-------|------------|-------|
 | GateCode | 1     | -/10  | -          | Pending |
 | GateSec  | 1     | 6/10  | 2026-03-15 (9130578) | 8 OQs added (OQ9–OQ16): registry hijack, token exposure, InMemoryStorage bounds, SecretProvider gap, ImportError swallowing, detector injection, discovery mechanism. See inline `⚠️` annotations. |
-| GateDocs | 1     | -/10  | -          | Pending |
+| GateDocs | 1     | 6/10  | 2026-03-15 | 5 blockers fixed (OQ9 code/test mismatch, OQ10/11 code/criteria mismatch, `vars(settings)` Pydantic incompatibility, `AIConfig.codex` wrong reference, InMemoryStorage code/test desync). 6 gaps addressed (`.env.example` added, OQ14 test, OQ15 AC, COMMANDS dedup note, OQ16 comment corrected, `remote-control-fork-project.md` added to Files table). |
 
 **Status**: ⏳ In review
 **Approved**: No — requires all scores ≥ 9/10 in the same round
@@ -261,13 +261,29 @@ class TelegramConfig(BaseSettings):
 ```python
 class SecretRedactor:
     @staticmethod
-    def _collect_secrets(settings: Settings) -> list[str]:
-        result = []
+    def _collect_secrets(settings: "Settings") -> list[str]:
+        # Iterate known sub-config attributes directly — Pydantic BaseSettings does not
+        # expose nested model instances via vars() / __dict__ in a consistent way.
+        result: list[str] = []
         for attr in vars(settings).values():
-            if hasattr(attr, "secret_values"):
+            if isinstance(attr, SecretProvider):
                 result.extend(attr.secret_values())
         return [v for v in result if v and len(v) >= 8]
 ```
+
+> ⚠️ **Implementation note**: `vars(settings)` does not enumerate Pydantic sub-model
+> attributes in all Pydantic versions. The safe implementation iterates
+> `settings.__dict__.values()` after `Settings.load()` has been called (which
+> populates all sub-configs as instance attributes). In practice this works because
+> `Settings.__init__` assigns `self.telegram`, `self.slack`, etc. as plain attributes.
+> If a future Pydantic upgrade changes this, the correct fallback is:
+> ```python
+> for field_name in settings.model_fields:
+>     attr = getattr(settings, field_name)
+>     if isinstance(attr, SecretProvider):
+>         result.extend(attr.secret_values())
+> ```
+> The test `test_collect_secrets_via_protocol` will catch any regression here.
 
 Adding a new secret-bearing config field: add it to the sub-config's `secret_values()`
 method — no change to `redact.py` required.
@@ -342,7 +358,7 @@ End-to-end startup flow after refactor:
 
 ```
 main() → Settings.load() → _validate_config()
-       → _load_registries()      # ⚠️ OQ16 — imports all src/ai/*, src/platform/*, src/storage/*; verify hardcoded list, not glob
+       → _load_registries()      # OQ16: uses a hardcoded module list (not glob/scan); see Step 5a
        → services = _build_services(settings)   # Services dataclass
        → storage  = storage_registry.create(settings.storage.backend)
        → audit    = audit_registry.create(...)
@@ -431,12 +447,19 @@ class Registry:
         self._name = name
         self._map: dict[str, Callable] = {}
 
-    def register(self, key: str) -> Callable:
-        """Decorator — register a class or factory function under *key*."""
+    def register(self, key: str, *, force: bool = False) -> Callable:
+        """Decorator — register a class or factory function under *key*.
+
+        Raises ``ValueError`` on duplicate keys unless *force=True* is passed explicitly.
+        ``force=True`` is for intentional overrides in fork compositions; never use it in
+        core modules.
+        """
         def decorator(cls_or_fn: Callable) -> Callable:
-            if key in self._map:
-                # ⚠️ OQ9 — overwrite-on-duplicate allows backend hijacking; raise instead
-                logger.warning("Registry %r: overwriting key %r", self._name, key)
+            if key in self._map and not force:
+                raise ValueError(
+                    f"Registry {self._name!r}: key {key!r} already registered by "
+                    f"{self._map[key]!r}. Use force=True to override intentionally."
+                )
             self._map[key] = cls_or_fn
             return cls_or_fn
         return decorator
@@ -484,7 +507,7 @@ Replace the existing `_collect_secrets` body:
 @staticmethod
 def _collect_secrets(settings: "Settings") -> list[str]:
     result: list[str] = []
-    for attr in vars(settings).values():
+    for attr in settings.__dict__.values():   # see implementation note in Design Space
         if isinstance(attr, SecretProvider):
             result.extend(attr.secret_values())
     return [v for v in result if v and len(v) >= 8]
@@ -511,9 +534,11 @@ class GitHubConfig(BaseSettings):
 class AIConfig(BaseSettings):
     ...
     def secret_values(self) -> list[str]:
+        # codex_api_key is a flat field on AIConfig, not a nested sub-config.
+        # See src/config.py — CodexConfig is not a separate sub-config instance.
         return [v for v in [
             self.ai_api_key,
-            self.codex.codex_api_key,
+            self.codex_api_key,   # flat field, aliased CODEX_API_KEY
         ] if v]
 
 class VoiceConfig(BaseSettings):
@@ -577,13 +602,13 @@ class ShellService:
 @dataclass
 class RepoService:
     """Wraps src/repo.py. A fork can replace this with NullRepoService."""
-    token: str       # ⚠️ OQ10 — raw credential stored as public attribute; consider hiding
+    _token: str       # OQ10 resolved — stored as private field; not in repr(), not in public interface
     repo_name: str
     branch: str
 
     async def clone(self) -> None:
         from src import repo
-        await repo.clone(self.token, self.repo_name, self.branch)
+        await repo.clone(self._token, self.repo_name, self.branch)
 
     async def pull(self) -> str:
         from src import repo
@@ -595,16 +620,15 @@ class RepoService:
 
     async def configure_auth(self) -> None:
         from src import repo
-        await repo.configure_git_auth(self.token)
+        await repo.configure_git_auth(self._token)
 
 
-@dataclass
-class NullRepoService(RepoService):
-    """No-op repo service for forks that manage their own source directory."""
-    token: str = ""     # ⚠️ OQ11 — inherits public token attr; misconfig stores unused credential
-    repo_name: str = ""
-    branch: str = ""
+class NullRepoService:
+    """No-op repo service for forks that manage their own source directory.
 
+    OQ11 resolved — does NOT inherit from RepoService (no token attribute at all).
+    Implements the same interface via duck typing / ABC (see RepoServiceABC below).
+    """
     async def clone(self) -> None: pass
     async def pull(self) -> str: return "ℹ️ No repository configured."
     async def status(self) -> str: return "ℹ️ No repository configured."
@@ -797,15 +821,24 @@ class SQLiteStorage(ConversationStorage): ...
 
 @storage_registry.register("memory")
 class InMemoryStorage(ConversationStorage):
-    """Volatile in-memory storage. For testing and forks without a /data volume."""
-    # ⚠️ OQ12 — no size limit, no TTL; unbounded memory growth in multi-user scenarios
-    def __init__(self, *_): self._store: dict[str, list] = {}
-    async def init(self): pass
-    async def add_exchange(self, chat_id, user_msg, ai_msg):
-        self._store.setdefault(chat_id, []).append((user_msg, ai_msg))
-    async def get_history(self, chat_id, limit=10):
+    """Volatile in-memory storage. For testing and forks without a /data volume.
+
+    ⚠️ Not for production: history is lost on container restart.
+    OQ12 resolved — enforces per-chat entry limit to prevent unbounded growth.
+    """
+    def __init__(self, _db_path: str = "", max_entries_per_chat: int = 200) -> None:
+        self._store: dict[str, list] = {}
+        self._max = max_entries_per_chat
+    async def init(self) -> None: pass
+    async def add_exchange(self, chat_id: str, user_msg: str, ai_msg: str) -> None:
+        bucket = self._store.setdefault(chat_id, [])
+        bucket.append((user_msg, ai_msg))
+        if len(bucket) > self._max:
+            del bucket[: len(bucket) - self._max]
+    async def get_history(self, chat_id: str, limit: int = 10) -> list:
         return self._store.get(chat_id, [])[-limit:]
-    async def clear(self, chat_id): self._store.pop(chat_id, None)
+    async def clear(self, chat_id: str) -> None:
+        self._store.pop(chat_id, None)
 ```
 
 ```python
@@ -872,6 +905,9 @@ register_detector("Cargo.toml", ["cargo", "build"])
 | `tests/integration/test_startup.py` | **Edit** | Update startup test to use registry-based init |
 | `docs/roadmap.md` | **Edit** | Add item 2.16 |
 | `docs/guides/feature-review-process.md` | **Edit** | Add Modularity Checklist to GateCode review criteria |
+| `docs/features/remote-control-fork-project.md` | **Create** | New spec (from `_template.md`); list modular-plugin-architecture as a prerequisite in Prerequisite Questions |
+| `.env.example` | **Edit** | Add commented entries for `STORAGE_BACKEND` and `AUDIT_BACKEND` |
+| `docker-compose.yml.example` | **Edit** | Add commented entries for `STORAGE_BACKEND` and `AUDIT_BACKEND` |
 
 ---
 
@@ -893,7 +929,8 @@ No new runtime or dev dependencies.
 |------|----------------|
 | `test_register_and_create` | `registry.register("k")` → `registry.create("k", ...)` instantiates |
 | `test_create_unknown_key_raises` | `registry.create("unknown")` raises `ValueError` with available keys |
-| `test_overwrite_warns` | Registering same key twice logs a warning |
+| `test_register_duplicate_key_raises` | Registering same key twice raises `ValueError` (OQ9) |
+| `test_register_force_overwrites` | `registry.register("k", force=True)` replaces without error |
 | `test_keys_returns_registered` | `.keys()` reflects all registered names |
 | `test_contains` | `"k" in registry` returns `True` after registration |
 
@@ -903,6 +940,8 @@ No new runtime or dev dependencies.
 |------|----------------|
 | `test_null_repo_service_pull` | `NullRepoService.pull()` returns info string, no git call |
 | `test_null_repo_service_clone` | `NullRepoService.clone()` is a no-op |
+| `test_repo_service_token_private` | `RepoService` has no public `.token` attribute; `repr()` does not contain raw token (OQ10) |
+| `test_null_repo_service_no_token_attr` | `NullRepoService` has no `token` attribute at all — does not inherit from `RepoService` (OQ11) |
 | `test_shell_service_delegates_to_executor` | `ShellService.run()` calls `executor.run_shell` |
 | `test_shell_service_sanitize_ref` | Invalid ref → `None`; valid ref → shell-quoted |
 
@@ -946,27 +985,36 @@ No new runtime or dev dependencies.
 | Test | What it checks |
 |------|----------------|
 | `test_register_duplicate_key_raises` | Registering same key twice raises `ValueError` (OQ9 fix) |
-| `test_registry_not_extensible_after_freeze` | After startup, `registry.register()` raises if freeze-on-boot is implemented |
+| `test_register_force_overwrites_silently` | `register(..., force=True)` replaces without error — intentional fork override path |
 
 ### `tests/unit/test_services.py` security additions (GateSec)
 
 | Test | What it checks |
 |------|----------------|
-| `test_null_repo_service_discards_token` | `NullRepoService(token="secret").token` is empty or inaccessible (OQ11) |
-| `test_repo_service_token_not_in_repr` | `repr(RepoService(...))` does not contain the raw token value (OQ10) |
+| `test_null_repo_service_has_no_token_attr` | `NullRepoService` has no `.token` attribute — does not inherit `RepoService` (OQ11) |
+| `test_repo_service_token_not_public` | `RepoService` has no public `.token` attribute; `repr()` does not expose the credential (OQ10) |
+
+### `tests/unit/test_runtime.py` additions (OQ14)
+
+| Test | What it checks |
+|------|----------------|
+| `test_register_detector_appears_in_detectors` | `register_detector("Cargo.toml", ["cargo","build"])` adds the pair to `_DETECTORS` |
+| `test_register_detector_logged_at_startup` | All registered detectors are logged at `INFO` level during startup for auditability (OQ14 mitigation) |
 
 ### `tests/unit/test_redact.py` security additions (GateSec)
 
 | Test | What it checks |
 |------|----------------|
 | `test_all_sub_configs_implement_secret_provider` | Every `BaseSettings` sub-class in `config.py` satisfies `SecretProvider` protocol (OQ13) |
+| `test_collect_secrets_uses_dict_not_vars` | `_collect_secrets` correctly enumerates sub-configs via `settings.__dict__` (Pydantic compatibility) |
 
 ### `tests/unit/test_storage_memory.py` security additions (GateSec)
 
 | Test | What it checks |
 |------|----------------|
-| `test_memory_storage_respects_max_entries` | `InMemoryStorage` evicts oldest entries when limit reached (OQ12) |
+| `test_memory_storage_respects_max_entries` | After `max_entries_per_chat` exchanges, oldest are evicted |
 | `test_memory_storage_chat_isolation` | `get_history("chat_a")` never returns data from `"chat_b"` |
+| `test_memory_storage_default_max_is_finite` | Default `max_entries_per_chat` is 200 (not unbounded) |
 ### `tests/contract/test_backends_contract.py` — no change
 
 Backend contract tests already run on all registered backends; once backends are registered
@@ -999,6 +1047,25 @@ Every feature that touches a core subsystem must verify:
 ### `README.md`
 
 Add `STORAGE_BACKEND` and `AUDIT_BACKEND` to the environment variables table.
+
+### `.env.example` and `docker-compose.yml.example`
+
+Per the established lean convention (see `docs/features/align-sync`), add commented
+entries only for the two new env vars:
+
+- [ ] `.env.example` — two commented lines:
+```bash
+# Conversation history backend: sqlite (persistent) or memory (testing/forks). (default: sqlite)
+# STORAGE_BACKEND=sqlite
+# Audit log backend: sqlite or null. Effective only when AUDIT_ENABLED=true. (default: sqlite)
+# AUDIT_BACKEND=sqlite
+```
+
+- [ ] `docker-compose.yml.example` — two matching commented lines under the existing env section:
+```yaml
+# STORAGE_BACKEND=sqlite    # history backend (sqlite | memory)
+# AUDIT_BACKEND=sqlite      # audit backend (sqlite | null)
+```
 
 ### `.github/copilot-instructions.md`
 
@@ -1057,6 +1124,12 @@ No env vars renamed or removed. All changes are internal. → **MINOR** bump: `0
    method name (e.g., `"cmd_run"`); each adapter looks up `getattr(self, handler_attr)`.
    If a platform adapter doesn't have the method, `AttributeError` is raised at startup by
    the symmetry-validation step — not silently at dispatch time.
+
+   > **Deduplication**: Each command registers once with `platforms={"telegram", "slack"}`.
+   > Do NOT decorate the same command name in both `bot.py` and `slack.py` — that would
+   > append two `CommandDef` entries. Apply `@register_command` in `bot.py` only (or a
+   > shared `commands/definitions.py`). The Slack adapter looks up the handler by
+   > `handler_attr` name on itself; it does not need to register the command again.
 
 4. **OQ4 — `InMemoryStorage` and `gate restart`** — `gate restart` recreates the AI
    backend but not the storage. `InMemoryStorage` state survives a restart. This is the
@@ -1165,16 +1238,22 @@ No env vars renamed or removed. All changes are internal. → **MINOR** bump: `0
       and the container starts without `ImportError` (provided the deleted subsystem is not
       selected via env var). *(Verified manually.)*
 - [ ] All existing env vars, commands, and default behaviours are preserved.
-- [ ] `Registry.register()` raises on duplicate keys by default (OQ9).
-- [ ] `RepoService.token` is not exposed as a public attribute or in `repr()` (OQ10).
-- [ ] `InMemoryStorage` enforces a per-chat entry limit (OQ12).
+- [ ] `Registry.register()` raises on duplicate keys by default; `force=True` is the intentional-override path (OQ9).
+- [ ] `RepoService._token` is private; no public `.token` attribute; `repr()` does not expose credential (OQ10).
+- [ ] `NullRepoService` does not inherit from `RepoService` — no token attribute (OQ11).
+- [ ] `InMemoryStorage` enforces a per-chat entry limit (default 200) (OQ12).
 - [ ] `_load_registries()` uses a hardcoded module list, not filesystem discovery (OQ16).
 - [ ] All `BaseSettings` sub-classes implement `SecretProvider` (OQ13 — enforced by test).
+- [ ] `_load_registries()` distinguishes "file deleted by fork" (`ImportError` + file absent) from "missing pip dep" (`ImportError` + file present); re-raises the latter with a clear message (OQ15).
+- [ ] `register_detector()` logs all registered detectors at `INFO` level for auditability (OQ14).
 - [ ] `docs/guides/feature-review-process.md` includes the Modularity Checklist.
 - [ ] `.github/copilot-instructions.md` updated with registry and `Services` patterns.
 - [ ] `README.md` updated with `STORAGE_BACKEND` and `AUDIT_BACKEND` env var rows.
 - [ ] `docs/roadmap.md` item 2.16 added.
 - [ ] `VERSION` bumped to `0.19.0` before merge to `main`.
+- [ ] `.env.example` updated with commented entries for `STORAGE_BACKEND` and `AUDIT_BACKEND`.
+- [ ] `docker-compose.yml.example` updated with matching commented entries.
 - [ ] Feature works transparently on both Telegram and Slack — no behaviour change for
       existing users.
-- [ ] `remote-control-fork-project.md` references this milestone as a prerequisite.
+- [ ] `docs/features/remote-control-fork-project.md` created from template and lists
+      this milestone as a prerequisite.
