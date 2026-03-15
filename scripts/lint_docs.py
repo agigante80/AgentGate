@@ -21,6 +21,11 @@ FEATURES_DIR = Path("docs/features")
 ROADMAP_FILE = Path("docs/roadmap.md")
 CONFIG_FILE = Path("src/config.py")
 README_FILE = Path("README.md")
+ENV_EXAMPLE_FILE = Path(".env.example")
+COMPOSE_EXAMPLE_FILE = Path("docker-compose.yml.example")
+
+_PASSTHROUGH_MARKER = "# passthrough:"
+_COMPOSE_VAR_RE = re.compile(r'\b([A-Z][A-Z0-9_]{2,})=')
 TEMPLATE_NAME = "_template.md"
 
 # Nested BaseSettings fields on Settings / AIConfig — not direct env vars.
@@ -96,6 +101,67 @@ def check_config_coverage(readme_text: str) -> tuple[list[str], list[str]]:
     return errors, []
 
 
+def _parse_env_example() -> tuple[set[str], set[str]]:
+    """Return (declared_vars, passthrough_vars) from .env.example.
+
+    Parses both uncommented and commented-out variable lines.  Lines that
+    contain ``# passthrough:`` are added to *passthrough_vars* instead of
+    *declared_vars* so Check 6 never flags them as stale.
+    """
+    declared: set[str] = set()
+    passthroughs: set[str] = set()
+    if not ENV_EXAMPLE_FILE.is_file():
+        return declared, passthroughs
+    for line in ENV_EXAMPLE_FILE.read_text().splitlines():
+        stripped = line.strip().lstrip("#").strip()
+        if "=" not in stripped:
+            continue
+        var = stripped.split("=", 1)[0].strip()
+        # Skip non-env-var tokens (e.g. section headers that happen to contain "=")
+        if not re.match(r'^[A-Z][A-Z0-9_]*$', var):
+            continue
+        if _PASSTHROUGH_MARKER in line:
+            passthroughs.add(var)
+        else:
+            declared.add(var)
+    return declared, passthroughs
+
+
+def check_env_example_coverage(config_vars: set[str]) -> tuple[list[str], list[str]]:
+    """Check 6: .env.example has no stale entries not present in src/config.py."""
+    declared, _passthroughs = _parse_env_example()
+    errors: list[str] = []
+    for var in sorted(declared - config_vars):
+        errors.append(
+            f"[ENV EXAMPLE STALE] {var} is in .env.example but not in src/config.py "
+            "(add '# passthrough: <reason>' if intentional)"
+        )
+    return errors, []
+
+
+def check_compose_coverage(config_vars: set[str]) -> tuple[list[str], list[str]]:
+    """Check 7: docker-compose.yml.example has no stale variable references.
+
+    Parses ``VAR=`` assignments in the compose file and flags any that are
+    unrecognised — i.e. not in *config_vars*, not declared in ``.env.example``,
+    and not marked as a passthrough there.
+    """
+    if not COMPOSE_EXAMPLE_FILE.is_file():
+        return [], []
+    declared, passthroughs = _parse_env_example()
+    all_known = declared | passthroughs | config_vars
+    compose_text = COMPOSE_EXAMPLE_FILE.read_text()
+    errors: list[str] = []
+    for var in sorted({m.group(1) for m in _COMPOSE_VAR_RE.finditer(compose_text)}):
+        if var not in all_known:
+            errors.append(
+                f"[COMPOSE STALE] {var} appears in docker-compose.yml.example "
+                "but is not in src/config.py or .env.example — "
+                "add a '# passthrough: <reason>' marker in .env.example if intentional"
+            )
+    return errors, []
+
+
 def main() -> int:
     errors: list[str] = []
     warnings: list[str] = []
@@ -157,9 +223,18 @@ def main() -> int:
             )
 
     # ── Check 5: every config.py env var is documented in README.md ─────────
+    config_vars = extract_config_env_vars()
     cfg_errors, cfg_warnings = check_config_coverage(readme_text)
     errors.extend(cfg_errors)
     warnings.extend(cfg_warnings)
+
+    # ── Check 6: .env.example has no stale entries ───────────────────────────
+    env_errors, _ = check_env_example_coverage(config_vars)
+    errors.extend(env_errors)
+
+    # ── Check 7: docker-compose.yml.example has no stale var references ──────
+    compose_errors, _ = check_compose_coverage(config_vars)
+    errors.extend(compose_errors)
 
     # ── Report ────────────────────────────────────────────────────────────────
     for w in warnings:

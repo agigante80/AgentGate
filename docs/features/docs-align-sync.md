@@ -21,7 +21,7 @@ Keeps the four key user-facing reference files — `README.md`, `.env.example`, 
 
 | Reviewer | Round | Score | Date | Notes |
 |----------|-------|-------|------|-------|
-| GateCode | 1 | -/10 | - | Pending |
+| GateCode | 1 | 7/10 | 2026-03-15 | Two spec bugs fixed inline: (1) `_parse_env_example()` missing `re.match` guard for non-var tokens; (2) Check 7 direction inverted — must flag stale compose entries, not require all `.env.example` vars in compose. Checks 6+7 implemented in `lint_docs.py`; passthrough markers added to `.env.example`. |
 | GateSec  | 1 | -/10 | - | Pending |
 | GateDocs | 1 | -/10 | - | Pending |
 
@@ -268,6 +268,8 @@ def _parse_env_example() -> tuple[set[str], set[str]]:
         stripped = line.strip().lstrip("#").strip()
         if "=" in stripped:
             var = stripped.split("=", 1)[0].strip()
+            if not re.match(r'^[A-Z][A-Z0-9_]*$', var):
+                continue
             if _PASSTHROUGH_MARKER in line:
                 passthroughs.add(var)
             else:
@@ -294,10 +296,11 @@ def check_env_example_coverage(config_vars: set[str]) -> tuple[list[str], list[s
     return errors, []
 ```
 
-Wire into `main()` after check 5:
+Wire into `main()` after check 5, sharing a single `extract_config_env_vars()` call with checks 6 and 7:
 
 ```python
-env_errors, _ = check_env_example_coverage(extract_config_env_vars())
+config_vars = extract_config_env_vars()
+env_errors, _ = check_env_example_coverage(config_vars)
 errors.extend(env_errors)
 ```
 
@@ -305,31 +308,44 @@ errors.extend(env_errors)
 
 ### Step 5 — Extend `scripts/lint_docs.py` with Check 7
 
-Add `check_compose_coverage()` function:
+Add `check_compose_coverage()` function. Note the direction: Check 7 detects *stale* variable assignments in `docker-compose.yml.example` — variables that appear as `VAR=value` in the compose file but are no longer in `src/config.py` or `.env.example`. This is intentionally *not* a coverage check (not every `.env.example` var needs to appear in the compose file — the compose example is essentials-only).
 
 ```python
 COMPOSE_EXAMPLE_FILE = Path("docker-compose.yml.example")
+_COMPOSE_VAR_RE = re.compile(r'\b([A-Z][A-Z0-9_]{2,})=')
 
-def check_compose_coverage() -> tuple[list[str], list[str]]:
-    """Check 7: docker-compose.yml.example references all vars in .env.example.
+def check_compose_coverage(config_vars: set[str]) -> tuple[list[str], list[str]]:
+    """Check 7: docker-compose.yml.example has no stale variable references.
 
-    Compose mirrors .env.example (curated important vars), not src/config.py.
+    Parses ``VAR=`` assignments in the compose file and flags any that are
+    unrecognised — not in config_vars, not declared in .env.example, and not
+    marked as a passthrough there.
     """
     if not COMPOSE_EXAMPLE_FILE.is_file():
         return [], []
-    declared, _ = _parse_env_example()
+    declared, passthroughs = _parse_env_example()
+    all_known = declared | passthroughs | config_vars
     compose_text = COMPOSE_EXAMPLE_FILE.read_text()
     errors: list[str] = []
-    for var in sorted(declared):
-        if var not in compose_text:
+    for var in sorted({m.group(1) for m in _COMPOSE_VAR_RE.finditer(compose_text)}):
+        if var not in all_known:
             errors.append(
-                f"[COMPOSE DRIFT] {var} is in .env.example but not referenced in "
-                "docker-compose.yml.example"
+                f"[COMPOSE STALE] {var} appears in docker-compose.yml.example "
+                "but is not in src/config.py or .env.example — "
+                "add a '# passthrough: <reason>' marker in .env.example if intentional"
             )
     return errors, []
 ```
 
-Wire into `main()` after check 6.
+Wire into `main()` after check 6, sharing the `config_vars` already extracted:
+
+```python
+config_vars = extract_config_env_vars()
+env_errors, _ = check_env_example_coverage(config_vars)
+errors.extend(env_errors)
+compose_errors, _ = check_compose_coverage(config_vars)
+errors.extend(compose_errors)
+```
 
 ---
 
