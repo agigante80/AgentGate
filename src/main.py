@@ -167,6 +167,12 @@ async def startup(settings: Settings) -> None:
     audit_backend = "null" if not audit_enabled else getattr(settings.storage, "audit_backend", "sqlite")
     audit = audit_registry.create(audit_backend, AUDIT_DB_PATH)
     await audit.init()
+    if not await audit.verify():
+        logger.error(
+            "Audit log verification FAILED — audit records may not be "
+            "persisting.  Check file permissions and disk space at %s",
+            AUDIT_DB_PATH,
+        )
     if audit_enabled:
         logger.info("Audit log enabled at %s", AUDIT_DB_PATH)
     else:
