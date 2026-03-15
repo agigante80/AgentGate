@@ -1,6 +1,6 @@
 # Docs Align-Sync (`docs align-sync`)
 
-> Status: **Approved** | Priority: High | Last reviewed: 2026-03-15
+> Status: **Implemented** | Priority: High | Last reviewed: 2026-03-15
 
 Keeps the four key user-facing reference files — `README.md`, `.env.example`, `docker-compose.yml.example`, and `scripts/lint_docs.py` — in sync with the actual source-of-truth (`src/config.py` and `docs/roadmap.md`).
 

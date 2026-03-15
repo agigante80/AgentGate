@@ -1,6 +1,6 @@
 # Request Cancellation (`gate cancel`)
 
-> Status: **Approved** | Priority: High | Last reviewed: 2026-03-15
+> Status: **Implemented** | Priority: High | Last reviewed: 2026-03-15
 
 Allow users to cancel an in-progress AI request from Telegram or Slack without waiting for it
 to finish or restarting the container. A `gate cancel` text command and an optional Slack

@@ -1,6 +1,6 @@
 # AgentGate — Roadmap
 
-> Last updated: 2026-03-15 (roadmap-sync: removed 2 implemented features, reprioritised)
+> Last updated: 2026-03-15 (roadmap-sync: removed 2 implemented features — docs-align-sync, request-cancellation)
 
 A lean, prioritized list of work for AgentGate. Each item is a short name, one-line description, and a link to a feature document under `docs/features/`.
 
@@ -34,8 +34,6 @@ If adding a new item, create a feature document using `docs/features/_template.m
 | 2.12 | Voice transcription — Google Speech-to-Text provider | [→ features/whisper-google.md](features/whisper-google.md) |
 | 2.13 | Lightweight web dashboard — read-only HTTP status page in the container | [→ features/web-dashboard.md](features/web-dashboard.md) |
 | 2.14 | Prometheus metrics endpoint — expose request/error/latency metrics via `/metrics` | [→ features/metrics-endpoint.md](features/metrics-endpoint.md) |
-| 2.15 | Docs align-sync — README de-dup, .env.example & docker-compose coverage lint | [→ features/docs-align-sync.md](features/docs-align-sync.md) |
-| 2.16 | Request cancellation — `gate cancel` stops an in-progress AI request per chat/channel | [→ features/request-cancellation.md](features/request-cancellation.md) |
 
 ---
 
