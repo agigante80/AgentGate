@@ -1,6 +1,6 @@
 # Request Cancellation (`gate cancel`)
 
-> Status: **Planned** | Priority: High | Last reviewed: 2026-03-15
+> Status: **Approved** | Priority: High | Last reviewed: 2026-03-15
 
 Allow users to cancel an in-progress AI request from Telegram or Slack without waiting for it
 to finish or restarting the container. A `gate cancel` text command and an optional Slack
@@ -21,9 +21,10 @@ Block Kit "Cancel" button interrupt the running pipeline cleanly and notify the 
 | GateDocs | 1 | 9/10 | 2026-03-15 | Applied 4 inline fixes (test files table, AC slash-command wording, redundant contract test, modularity-debt note); doc is implementation-ready from docs perspective |
 | GateCode | 3 | 9/10 | 2026-03-15 | All 5 Round 1 Blocking Gaps resolved — see GateCode R3 below |
 | GateSec  | 2 | 9/10 | 2026-03-15 | All 5 R1 findings resolved — race guard, clear_history stance, audit gap tracked, timeout risk accepted, re-entrance contract documented |
-| GateDocs | 2 | -/10 | - | Pending |
+| GateDocs | 2 | 9/10 | 2026-03-15 | Applied 2 inline improvements (adapter.py AC, Step 4a cfg shorthand); doc is implementation-ready |
 
-**Status**: ⏳ Round 2 in progress — GateCode R3 9/10 (all 5 Round 1 Blocking Gaps resolved); GateSec R2 and GateDocs R2 pending
+**Status**: ✅ Approved — round 2, all scores ≥ 9
+**Approved**: Yes — ready to implement
 
 ### Round 1 Blocking Gaps (for Round 2 addressal)
 
@@ -914,6 +915,7 @@ coroutine. The `_stream_to_telegram` / `_stream_to_slack` functions themselves d
 
 ```python
 # Streaming branch (replaces the bare `await _stream_to_telegram(...)` call)
+cfg = self._settings.bot  # convenience alias — matches existing code style
 
 # In-flight guard (same as non-streaming path):
 if chat_id in self._active_tasks and not self._active_tasks[chat_id].done():
@@ -1205,4 +1207,5 @@ Run `pytest tests/ --cov=src --cov-report=term-missing`. Target: all branches of
 - [ ] Feature works with all backends (`copilot`, `codex`, `api`).
 - [ ] Edge cases 1–9 above are resolved and either handled in code or documented as accepted trade-offs.
 - [ ] Follow-up issue created: "Thread user_id through _dispatch() for full audit attribution on Slack text commands."
+- [ ] `AICLIBackend.close()` docstring in `src/ai/adapter.py` updated with re-entrance contract (safe to call after cancel, backend remains usable).
 - [ ] PR is merged to `develop` first; CI is green; then merged to `main`.
