@@ -960,3 +960,74 @@ class TestDeliverSlack:
             await bot._deliver_slack(client, "C1", "T100", text, None)
         except Exception:
             pytest.fail("_deliver_slack should not propagate API errors")
+
+
+# ── Issue #18: user_id attribution in _dispatch ───────────────────────────────
+
+class TestDispatchUserIdAttribution:
+    """Regression tests: _dispatch must forward user_id to handlers for full audit attribution."""
+
+    def _make_audit_bot(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from src.audit import AuditLog
+
+        audit = MagicMock(spec=AuditLog)
+        audit.record = AsyncMock()
+
+        with patch("slack_bolt.async_app.AsyncApp"):
+            from src.platform.slack import SlackBot
+            bot = SlackBot(
+                _make_settings(), _make_backend(), _make_storage(),
+                start_time=0.0, audit=audit,
+            )
+        return bot, audit
+
+    async def test_cancel_text_command_audit_has_user_id(self):
+        """gate cancel text command must record the actual user_id, not None."""
+        bot, audit = self._make_audit_bot()
+        event = _make_event(text="dev cancel", user="U42")
+        await bot._on_message(event, _make_say(), _make_client())
+        audit.record.assert_awaited()
+        call_kwargs = audit.record.call_args_list[-1][1]
+        assert call_kwargs.get("user_id") == "U42", (
+            f"Expected user_id='U42', got {call_kwargs.get('user_id')!r}"
+        )
+
+    async def test_clear_text_command_audit_has_user_id(self):
+        """gate clear text command must record the actual user_id."""
+        bot, audit = self._make_audit_bot()
+        event = _make_event(text="dev clear", user="U55")
+        await bot._on_message(event, _make_say(), _make_client())
+        audit.record.assert_awaited()
+        call_kwargs = audit.record.call_args_list[-1][1]
+        assert call_kwargs.get("user_id") == "U55"
+
+    async def test_init_text_command_audit_has_user_id(self):
+        """gate init text command must record the actual user_id."""
+        bot, audit = self._make_audit_bot()
+        say = _make_say()
+        client = _make_client()
+        # Patch _run_ai_pipeline to avoid full pipeline execution
+        bot._run_ai_pipeline = AsyncMock()
+        await bot._dispatch("init", [], say, client, "C1", user_id="U77")
+        audit.record.assert_awaited()
+        init_call = next(
+            (c for c in audit.record.call_args_list if c[1].get("action") == "command"),
+            None,
+        )
+        assert init_call is not None
+        assert init_call[1].get("user_id") == "U77"
+
+    async def test_dispatch_passes_user_id_kwarg(self):
+        """_dispatch must forward user_id keyword arg to the handler."""
+        bot, _ = self._make_audit_bot()
+        called_with = {}
+
+        async def fake_handler(args, say, client, channel, *, thread_ts=None, user_id=None):
+            called_with["user_id"] = user_id
+
+        bot._cmd_sync = fake_handler
+        say = _make_say()
+        client = _make_client()
+        await bot._dispatch("sync", [], say, client, "C1", user_id="U99")
+        assert called_with.get("user_id") == "U99"

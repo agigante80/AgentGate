@@ -645,7 +645,7 @@ class SlackBot:
                 # Same routing as human messages: only known utility commands go to
                 # _dispatch; anything else is an AI-addressed delegation → AI pipeline
                 if sub in _KNOWN_SUBS or not sub:
-                    await self._dispatch(sub, args, say, client, channel, thread_ts=thread_ts)
+                    await self._dispatch(sub, args, say, client, channel, thread_ts=thread_ts, user_id=user or bot_id)
                 else:
                     await self._run_ai_pipeline(
                         say, client, text[len(p):].strip(), channel, thread_ts=thread_ts, user_id=user or bot_id
@@ -681,7 +681,7 @@ class SlackBot:
                 sub_b = parts_b[1].lower() if len(parts_b) > 1 else ""
                 args_b = parts_b[2].split() if len(parts_b) > 2 else []
                 if sub_b in _KNOWN_SUBS or not sub_b:
-                    await self._dispatch(sub_b, args_b, say, client, channel, thread_ts=thread_ts)
+                    await self._dispatch(sub_b, args_b, say, client, channel, thread_ts=thread_ts, user_id=user)
                 else:
                     await self._run_ai_pipeline(
                         say, client, broadcast_text[len(p):].strip(), channel, thread_ts=thread_ts, user_id=user
@@ -710,7 +710,7 @@ class SlackBot:
             args = args_str.split() if args_str else []
             # Route known utility commands to dispatcher; everything else goes to AI
             if sub in _KNOWN_SUBS or not sub:
-                await self._dispatch(sub, args, say, client, channel, thread_ts=thread_ts)
+                await self._dispatch(sub, args, say, client, channel, thread_ts=thread_ts, user_id=user)
             else:
                 # Prefix was used as an addressing token — forward remainder to AI
                 await self._run_ai_pipeline(
@@ -730,6 +730,7 @@ class SlackBot:
         channel: str,
         *,
         thread_ts: str | None = None,
+        user_id: str | None = None,
     ) -> None:
         table = {
             "run": self._cmd_run,
@@ -750,14 +751,14 @@ class SlackBot:
         if handler is None:
             if sub:
                 await self._reply(client, channel, f"❓ Unknown command: `{sub}`", thread_ts)
-            await self._cmd_help([], say, client, channel, thread_ts=thread_ts)
+            await self._cmd_help([], say, client, channel, thread_ts=thread_ts, user_id=user_id)
             return
-        await handler(args, say, client, channel, thread_ts=thread_ts)
+        await handler(args, say, client, channel, thread_ts=thread_ts, user_id=user_id)
 
     # ── Utility commands ──────────────────────────────────────────────────
 
     async def _cmd_run(
-        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None
+        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None, user_id: str | None = None
     ) -> None:
         cmd = " ".join(args)
         if not cmd:
@@ -800,7 +801,7 @@ class SlackBot:
             )
             self._pending_cmds[(channel, resp["ts"])] = cmd
             await self._audit.record(
-                platform="slack", chat_id=channel,
+                platform="slack", chat_id=channel, user_id=user_id,
                 action="shell_exec",
                 detail={"cmd": self._redactor.redact(cmd), "destructive": True, "awaiting_confirm": True},
             )
@@ -812,27 +813,27 @@ class SlackBot:
             )
             await self._reply(client, channel, f"```\n{result}\n```", thread_ts)
             await self._audit.record(
-                platform="slack", chat_id=channel,
+                platform="slack", chat_id=channel, user_id=user_id,
                 action="shell_exec",
                 detail={"cmd": self._redactor.redact(cmd), "destructive": False},
                 duration_ms=_ms_since(t0),
             )
 
     async def _cmd_sync(
-        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None
+        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None, user_id: str | None = None
     ) -> None:
         await self._reply(client, channel, "⏳ Pulling latest changes…", thread_ts)
         result = await repo.pull()
         await self._reply(client, channel, f"✅ Synced\n{result}", thread_ts)
 
     async def _cmd_git(
-        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None
+        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None, user_id: str | None = None
     ) -> None:
         result = await repo.status()
         await self._reply(client, channel, f"```\n{result}\n```", thread_ts)
 
     async def _cmd_diff(
-        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None
+        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None, user_id: str | None = None
     ) -> None:
         arg = args[0] if args else ""
         if not arg:
@@ -853,7 +854,7 @@ class SlackBot:
         await self._reply(client, channel, f"```\n{result or '(no changes)'}\n```", thread_ts)
 
     async def _cmd_log(
-        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None
+        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None, user_id: str | None = None
     ) -> None:
         try:
             n = int(args[0]) if args else 20
@@ -877,7 +878,7 @@ class SlackBot:
         await self._reply(client, channel, f"```\n{result}\n```", thread_ts)
 
     async def _cmd_status(
-        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None
+        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None, user_id: str | None = None
     ) -> None:
         if self._active_ai:
             lines = ["🔄 AI is currently processing:\n"]
@@ -889,7 +890,7 @@ class SlackBot:
             await self._reply(client, channel, "✅ AI is idle — ready for your next message.", thread_ts)
 
     async def _cmd_confirm(
-        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None
+        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None, user_id: str | None = None
     ) -> None:
         arg = (args[0].lower() if args else "").strip()
         if arg == "off":
@@ -919,19 +920,19 @@ class SlackBot:
             await self._reply(client, channel, f"Confirmation prompts: *{state}* ({source}){skipped}", thread_ts)
 
     async def _cmd_clear(
-        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None
+        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None, user_id: str | None = None
     ) -> None:
         if self._settings.bot.history_enabled:
             await self._history.clear(channel)
         self._backend.clear_history()
         await self._reply(client, channel, "🗑 Conversation history cleared.", thread_ts)
         await self._audit.record(
-            platform="slack", chat_id=channel,
+            platform="slack", chat_id=channel, user_id=user_id,
             action="command", detail={"sub": "clear"},
         )
 
     async def _cmd_init(
-        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None
+        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None, user_id: str | None = None
     ) -> None:
         """Clear history and forward `/init` to the AI with no prior context.
 
@@ -943,13 +944,13 @@ class SlackBot:
             await self._history.clear(channel)
         self._backend.clear_history()
         await self._audit.record(
-            platform="slack", chat_id=channel,
+            platform="slack", chat_id=channel, user_id=user_id,
             action="command", detail={"sub": "init"},
         )
         await self._run_ai_pipeline(say, client, "/init", channel, thread_ts=thread_ts)
 
     async def _cmd_restart(
-        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None
+        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None, user_id: str | None = None
     ) -> None:
         await self._reply(client, channel, "🔄 Restarting AI backend…", thread_ts)
         try:
@@ -957,20 +958,20 @@ class SlackBot:
             self._backend = ai_factory.create_backend(self._settings.ai)
             await self._reply(client, channel, f"✅ AI backend restarted ({self._settings.ai.ai_cli})", thread_ts)
             await self._audit.record(
-                platform="slack", chat_id=channel,
+                platform="slack", chat_id=channel, user_id=user_id,
                 action="command", detail={"sub": "restart"},
             )
         except Exception as exc:
             logger.exception("Backend restart failed")
             await self._reply(client, channel, f"⚠️ Restart failed: {exc}", thread_ts)
             await self._audit.record(
-                platform="slack", chat_id=channel,
+                platform="slack", chat_id=channel, user_id=user_id,
                 action="command", status="error",
                 detail={"sub": "restart", "error": str(exc)},
             )
 
     async def _cmd_help(
-        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None
+        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None, user_id: str | None = None
     ) -> None:
         p = self._p
         text = (
@@ -997,7 +998,7 @@ class SlackBot:
         await self._reply(client, channel, text, thread_ts)
 
     async def _cmd_info(
-        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None
+        self, args: list[str], say, client, channel: str, *, thread_ts: str | None = None, user_id: str | None = None
     ) -> None:
         uptime_s = int(time.time() - self._start_time)
         h, remainder = divmod(uptime_s, 3600)
@@ -1085,22 +1086,14 @@ class SlackBot:
 
     async def _handle_cancel(
         self, args: list[str], say, client, channel: str,
-        *, thread_ts: str | None = None,
+        *, thread_ts: str | None = None, user_id: str | None = None,
     ) -> None:
-        """Handle `gate cancel` text command — cancel the in-progress AI request for this channel.
-
-        Note: user_id is not available in the _dispatch calling convention
-        (slack.py: await handler(args, say, client, channel, thread_ts=thread_ts)).
-        Audit is recorded with user_id=None for text-command cancels; Block Kit button
-        cancels (_on_cancel_ai) have user_id available via body["user"]["id"].
-        GateSec R1 Finding 3: this creates a non-attributable audit record for a
-        security-relevant action. Follow-up: thread user_id through _dispatch().
-        """
+        """Handle `gate cancel` text command — cancel the in-progress AI request for this channel."""
         cancelled = await self._cancel_active_task(channel)
         msg = "⚠️ Request cancelled." if cancelled else "ℹ️ No request in progress."
         await self._reply(client, channel, msg, thread_ts)
         await self._audit.record(
-            platform="slack", chat_id=channel, user_id=None,
+            platform="slack", chat_id=channel, user_id=user_id,
             action="cancel", status="cancelled" if cancelled else "no_op",
         )
 
