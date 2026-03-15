@@ -111,6 +111,43 @@ This is picked up by the `@GateCode` developer agent if `TRUSTED_AGENT_BOT_IDS` 
 5. **Verify examples** — every command, every env var, every docker-compose snippet
 6. **End with next steps** — link to related docs or the implementation ticket
 
+## Named Commands
+
+### `docs roadmap-sync`
+
+Synchronises `docs/features/` and `docs/roadmap.md` so both reflect the same ground truth.
+
+**Steps (in order):**
+
+1. **Scan `docs/features/`** — for each spec (excluding `_template.md`):
+   - Inspect the corresponding source code in `src/` to determine if the feature is fully implemented.
+   - If *fully implemented*: delete the feature doc file and note it for roadmap removal.
+   - If *not in `docs/roadmap.md`*: add a new roadmap entry (do not create a duplicate).
+
+2. **Scan `docs/roadmap.md`** — for each entry:
+   - If *fully implemented* (confirmed in step 1 or via direct code inspection): remove the row.
+   - If *no corresponding file in `docs/features/`*: create the missing spec from `docs/features/_template.md`.
+
+3. **Re-prioritise** `docs/roadmap.md` if the ordering no longer reflects current project priorities — approved/foundational features first, nice-to-haves last. Briefly document any re-ordering rationale in the commit message.
+
+4. **Commit** all changes (deletions, additions, roadmap edits) in a single commit on `develop` with message:
+   ```
+   docs(roadmap): roadmap-sync — remove N implemented, add M missing specs, reprioritise
+   ```
+
+**Decision rules:**
+- "Fully implemented" = the feature's core behaviour exists in `src/` and works end-to-end. Partial implementations (stubs, `NotImplementedError`, config-only) do *not* qualify.
+- When in doubt about implementation status, check `src/` directly — do not rely solely on the feature doc status field.
+- Never delete a feature doc that is "Approved" but not yet implemented; only delete if the code is live.
+
+---
+
+### `docs align-sync`
+
+*(To be defined — placeholder for cross-checking feature specs against actual `src/config.py` env vars and file references.)*
+
+---
+
 ## Communication Style
 
 - **Lead with the outcome**: "After following this guide, you will have three Slack agents running in one workspace"

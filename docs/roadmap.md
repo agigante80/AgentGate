@@ -1,6 +1,6 @@
 # AgentGate — Roadmap
 
-> Last updated: 2026-03-15
+> Last updated: 2026-03-15 (roadmap-sync: removed 2 implemented features, reprioritised)
 
 A lean, prioritized list of work for AgentGate. Each item is a short name, one-line description, and a link to a feature document under `docs/features/`.
 
@@ -19,22 +19,20 @@ If adding a new item, create a feature document using `docs/features/_template.m
 
 | # | Item | Detail |
 |---|------|--------|
-| 2.1 | Long response delivery — chunk/stream long AI replies on Telegram and Slack | [→ features/long-response-delivery.md](features/long-response-delivery.md) |
-| 2.2 | Improved security scanning — Trivy noise reduction, CodeQL SAST, pip-audit dependency scan | [→ features/improved-security-scanning.md](features/improved-security-scanning.md) |
-| 2.3 | Broadcast bare command — fix `@here sync` routing to `_dispatch` instead of AI pipeline | [→ features/broadcast-bare-command.md](features/broadcast-bare-command.md) |
-| 2.4 | `/gate schedule` — recurring shell commands or AI prompts | [→ features/schedule.md](features/schedule.md) |
-| 2.5 | Gemini CLI backend — `AI_CLI=gemini` (Google Gemini CLI) | [→ features/gemini-cli-backend.md](features/gemini-cli-backend.md) |
-| 2.6 | `/gate switch` — hot-swap the AI backend at runtime | [→ features/switch-backend.md](features/switch-backend.md) |
-| 2.7 | `/gate file` — send/receive files to/from `/repo` via chat | [→ features/file-transfer.md](features/file-transfer.md) |
+| 2.1 | Improved security scanning — complete Trivy + add CodeQL SAST and pip-audit dependency scan | [→ features/improved-security-scanning.md](features/improved-security-scanning.md) |
+| 2.2 | Modular plugin architecture — registry-based subsystems for fork cherry-picking (pre-work for forks) | [→ features/modular-plugin-architecture.md](features/modular-plugin-architecture.md) |
+| 2.3 | Copilot session pre-warming — reduce repeated context setup overhead | [→ features/copilot-prewarm.md](features/copilot-prewarm.md) |
+| 2.4 | Token/cost tracking — capture OpenAI usage payloads, surface spend via `/gate status` | [→ features/token-cost-tracking.md](features/token-cost-tracking.md) |
+| 2.5 | `/gate schedule` — recurring shell commands or AI prompts | [→ features/schedule.md](features/schedule.md) |
+| 2.6 | Gemini CLI backend — `AI_CLI=gemini` (Google Gemini CLI) | [→ features/gemini-cli-backend.md](features/gemini-cli-backend.md) |
+| 2.7 | `/gate switch` — hot-swap the AI backend at runtime | [→ features/switch-backend.md](features/switch-backend.md) |
 | 2.8 | Proactive alerts — notify chat on file changes or log keyword matches | [→ features/proactive-alerts.md](features/proactive-alerts.md) |
-| 2.9 | Copilot session pre-warming — reduce repeated context setup overhead | [→ features/copilot-prewarm.md](features/copilot-prewarm.md) |
-| 2.10 | Token/cost tracking — capture OpenAI usage payloads, surface spend via `/gate status` | [→ features/token-cost-tracking.md](features/token-cost-tracking.md) |
+| 2.9 | Multi-provider git hosting — GitLab, Bitbucket, Azure DevOps (`REPO_PROVIDER`) | [→ features/multi-provider-git-hosting.md](features/multi-provider-git-hosting.md) |
+| 2.10 | `/gate file` — send/receive files to/from `/repo` via chat | [→ features/file-transfer.md](features/file-transfer.md) |
 | 2.11 | Voice transcription — local Whisper provider | [→ features/whisper-local.md](features/whisper-local.md) |
 | 2.12 | Voice transcription — Google Speech-to-Text provider | [→ features/whisper-google.md](features/whisper-google.md) |
 | 2.13 | Lightweight web dashboard — read-only HTTP status page in the container | [→ features/web-dashboard.md](features/web-dashboard.md) |
 | 2.14 | Prometheus metrics endpoint — expose request/error/latency metrics via `/metrics` | [→ features/metrics-endpoint.md](features/metrics-endpoint.md) |
-| 2.15 | Multi-provider git hosting — GitLab, Bitbucket, Azure DevOps (`REPO_PROVIDER`) | [→ features/multi-provider-git-hosting.md](features/multi-provider-git-hosting.md) |
-| 2.16 | Modular plugin architecture — registry-based subsystems for fork cherry-picking (pre-work for forks) | [→ features/modular-plugin-architecture.md](features/modular-plugin-architecture.md) |
 
 ---
 
