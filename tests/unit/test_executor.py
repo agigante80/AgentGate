@@ -1,8 +1,9 @@
 """Unit tests for executor.py — is_destructive, truncate_output, summarize_if_long."""
+import os
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.executor import is_destructive, truncate_output, summarize_if_long, run_shell, sanitize_git_ref
+from src.executor import is_destructive, truncate_output, summarize_if_long, run_shell, sanitize_git_ref, scrubbed_env, _SECRET_ENV_KEYS
 
 
 class TestSanitizeGitRef:
@@ -149,3 +150,45 @@ class TestRunShell:
             result = await run_shell("cmd", 100)
         assert "⚠️ Output truncated" in result
         assert len(result) <= 300  # header + a few kept lines
+
+
+class TestScrubbedEnv:
+    """scrubbed_env() must strip all known secret env vars and pass everything else through."""
+
+    def test_strips_all_secret_keys(self):
+        fake_secrets = {k: "s3cr3t" for k in _SECRET_ENV_KEYS}
+        with patch.dict(os.environ, fake_secrets, clear=False):
+            result = scrubbed_env()
+        for key in _SECRET_ENV_KEYS:
+            assert key not in result, f"{key} should have been stripped"
+
+    def test_preserves_non_secret_vars(self):
+        with patch.dict(os.environ, {"NODE_PATH": "/usr/lib/node", "HOME": "/root"}, clear=False):
+            result = scrubbed_env()
+        assert result.get("NODE_PATH") == "/usr/lib/node"
+        assert "HOME" in result
+
+    def test_returns_dict_copy(self):
+        result = scrubbed_env()
+        result["MUTATED"] = "yes"
+        assert os.environ.get("MUTATED") is None
+
+    def test_run_shell_passes_scrubbed_env(self):
+        """run_shell must pass env= to create_subprocess_shell so secrets cannot leak."""
+        mock_proc = AsyncMock()
+        mock_proc.returncode = 0
+        mock_proc.communicate = AsyncMock(return_value=(b"ok\n", b""))
+
+        captured_kwargs: dict = {}
+
+        async def _fake_shell(cmd, **kwargs):
+            captured_kwargs.update(kwargs)
+            return mock_proc
+
+        import asyncio
+        with patch("asyncio.create_subprocess_shell", side_effect=_fake_shell):
+            asyncio.get_event_loop().run_until_complete(run_shell("echo ok", 3000))
+
+        assert "env" in captured_kwargs, "run_shell must pass env= to create_subprocess_shell"
+        for key in _SECRET_ENV_KEYS:
+            assert key not in captured_kwargs["env"], f"{key} must not be forwarded by run_shell"

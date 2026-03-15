@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import re
 import shlex
 
@@ -9,6 +10,31 @@ from src.config import REPO_DIR
 logger = logging.getLogger(__name__)
 
 _DESTRUCTIVE_KEYWORDS = ("push", "merge", "rm ", "remove", "force", " -f ", "--force", "drop", "delete")
+
+# AgentGate secret env vars that must never be forwarded to user-initiated subprocesses.
+# Uses a denylist so CLI tools receive all env they need (NODE_PATH, XDG_*, SSL_CERT_*, proxy
+# vars, etc.) while credentials are stripped. AI backends that need a key re-inject it explicitly.
+_SECRET_ENV_KEYS: frozenset[str] = frozenset({
+    "TG_BOT_TOKEN",
+    "SLACK_BOT_TOKEN",
+    "SLACK_APP_TOKEN",
+    "GITHUB_REPO_TOKEN",
+    "AI_API_KEY",
+    "CODEX_API_KEY",
+    "WHISPER_API_KEY",
+    "OPENAI_API_KEY",
+})
+
+
+def scrubbed_env() -> dict[str, str]:
+    """Return a copy of ``os.environ`` with all AgentGate secret vars removed.
+
+    Use this as the ``env=`` argument for every subprocess spawned by AgentGate
+    so that tokens cannot be read by user-supplied commands or third-party CLIs.
+    Backends that require a specific key (e.g. ``OPENAI_API_KEY`` for Codex) must
+    re-inject it explicitly after calling this function.
+    """
+    return {k: v for k, v in os.environ.items() if k not in _SECRET_ENV_KEYS}
 
 _SAFE_GIT_REF = re.compile(r"^[a-zA-Z0-9._\-/~^]+$")
 
@@ -52,6 +78,7 @@ async def run_shell(cmd: str, max_chars: int, redactor=None) -> str:
     proc = await asyncio.create_subprocess_shell(
         cmd,
         cwd=str(REPO_DIR),
+        env=scrubbed_env(),
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
     )

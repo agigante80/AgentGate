@@ -5,6 +5,7 @@ from collections.abc import AsyncGenerator
 
 from src.ai.adapter import AICLIBackend, SubprocessMixin
 from src.config import REPO_DIR  # noqa: F401 — test seam for monkeypatching
+from src.executor import scrubbed_env
 from src.registry import backend_registry
 
 logger = logging.getLogger(__name__)
@@ -20,8 +21,7 @@ class CodexBackend(SubprocessMixin, AICLIBackend):
         self._opts = opts
 
     def _make_cmd(self, prompt: str) -> tuple[list[str], dict]:
-        import os
-        env = {**os.environ, "OPENAI_API_KEY": self._api_key}
+        env = {**scrubbed_env(), "OPENAI_API_KEY": self._api_key}
         # Empty opts → full-auto default; non-empty → verbatim (replaces defaults)
         extra = shlex.split(self._opts) if self._opts else ["--approval-mode", "full-auto"]
         cmd = ["codex", prompt] + extra + ["--model", self._model]

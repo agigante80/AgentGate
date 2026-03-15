@@ -4,6 +4,7 @@ import os
 from src.ai.adapter import AICLIBackend
 from src.ai.session import CopilotSession
 from src.config import REPO_DIR
+from src.executor import scrubbed_env
 from src.registry import backend_registry
 
 logger = logging.getLogger(__name__)
@@ -15,7 +16,7 @@ class CopilotBackend(AICLIBackend):
     def __init__(self, model: str = "", opts: str = "", skills_dirs: str = "") -> None:
         self._model = model
         self._opts = opts
-        self._env = {**os.environ}
+        self._env = scrubbed_env()
         if model:
             self._env["COPILOT_MODEL"] = model
         if skills_dirs:

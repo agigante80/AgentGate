@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 
 from src.config import REPO_DIR
+from src.executor import scrubbed_env
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,7 @@ async def install_deps() -> str:
         logger.info("Detected %s → running %s", marker, " ".join(cmd))
         proc = await asyncio.create_subprocess_exec(
             *cmd, cwd=str(REPO_DIR),
+            env=scrubbed_env(),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
