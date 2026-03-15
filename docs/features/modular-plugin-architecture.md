@@ -19,7 +19,7 @@ begins implementation.
 
 | Reviewer | Round | Score | Date       | Notes |
 |----------|-------|-------|------------|-------|
-| GateCode | 1     | -/10  | -          | Pending |
+| GateCode | 1     | 7/10  | 2026-03-15 | 4 implementation bugs fixed: (1) `force=True` was silent — added `logger.warning()` on overwrite; (2) `_token` dataclass field breaks `__init__` kwarg and falsely claimed "not in repr()" — changed to `token: str = field(repr=False)`; (3) `AIConfig.secret_values()` used `self.codex_api_key` (flat, non-existent) — fixed to `self.codex.codex_api_key` (nested); (4) `_collect_secrets` used `__dict__`/`vars()` — changed to Pydantic v2 idiomatic `model_fields` iteration. OQ3 clarified: `commands/registry.py` defines the decorator; `bot.py` applies it — "shared definitions.py" option removed (circular import). |
 | GateSec  | 1     | 6/10  | 2026-03-15 (9130578) | 8 OQs added (OQ9–OQ16): registry hijack, token exposure, InMemoryStorage bounds, SecretProvider gap, ImportError swallowing, detector injection, discovery mechanism. See inline `⚠️` annotations. |
 | GateDocs | 1     | 6/10  | 2026-03-15 | 5 blockers fixed (OQ9 code/test mismatch, OQ10/11 code/criteria mismatch, `vars(settings)` Pydantic incompatibility, `AIConfig.codex` wrong reference, InMemoryStorage code/test desync). 6 gaps addressed (`.env.example` added, OQ14 test, OQ15 AC, COMMANDS dedup note, OQ16 comment corrected, `remote-control-fork-project.md` added to Files table). |
 
@@ -262,27 +262,21 @@ class TelegramConfig(BaseSettings):
 class SecretRedactor:
     @staticmethod
     def _collect_secrets(settings: "Settings") -> list[str]:
-        # Iterate known sub-config attributes directly — Pydantic BaseSettings does not
-        # expose nested model instances via vars() / __dict__ in a consistent way.
+        # Use Pydantic v2's model_fields — the idiomatic, version-stable way to
+        # enumerate declared fields without picking up Pydantic internals.
         result: list[str] = []
-        for attr in vars(settings).values():
+        for field_name in settings.model_fields:
+            attr = getattr(settings, field_name)
             if isinstance(attr, SecretProvider):
                 result.extend(attr.secret_values())
         return [v for v in result if v and len(v) >= 8]
 ```
 
-> ⚠️ **Implementation note**: `vars(settings)` does not enumerate Pydantic sub-model
-> attributes in all Pydantic versions. The safe implementation iterates
-> `settings.__dict__.values()` after `Settings.load()` has been called (which
-> populates all sub-configs as instance attributes). In practice this works because
-> `Settings.__init__` assigns `self.telegram`, `self.slack`, etc. as plain attributes.
-> If a future Pydantic upgrade changes this, the correct fallback is:
-> ```python
-> for field_name in settings.model_fields:
->     attr = getattr(settings, field_name)
->     if isinstance(attr, SecretProvider):
->         result.extend(attr.secret_values())
-> ```
+> ⚠️ **Implementation note**: `vars(settings)` / `settings.__dict__` includes Pydantic
+> internal attributes (e.g. `__pydantic_fields_set__`) that can vary across Pydantic versions.
+> `settings.model_fields` (Pydantic v2 API) returns only declared field names and is the
+> correct approach. The `isinstance(attr, SecretProvider)` filter is still useful as a
+> second guard against non-config values.
 > The test `test_collect_secrets_via_protocol` will catch any regression here.
 
 Adding a new secret-bearing config field: add it to the sub-config's `secret_values()`
@@ -455,10 +449,16 @@ class Registry:
         core modules.
         """
         def decorator(cls_or_fn: Callable) -> Callable:
-            if key in self._map and not force:
-                raise ValueError(
-                    f"Registry {self._name!r}: key {key!r} already registered by "
-                    f"{self._map[key]!r}. Use force=True to override intentionally."
+            if key in self._map:
+                if not force:
+                    raise ValueError(
+                        f"Registry {self._name!r}: key {key!r} already registered by "
+                        f"{self._map[key]!r}. Use force=True to override intentionally."
+                    )
+                logger.warning(
+                    "Registry %r: key %r overwritten (force=True). "
+                    "Previous: %r  New: %r",
+                    self._name, key, self._map[key], cls_or_fn,
                 )
             self._map[key] = cls_or_fn
             return cls_or_fn
@@ -507,7 +507,8 @@ Replace the existing `_collect_secrets` body:
 @staticmethod
 def _collect_secrets(settings: "Settings") -> list[str]:
     result: list[str] = []
-    for attr in settings.__dict__.values():   # see implementation note in Design Space
+    for field_name in settings.model_fields:   # Pydantic v2 idiomatic — safer than __dict__
+        attr = getattr(settings, field_name)
         if isinstance(attr, SecretProvider):
             result.extend(attr.secret_values())
     return [v for v in result if v and len(v) >= 8]
@@ -534,11 +535,11 @@ class GitHubConfig(BaseSettings):
 class AIConfig(BaseSettings):
     ...
     def secret_values(self) -> list[str]:
-        # codex_api_key is a flat field on AIConfig, not a nested sub-config.
-        # See src/config.py — CodexConfig is not a separate sub-config instance.
+        # codex_api_key lives on the nested CodexAIConfig sub-config (self.codex),
+        # not as a flat field on AIConfig. Iterate both the shared key and the nested one.
         return [v for v in [
             self.ai_api_key,
-            self.codex_api_key,   # flat field, aliased CODEX_API_KEY
+            self.codex.codex_api_key,   # nested: AIConfig.codex is a CodexAIConfig instance
         ] if v]
 
 class VoiceConfig(BaseSettings):
@@ -602,13 +603,13 @@ class ShellService:
 @dataclass
 class RepoService:
     """Wraps src/repo.py. A fork can replace this with NullRepoService."""
-    _token: str       # OQ10 resolved — stored as private field; not in repr(), not in public interface
-    repo_name: str
-    branch: str
+    token: str = field(repr=False)  # OQ10 resolved — excluded from repr() via field(repr=False); not part of public interface
+    repo_name: str = ""
+    branch: str = "main"
 
     async def clone(self) -> None:
         from src import repo
-        await repo.clone(self._token, self.repo_name, self.branch)
+        await repo.clone(self.token, self.repo_name, self.branch)
 
     async def pull(self) -> str:
         from src import repo
@@ -620,7 +621,7 @@ class RepoService:
 
     async def configure_auth(self) -> None:
         from src import repo
-        await repo.configure_git_auth(self._token)
+        await repo.configure_git_auth(self.token)
 
 
 class NullRepoService:
@@ -930,7 +931,7 @@ No new runtime or dev dependencies.
 | `test_register_and_create` | `registry.register("k")` → `registry.create("k", ...)` instantiates |
 | `test_create_unknown_key_raises` | `registry.create("unknown")` raises `ValueError` with available keys |
 | `test_register_duplicate_key_raises` | Registering same key twice raises `ValueError` (OQ9) |
-| `test_register_force_overwrites` | `registry.register("k", force=True)` replaces without error |
+| `test_register_force_overwrites` | `registry.register("k", force=True)` replaces without error and emits a `WARNING` log |
 | `test_keys_returns_registered` | `.keys()` reflects all registered names |
 | `test_contains` | `"k" in registry` returns `True` after registration |
 
@@ -940,7 +941,7 @@ No new runtime or dev dependencies.
 |------|----------------|
 | `test_null_repo_service_pull` | `NullRepoService.pull()` returns info string, no git call |
 | `test_null_repo_service_clone` | `NullRepoService.clone()` is a no-op |
-| `test_repo_service_token_private` | `RepoService` has no public `.token` attribute; `repr()` does not contain raw token (OQ10) |
+| `test_repo_service_token_private` | `RepoService` constructor uses `token=` kwarg; `repr()` does not contain the raw token value (OQ10) |
 | `test_null_repo_service_no_token_attr` | `NullRepoService` has no `token` attribute at all — does not inherit from `RepoService` (OQ11) |
 | `test_shell_service_delegates_to_executor` | `ShellService.run()` calls `executor.run_shell` |
 | `test_shell_service_sanitize_ref` | Invalid ref → `None`; valid ref → shell-quoted |
@@ -968,7 +969,7 @@ No new runtime or dev dependencies.
 |------|----------------|
 | `test_telegram_config_secret_values` | Returns `bot_token` when set, empty list when not |
 | `test_slack_config_secret_values` | Returns both tokens when set |
-| `test_ai_config_secret_values` | Returns `ai_api_key` and `codex_api_key` |
+| `test_ai_config_secret_values` | Returns `ai_api_key` and `codex.codex_api_key` (nested field) |
 
 ### `tests/integration/test_startup.py` additions
 
@@ -985,14 +986,14 @@ No new runtime or dev dependencies.
 | Test | What it checks |
 |------|----------------|
 | `test_register_duplicate_key_raises` | Registering same key twice raises `ValueError` (OQ9 fix) |
-| `test_register_force_overwrites_silently` | `register(..., force=True)` replaces without error — intentional fork override path |
+| `test_register_force_overwrites_silently` | `register(..., force=True)` replaces without error and emits a `WARNING` log — intentional fork override path |
 
 ### `tests/unit/test_services.py` security additions (GateSec)
 
 | Test | What it checks |
 |------|----------------|
 | `test_null_repo_service_has_no_token_attr` | `NullRepoService` has no `.token` attribute — does not inherit `RepoService` (OQ11) |
-| `test_repo_service_token_not_public` | `RepoService` has no public `.token` attribute; `repr()` does not expose the credential (OQ10) |
+| `test_repo_service_token_not_public` | `RepoService` constructor uses `token=` kwarg; `repr()` does not expose the credential — `field(repr=False)` confirmed (OQ10) |
 
 ### `tests/unit/test_runtime.py` additions (OQ14)
 
@@ -1006,7 +1007,7 @@ No new runtime or dev dependencies.
 | Test | What it checks |
 |------|----------------|
 | `test_all_sub_configs_implement_secret_provider` | Every `BaseSettings` sub-class in `config.py` satisfies `SecretProvider` protocol (OQ13) |
-| `test_collect_secrets_uses_dict_not_vars` | `_collect_secrets` correctly enumerates sub-configs via `settings.__dict__` (Pydantic compatibility) |
+| `test_collect_secrets_uses_model_fields` | `_collect_secrets` iterates via `settings.model_fields` (Pydantic v2 API), not `__dict__` |
 
 ### `tests/unit/test_storage_memory.py` security additions (GateSec)
 
@@ -1127,9 +1128,14 @@ No env vars renamed or removed. All changes are internal. → **MINOR** bump: `0
 
    > **Deduplication**: Each command registers once with `platforms={"telegram", "slack"}`.
    > Do NOT decorate the same command name in both `bot.py` and `slack.py` — that would
-   > append two `CommandDef` entries. Apply `@register_command` in `bot.py` only (or a
-   > shared `commands/definitions.py`). The Slack adapter looks up the handler by
-   > `handler_attr` name on itself; it does not need to register the command again.
+   > append two `CommandDef` entries.
+   >
+   > Apply `@register_command` directly on the handler method in `bot.py` (where the handler
+   > is defined). `commands/registry.py` is where `CommandDef`, `COMMANDS`, and the
+   > `@register_command` decorator are **defined** — not the place to call the decorator,
+   > which would require importing `_BotHandlers` and create circular dependencies. The Slack
+   > adapter does not call `@register_command` at all: it finds the handler via
+   > `getattr(self, handler_attr)` at dispatch time.
 
 4. **OQ4 — `InMemoryStorage` and `gate restart`** — `gate restart` recreates the AI
    backend but not the storage. `InMemoryStorage` state survives a restart. This is the
@@ -1239,7 +1245,7 @@ No env vars renamed or removed. All changes are internal. → **MINOR** bump: `0
       selected via env var). *(Verified manually.)*
 - [ ] All existing env vars, commands, and default behaviours are preserved.
 - [ ] `Registry.register()` raises on duplicate keys by default; `force=True` is the intentional-override path (OQ9).
-- [ ] `RepoService._token` is private; no public `.token` attribute; `repr()` does not expose credential (OQ10).
+- [ ] `RepoService.token` is excluded from `repr()` via `field(repr=False)`; raw token value does not appear in logs or debug output (OQ10).
 - [ ] `NullRepoService` does not inherit from `RepoService` — no token attribute (OQ11).
 - [ ] `InMemoryStorage` enforces a per-chat entry limit (default 200) (OQ12).
 - [ ] `_load_registries()` uses a hardcoded module list, not filesystem discovery (OQ16).
