@@ -1,6 +1,6 @@
 # Persistent Thinking Message (`THINKING_SHOW_ELAPSED`)
 
-> Status: **Planned** | Priority: Medium | Last reviewed: 2026-03-15
+> Status: **Approved** | Priority: Medium | Last reviewed: 2026-03-15
 
 Fix the non-streaming message lifecycle so the "⏳ Still thinking…" placeholder persists with its final elapsed time instead of being silently overwritten by the AI response.
 
@@ -15,10 +15,10 @@ Fix the non-streaming message lifecycle so the "⏳ Still thinking…" placehold
 |----------|-------|-------|------|-------|
 | GateCode | 1 | 9/10 | 2026-03-15 | Fixed config.py line ref, added README.md to Files table (required), corrected version caveat |
 | GateSec  | 1 | 9/10 | 2026-03-15 | No new attack surface; redaction contracts preserved; minor naming nit fixed inline |
-| GateDocs | 1 | -/10 | - | Pending |
+| GateDocs | 1 | 9/10 | 2026-03-15 | Added docs/roadmap.md to Files table; clarified two ACs (config comment, README); fixed roadmap AC wording |
 
-**Status**: ⏳ Pending review
-**Approved**: No — requires all scores ≥ 9/10 in the same round
+**Status**: ✅ Approved — round 1, all scores ≥ 9
+**Approved**: Yes — ready to implement
 
 ---
 
@@ -359,7 +359,7 @@ thinking_show_elapsed: bool = True      # THINKING_SHOW_ELAPSED: persist "🤖 T
 | `tests/unit/test_thinking_persist.py` | **Create** | Tests for both platforms, both `THINKING_SHOW_ELAPSED` values |
 | `README.md` | **Edit** | Update `THINKING_SHOW_ELAPSED` description to reflect new behaviour (response now sent as separate message) |
 | `docs/features/thinking-persist.md` | **Edit** | Mark status as `Implemented` after merge |
-| `docs/roadmap.md` | **Edit** | Add ✅ to entry on merge |
+| `docs/roadmap.md` | **Edit** | Mark entry 1.1 with ✅ on merge (entry already present; no new row needed) |
 
 ---
 
@@ -475,8 +475,10 @@ When complete, add to Technical Debt in `docs/roadmap.md`:
 - [ ] Thinking message is overwritten by AI response when `THINKING_SHOW_ELAPSED=false` (both platforms).
 - [ ] `SLACK_DELETE_THINKING=true` still deletes the thinking message regardless of `THINKING_SHOW_ELAPSED`.
 - [ ] Streaming mode behaviour is unchanged on both platforms.
-- [ ] `docs/roadmap.md` entry added.
+- [ ] `docs/roadmap.md` entry 1.1 marked ✅ on merge (entry already exists in roadmap; no new row needed).
 - [ ] `docs/features/thinking-persist.md` status changed to `Implemented` after merge.
+- [ ] `src/config.py` comment on `thinking_show_elapsed` updated to reflect new behaviour (Step 3).
+- [ ] `README.md` `THINKING_SHOW_ELAPSED` description updated to reflect that the AI response is now sent as a separate message.
 - [ ] `VERSION` file bumped to `0.18.1`.
 - [ ] Feature works with **all AI backends** (`copilot`, `codex`, `api`).
 - [ ] Edge cases in the section above are resolved and either handled or documented.
