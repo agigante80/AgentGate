@@ -30,7 +30,7 @@ Keeps the four key user-facing reference files — `README.md`, `.env.example`, 
 
 | GateDocs | 3 | 9/10 | 2026-03-15 | Fixed `_parse_env_example` signature to accept `config_vars` param (eliminates 2 redundant `extract_config_env_vars()` calls per lint run); clarified version bump wording. |
 | GateCode | 4 | 10/10 | 2026-03-15 | R3 Blocking Gap resolved: updated `_parse_env_example` in `scripts/lint_docs.py` to accept `config_vars: set[str]` as a parameter (removing internal `extract_config_env_vars()` call); both callers (`check_env_example_coverage`, `check_compose_coverage`) updated to pass the pre-extracted set. All 3 redundant `extract_config_env_vars()` calls per lint run now collapsed to 1. Linter still passes (17 specs clean). |
-| GateSec  | 4 | -/10 | - | Pending |
+| GateSec  | 4 | 10/10 | 2026-03-15 | R3 perf nit resolved — `_parse_env_example` now accepts `config_vars` param; single `extract_config_env_vars()` call per lint run. Spec and implementation fully aligned. No security concerns. |
 | GateDocs | 4 | -/10 | - | Pending |
 
 **Status**: ⏳ Pending review
