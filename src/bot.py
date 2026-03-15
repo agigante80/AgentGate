@@ -239,6 +239,8 @@ class _BotHandlers:
         self._confirm_destructive: bool = settings.bot.confirm_destructive
         self._transcriber: transcriber_mod.Transcriber | None = self._init_transcriber(settings)
         self._redactor = SecretRedactor(settings)
+        # per-chat asyncio Task registry for user-initiated cancellation
+        self._active_tasks: dict[str, asyncio.Task] = {}
 
     def _init_transcriber(self, settings: Settings) -> "transcriber_mod.Transcriber | None":
         """Create the transcriber from config, or return None when disabled."""
@@ -251,8 +253,37 @@ class _BotHandlers:
             logger.warning("Voice transcription unavailable: %s", exc)
             return None
 
+    async def _cancel_active_task(self, chat_id: str) -> bool:
+        """Cancel the active AI task for chat_id. Returns True if a task was cancelled."""
+        task = self._active_tasks.get(chat_id)
+        if task is None or task.done():
+            return False
+        task.cancel()
+        with suppress(asyncio.CancelledError, Exception):
+            # asyncio.shield protects the underlying task from a second CancelledError if
+            # _cancel_active_task() itself is cancelled while waiting (double-cancel guard).
+            await asyncio.wait_for(
+                asyncio.shield(task),
+                timeout=self._settings.bot.cancel_timeout_secs,
+            )
+        # Guard: only call close() if no new task arrived during the grace period.
+        # backend.close() is instance-wide — calling it while a new request is in-flight
+        # would disrupt that request. (GateSec R1 Finding 1)
+        current = self._active_tasks.get(chat_id)
+        if current is None or current is task:
+            self._backend.close()
+            self._backend.clear_history()  # reset DirectAPIBackend in-memory history
+        return True
+
     async def _run_ai_pipeline(self, update: Update, text: str, chat_id: str) -> None:
         """Shared AI pipeline: build prompt → stream/send → save history."""
+        # In-flight guard — reject new prompt if a task is already running for this chat
+        if chat_id in self._active_tasks and not self._active_tasks[chat_id].done():
+            await update.effective_message.reply_text(
+                "⏳ A request is already in progress. Use `gate cancel` to stop it."
+            )
+            return
+
         key = text[:60]
         self._active_ai[key] = time.time()
         t0 = time.time()
@@ -264,22 +295,46 @@ class _BotHandlers:
                 hist = await self._history.get_history(chat_id) if self._settings.bot.history_enabled else []
                 prompt = _build_context(hist, text)
 
+            cfg = self._settings.bot
             if self._settings.bot.stream_responses:
-                response = await _stream_to_telegram(
-                    update, self._backend, prompt,
-                    self._settings.bot.max_output_chars,
-                    self._settings.bot.stream_throttle_secs,
-                    timeout_secs=self._settings.bot.ai_timeout_secs,
-                    slow_threshold=self._settings.bot.thinking_slow_threshold_secs,
-                    update_interval=self._settings.bot.thinking_update_secs,
-                    warn_before_secs=self._settings.bot.ai_timeout_warn_secs,
-                    redactor=self._redactor,
-                    show_elapsed=self._settings.bot.thinking_show_elapsed,
+                # Streaming path — wrap in a task so gate cancel can interrupt it
+                if chat_id in self._active_tasks and not self._active_tasks[chat_id].done():
+                    await update.effective_message.reply_text(
+                        "⏳ A request is already in progress. Use `gate cancel` to stop it."
+                    )
+                    return
+                stream_task = asyncio.create_task(
+                    _stream_to_telegram(
+                        update, self._backend, prompt,
+                        cfg.max_output_chars,
+                        cfg.stream_throttle_secs,
+                        timeout_secs=0,  # timeout handled externally via wait_for below
+                        slow_threshold=cfg.thinking_slow_threshold_secs,
+                        update_interval=cfg.thinking_update_secs,
+                        warn_before_secs=cfg.ai_timeout_warn_secs,
+                        redactor=self._redactor,
+                        show_elapsed=cfg.thinking_show_elapsed,
+                    )
                 )
+                self._active_tasks[chat_id] = stream_task
+                try:
+                    timeout = cfg.ai_timeout_secs if cfg.ai_timeout_secs > 0 else None
+                    response = await asyncio.wait_for(asyncio.shield(stream_task), timeout=timeout)
+                except asyncio.CancelledError:
+                    await update.effective_message.reply_text("⚠️ Request cancelled.")
+                    return
+                except asyncio.TimeoutError:
+                    # shield kept stream_task running — must explicitly cancel it
+                    await self._cancel_active_task(chat_id)
+                    await update.effective_message.reply_text(
+                        f"⚠️ Stream cancelled after {cfg.ai_timeout_secs}s."
+                    )
+                    return
+                finally:
+                    self._active_tasks.pop(chat_id, None)
             else:
                 t_start = time.monotonic()
                 msg = await update.effective_message.reply_text("🤖 Thinking…")
-                cfg = self._settings.bot
                 ticker = asyncio.create_task(
                     thinking_ticker(
                         edit_fn=msg.edit_text,
@@ -289,20 +344,24 @@ class _BotHandlers:
                         warn_before_secs=cfg.ai_timeout_warn_secs,
                     )
                 )
+                ai_task = asyncio.create_task(self._backend.send(prompt))
+                self._active_tasks[chat_id] = ai_task
                 try:
-                    if cfg.ai_timeout_secs > 0:
-                        response = await asyncio.wait_for(
-                            self._backend.send(prompt), timeout=cfg.ai_timeout_secs
-                        )
-                    else:
-                        response = await self._backend.send(prompt)
+                    timeout = cfg.ai_timeout_secs if cfg.ai_timeout_secs > 0 else None
+                    response = await asyncio.wait_for(asyncio.shield(ai_task), timeout=timeout)
+                except asyncio.CancelledError:
+                    await msg.edit_text("⚠️ Request cancelled.")
+                    return
                 except asyncio.TimeoutError:
+                    # shield kept ai_task running — must explicitly cancel it
+                    await self._cancel_active_task(chat_id)
                     await msg.edit_text(
                         f"⚠️ Request cancelled after {cfg.ai_timeout_secs}s. "
                         "Use /gate status to check if the process is stuck."
                     )
                     return
                 finally:
+                    self._active_tasks.pop(chat_id, None)
                     ticker.cancel()
                     with suppress(asyncio.CancelledError):
                         await ticker
@@ -473,6 +532,7 @@ class _BotHandlers:
             "confirm": self.cmd_confirm,
             "info":    self.cmd_info,
             "init":    self.cmd_init,
+            "cancel":  self.cmd_cancel,
         }
 
         handler = dispatch.get(sub)
@@ -502,6 +562,7 @@ class _BotHandlers:
             f"`/{p} diff` `[n|sha]` — show git diff (default: last commit)\n"
             f"`/{p} log` `[n]` — tail last n container log lines (default 20)\n"
             f"`/{p} status` — check if AI is busy\n"
+            f"`/{p} cancel` — cancel the current in-progress AI request\n"
             f"`/{p} clear` — clear conversation history\n"
             f"`/{p} init` — clear history and run `/init` in the AI session\n"
             f"`/{p} restart` — restart AI backend session\n"
@@ -553,6 +614,19 @@ class _BotHandlers:
         await self._audit.record(
             platform="telegram", chat_id=chat_id, user_id=user_id,
             action="command", detail={"sub": "clear"},
+        )
+
+    @_requires_auth
+    async def cmd_cancel(self, update: Update, _ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle `gate cancel` — cancel the in-progress AI request for this chat."""
+        chat_id = str(update.effective_chat.id)
+        user_id = str(update.effective_user.id) if update.effective_user else None
+        cancelled = await self._cancel_active_task(chat_id)
+        msg = "⚠️ Request cancelled." if cancelled else "ℹ️ No request in progress."
+        await update.effective_message.reply_text(msg)
+        await self._audit.record(
+            platform="telegram", chat_id=chat_id, user_id=user_id,
+            action="cancel", status="cancelled" if cancelled else "no_op",
         )
 
     @_requires_auth
@@ -677,6 +751,7 @@ def build_app(settings: Settings, backend: AICLIBackend, storage: ConversationSt
     app.add_handler(CommandHandler(f"{p}log", h.cmd_log))
     app.add_handler(CommandHandler(f"{p}status", h.cmd_status))
     app.add_handler(CommandHandler(f"{p}clear", h.cmd_clear))
+    app.add_handler(CommandHandler(f"{p}cancel", h.cmd_cancel))
     app.add_handler(CommandHandler(f"{p}init", h.cmd_init))
     app.add_handler(CommandHandler(f"{p}restart", h.cmd_restart))
     app.add_handler(CommandHandler(f"{p}confirm", h.cmd_confirm))

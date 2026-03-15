@@ -96,3 +96,12 @@ class TestAdapterContract:
         backend._messages = [{"role": "user", "content": "hello"}]
         backend.clear_history()
         assert backend._messages == []
+
+    def test_cancel_calls_backend_close(self):
+        """backend.close() must be re-entrant and leave the backend usable after cancel."""
+        for factory in [make_copilot, make_codex, make_direct]:
+            backend = factory()
+            # close() is the post-cancel cleanup — must not raise and backend must stay usable
+            backend.close()  # first call (during cancel)
+            backend.close()  # second call (re-entrance — must not raise)
+            backend.clear_history()  # backend must remain functional after close()

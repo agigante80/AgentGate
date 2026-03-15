@@ -54,6 +54,8 @@ class BotConfig(BaseSettings):
     prefix_only: bool = False  # PREFIX_ONLY=true: ignore messages that don't start with the bot prefix (for multi-agent Slack)
     system_prompt: str = ""  # SYSTEM_PROMPT: optional text prepended to every AI prompt (team context is auto-generated separately)
     ai_timeout_secs: int = 0                # Hard timeout for any AI backend (0 = no timeout); env: AI_TIMEOUT_SECS
+    cancel_timeout_secs: int = Field(5, env="CANCEL_TIMEOUT_SECS")
+    # Grace period in seconds after task.cancel() before backend.close() is called. Range: 1-60.
     thinking_slow_threshold_secs: int = 15  # Seconds of silence before first "Still thinking…" update; env: THINKING_SLOW_THRESHOLD_SECS
     thinking_update_secs: int = 30          # Seconds between subsequent elapsed-time updates; env: THINKING_UPDATE_SECS
     ai_timeout_warn_secs: int = 60          # Seconds before hard timeout to include a cancellation warning; env: AI_TIMEOUT_WARN_SECS

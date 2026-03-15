@@ -807,4 +807,4 @@ class TestBuildApp:
             build_app(settings, backend, _make_storage(), 0.0, NullAuditLog())
 
         # 13 CommandHandlers + 1 CallbackQueryHandler + 2 MessageHandlers = 17
-        assert mock_app_instance.add_handler.call_count == 17
+        assert mock_app_instance.add_handler.call_count == 18

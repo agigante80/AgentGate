@@ -35,4 +35,10 @@ class AICLIBackend(ABC):
         """Clear conversation history (override in stateful backends)."""
 
     def close(self) -> None:
-        """Release resources (e.g. PTY process). Override in backends that hold external state."""
+        """Release resources (e.g. PTY process). Override in backends that hold external state.
+
+        Re-entrance contract: this method may be called after a cancel (not only at shutdown).
+        Implementations must be safe to call multiple times and must leave the backend in a
+        usable state for subsequent requests — do not tear down connection pools or shared state
+        that would prevent future ``send()`` calls from succeeding.
+        """

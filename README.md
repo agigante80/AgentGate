@@ -20,6 +20,7 @@ Chat with your AI coding assistant (GitHub Copilot, Codex, OpenAI, Anthropic) vi
 - 🔀 **Multi-turn sessions** — SQLite history injected for stateless backends; Direct API maintains native state
 - 🐳 **One container per project** — fully isolated, all config via env vars
 - 🔒 **Secure** — non-root container, allowlist by chat/user ID, confirmation for destructive shell commands
+- 🛑 **Request cancellation** — stop an in-progress AI call with `gate cancel` (or the Slack "❌ Cancel" button in the "Thinking…" message)
 - 📢 **Broadcast** (Slack) — prefix any message with `<!here>` to send it to all active agents simultaneously; each responds independently
 
 ---
@@ -102,6 +103,7 @@ AgentGate utility commands use a configurable prefix (`BOT_CMD_PREFIX`, default 
 | `/gate sync` | `git pull` |
 | `/gate git` | `git status` + last 3 commits |
 | `/gate status` | Show active AI requests |
+| `/gate cancel` | Cancel the current in-progress AI request |
 | `/gate clear` | Clear conversation history |
 | `/gate restart` | Restart the AI backend session |
 | `/gate info` | Repo, branch, AI backend, uptime |
@@ -187,6 +189,7 @@ Copy `.env.example` — it documents every variable with examples.
 | `SLACK_DELETE_THINKING` | `true` | Delete the ⏳ placeholder after posting the final AI response (Slack only). |
 | `SLACK_THREAD_REPLIES` | `false` | When `true`, post AI responses and bot output as thread replies to the triggering message (Slack only). |
 | `AI_TIMEOUT_SECS` | `0` | Hard timeout for any AI backend in seconds (0 = no timeout) |
+| `CANCEL_TIMEOUT_SECS` | `5` | Seconds to wait for graceful cancel before forcing backend close |
 | `ALLOW_SECRETS` | `false` | When `false` (default), secrets are redacted from outgoing messages and git commit messages. Set `true` to allow secrets (dangerous). |
 | `THINKING_SLOW_THRESHOLD_SECS` | `15` | Seconds of silence before first "Still thinking…" update |
 | `THINKING_UPDATE_SECS` | `30` | Seconds between subsequent elapsed-time updates |
@@ -417,6 +420,7 @@ Commands use a configurable prefix (`BOT_CMD_PREFIX`, default `gate`):
 | `/gate sync` | `git pull` |
 | `/gate git` | `git status` + last 3 commits |
 | `/gate status` | Show active AI requests |
+| `/gate cancel` | Cancel the current in-progress AI request |
 | `/gate clear` | Clear conversation history |
 | `/gate restart` | Restart the AI backend session |
 | `/gate info` | Repo, branch, AI backend, uptime |
@@ -504,6 +508,7 @@ Copy `.env.example` — it documents every variable with examples.
 | `SLACK_DELETE_THINKING` | `true` | Delete the ⏳ placeholder after posting the final AI response (Slack only). |
 | `SLACK_THREAD_REPLIES` | `false` | When `true`, post AI responses and bot output as thread replies to the triggering message (Slack only). |
 | `AI_TIMEOUT_SECS` | `0` | Hard timeout for any AI backend in seconds (0 = no timeout) |
+| `CANCEL_TIMEOUT_SECS` | `5` | Seconds to wait for graceful cancel before forcing backend close |
 | `ALLOW_SECRETS` | `false` | When `false` (default), secrets are redacted from outgoing messages and git commit messages. Set `true` to allow secrets (dangerous). |
 | `THINKING_SLOW_THRESHOLD_SECS` | `15` | Seconds of silence before first "Still thinking…" update |
 | `THINKING_UPDATE_SECS` | `30` | Seconds between subsequent elapsed-time updates |

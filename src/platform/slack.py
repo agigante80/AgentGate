@@ -42,6 +42,26 @@ logger = logging.getLogger(__name__)
 # Sent as a placeholder while streaming — updated chunk by chunk
 _THINKING = "🤖 Thinking…"
 
+# Block Kit "Thinking…" placeholder with embedded Cancel button
+_THINKING_BLOCKS = [
+    {
+        "type": "section",
+        "text": {"type": "mrkdwn", "text": "🤖 Thinking…"},
+    },
+    {
+        "type": "actions",
+        "elements": [
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "❌ Cancel"},
+                "style": "danger",
+                "action_id": "cancel_ai",
+                "value": "cancel",
+            }
+        ],
+    },
+]
+
 # Slack section block text limit (API enforced)
 _SLACK_BLOCK_LIMIT = 3000
 # Responses longer than this are uploaded as a file snippet instead of multi-block
@@ -67,7 +87,7 @@ _MAX_DELEGATIONS = 3
 
 # Known utility subcommands — shared by trusted-bot routing, broadcast routing, and _dispatch
 _KNOWN_SUBS = {
-    "run", "sync", "git", "diff", "log", "status", "clear", "restart", "confirm", "info", "help", "init",
+    "run", "sync", "git", "diff", "log", "status", "clear", "restart", "confirm", "info", "help", "init", "cancel",
 }
 
 
@@ -129,6 +149,8 @@ class SlackBot:
         self._confirm_destructive: bool = settings.bot.confirm_destructive
         self._transcriber = _init_transcriber(settings)
         self._redactor = SecretRedactor(settings)
+        # per-channel asyncio Task registry for user-initiated cancellation
+        self._active_tasks: dict[str, asyncio.Task] = {}
         # Parse TRUSTED_AGENT_BOT_IDS entries as "Name:prefix" or "Name" or "B-prefixed-id".
         # B-prefixed entries are pre-populated; name-based entries are resolved at startup.
         import re
@@ -153,6 +175,28 @@ class SlackBot:
 
     def _is_allowed(self, channel: str, user: str) -> bool:
         return common.is_allowed_slack(channel, user, self._settings)
+
+    async def _cancel_active_task(self, channel: str) -> bool:
+        """Cancel the active AI task for channel. Returns True if a task was cancelled."""
+        task = self._active_tasks.get(channel)
+        if task is None or task.done():
+            return False
+        task.cancel()
+        with suppress(asyncio.CancelledError, Exception):
+            # asyncio.shield protects the underlying task from a second CancelledError if
+            # _cancel_active_task() itself is cancelled while waiting (double-cancel guard).
+            await asyncio.wait_for(
+                asyncio.shield(task),
+                timeout=self._settings.bot.cancel_timeout_secs,
+            )
+        # Guard: only call close() if no new task arrived during the grace period.
+        # backend.close() is instance-wide — calling it while a new request is in-flight
+        # would disrupt that request. (GateSec R1 Finding 1)
+        current = self._active_tasks.get(channel)
+        if current is None or current is task:
+            self._backend.close()
+            self._backend.clear_history()  # reset DirectAPIBackend in-memory history
+        return True
 
     async def _send(self, say, text: str) -> dict:
         """Post a new message; return the Slack API response (includes ts)."""
@@ -410,6 +454,15 @@ class SlackBot:
     async def _run_ai_pipeline(
         self, say, client, text: str, channel: str, *, thread_ts: str | None = None, user_id: str | None = None
     ) -> None:
+        # In-flight guard — reject new prompt if a task is already running for this channel
+        if channel in self._active_tasks and not self._active_tasks[channel].done():
+            await self._reply(
+                client, channel,
+                "⏳ A request is already in progress. Use `gate cancel` to stop it.",
+                thread_ts,
+            )
+            return
+
         key = text[:60]
         self._active_ai[key] = time.time()
         t0 = time.time()
@@ -426,15 +479,40 @@ class SlackBot:
                 context_parts.append(sp)
             if context_parts:
                 prompt = "\n\n".join(context_parts) + "\n\n" + prompt
+            cfg = self._settings.bot
             if self._settings.bot.stream_responses:
-                response = await self._stream_to_slack(
-                    say, client, channel, prompt, thread_ts=thread_ts
+                # Streaming path — wrap in a task so gate cancel can interrupt it
+                stream_task = asyncio.create_task(
+                    self._stream_to_slack(say, client, channel, prompt, thread_ts=thread_ts)
                 )
+                self._active_tasks[channel] = stream_task
+                try:
+                    timeout = cfg.ai_timeout_secs if cfg.ai_timeout_secs > 0 else None
+                    response = await asyncio.wait_for(asyncio.shield(stream_task), timeout=timeout)
+                except asyncio.CancelledError:
+                    await self._reply(client, channel, "⚠️ Request cancelled.", thread_ts)
+                    return
+                except asyncio.TimeoutError:
+                    # shield kept stream_task running — must explicitly cancel it
+                    await self._cancel_active_task(channel)
+                    await self._reply(
+                        client, channel,
+                        f"⚠️ Stream cancelled after {cfg.ai_timeout_secs}s.",
+                        thread_ts,
+                    )
+                    return
+                finally:
+                    self._active_tasks.pop(channel, None)
             else:
                 t_start = time.monotonic()
-                resp = await self._reply(client, channel, _THINKING, thread_ts)
+                # Post thinking placeholder with Block Kit Cancel button
+                resp = await client.chat_postMessage(
+                    channel=channel,
+                    text=_THINKING,
+                    blocks=_THINKING_BLOCKS,
+                    **({"thread_ts": thread_ts} if thread_ts else {}),
+                )
                 ts = resp["ts"]
-                cfg = self._settings.bot
                 ticker = asyncio.create_task(
                     thinking_ticker(
                         edit_fn=lambda text: self._edit(client, channel, ts, text),
@@ -444,14 +522,23 @@ class SlackBot:
                         warn_before_secs=cfg.ai_timeout_warn_secs,
                     )
                 )
+                ai_task = asyncio.create_task(self._backend.send(prompt))
+                self._active_tasks[channel] = ai_task
                 try:
-                    if cfg.ai_timeout_secs > 0:
-                        response = await asyncio.wait_for(
-                            self._backend.send(prompt), timeout=cfg.ai_timeout_secs
+                    timeout = cfg.ai_timeout_secs if cfg.ai_timeout_secs > 0 else None
+                    response = await asyncio.wait_for(asyncio.shield(ai_task), timeout=timeout)
+                except asyncio.CancelledError:
+                    # Strip Cancel button from thinking placeholder on cancel
+                    try:
+                        await client.chat_update(
+                            channel=channel, ts=ts, text="⚠️ Request cancelled.", blocks=[]
                         )
-                    else:
-                        response = await self._backend.send(prompt)
+                    except Exception:
+                        logger.debug("Could not update thinking placeholder on cancel")
+                    return
                 except asyncio.TimeoutError:
+                    # shield kept ai_task running — must explicitly cancel it
+                    await self._cancel_active_task(channel)
                     await self._reply(
                         client, channel,
                         f"⚠️ Request cancelled after {cfg.ai_timeout_secs}s.",
@@ -464,6 +551,7 @@ class SlackBot:
                             logger.debug("Could not delete thinking placeholder (ts=%s)", ts)
                     return
                 finally:
+                    self._active_tasks.pop(channel, None)
                     ticker.cancel()
                     with suppress(asyncio.CancelledError):
                         await ticker
@@ -517,6 +605,7 @@ class SlackBot:
         self._app.event("message")(self._on_message)
         self._app.action("confirm_run")(self._on_confirm_run)
         self._app.action("cancel_run")(self._on_cancel_run)
+        self._app.action("cancel_ai")(self._on_cancel_ai)
 
     async def _on_message(self, event: dict, say, client) -> None:
         """Route incoming messages: prefix commands or AI forwarding."""
@@ -655,6 +744,7 @@ class SlackBot:
             "info": self._cmd_info,
             "help": self._cmd_help,
             "init": self._cmd_init,
+            "cancel": self._handle_cancel,
         }
         handler = table.get(sub)
         if handler is None:
@@ -976,6 +1066,42 @@ class SlackBot:
             platform="slack", chat_id=channel, user_id=user_id,
             action="shell_confirm", status="cancelled",
             detail={"cmd": self._redactor.redact(cmd) if cmd else None},
+        )
+
+    async def _on_cancel_ai(self, ack, body, client) -> None:
+        """Handle Block Kit 'cancel_ai' button — cancel the in-progress AI request."""
+        await ack()
+        channel = body["channel"]["id"]
+        user_id = body.get("user", {}).get("id")
+        if not self._is_allowed(channel, user_id):
+            return
+        cancelled = await self._cancel_active_task(channel)
+        msg = "⚠️ Request cancelled." if cancelled else "ℹ️ No request in progress."
+        await self._reply(client, channel, msg, None)
+        await self._audit.record(
+            platform="slack", chat_id=channel, user_id=user_id,
+            action="cancel", status="cancelled" if cancelled else "no_op",
+        )
+
+    async def _handle_cancel(
+        self, args: list[str], say, client, channel: str,
+        *, thread_ts: str | None = None,
+    ) -> None:
+        """Handle `gate cancel` text command — cancel the in-progress AI request for this channel.
+
+        Note: user_id is not available in the _dispatch calling convention
+        (slack.py: await handler(args, say, client, channel, thread_ts=thread_ts)).
+        Audit is recorded with user_id=None for text-command cancels; Block Kit button
+        cancels (_on_cancel_ai) have user_id available via body["user"]["id"].
+        GateSec R1 Finding 3: this creates a non-attributable audit record for a
+        security-relevant action. Follow-up: thread user_id through _dispatch().
+        """
+        cancelled = await self._cancel_active_task(channel)
+        msg = "⚠️ Request cancelled." if cancelled else "ℹ️ No request in progress."
+        await self._reply(client, channel, msg, thread_ts)
+        await self._audit.record(
+            platform="slack", chat_id=channel, user_id=None,
+            action="cancel", status="cancelled" if cancelled else "no_op",
         )
 
     # ── Voice/audio file handling ─────────────────────────────────────────
