@@ -4,6 +4,14 @@
 
 Allow AgentGate to clone, sync, and interact with repositories hosted on GitLab, Bitbucket, and Azure DevOps — not only GitHub.
 
+> ⚠️ **BREAKING CHANGE — MAJOR version bump (`0.16.x` → `1.0.0`)**
+> Two env vars are renamed. Existing Docker configurations **must** be updated before deploying:
+> - `GITHUB_REPO_TOKEN` → `REPO_TOKEN`
+> - `GITHUB_REPO` → `REPO`
+>
+> Containers that keep the old names will start but repo clone/sync will fail silently (empty token / repo).
+> All other env vars and behaviour are unchanged for GitHub users.
+
 ---
 
 ## Team Review
