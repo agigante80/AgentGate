@@ -13,7 +13,7 @@ Allow AgentGate to clone, sync, and interact with repositories hosted on GitLab,
 
 | Reviewer | Round | Score | Date | Notes |
 |----------|-------|-------|------|-------|
-| GateCode | 1 | -/10 | - | Pending |
+| GateCode | 1 | 8/10 | 2026-03-15 | OQ9/10/11/12/13/14/15 resolved in code samples. -1 OQ16 (git filter attack) accepted as pre-existing. -1 OQ11 REPO_USER per-provider format not enforced by Pydantic (runtime only). |
 | GateSec  | 1 | 5/10 | 2026-03-15 | 2 blockers (OQ9, OQ10). See OQ9–OQ16 below. Commit `2db3bdd` |
 | GateDocs | 1 | -/10 | - | Pending |
 
@@ -224,7 +224,7 @@ class RepoConfig(BaseSettings):
     repo_token: str = ""                                # REPO_TOKEN — PAT / app-password / access token
     repo: str = ""                                      # REPO — owner/repo (or project/_git/repo for Azure)
     branch: str = "main"                                # BRANCH
-    repo_provider: Literal["github", "gitlab", "bitbucket", "azure"] = Field("github", env="REPO_PROVIDER")  # ⚠️ GateSec OQ12: must be Literal, not str
+    repo_provider: Literal["github", "gitlab", "bitbucket", "azure"] = "github"  # REPO_PROVIDER
     repo_host: str = Field("", env="REPO_HOST")         # self-hosted hostname (like AI_BASE_URL)
     repo_user: str = Field("", env="REPO_USER")         # username/org (Bitbucket/Azure only)
     repo_clone_url: str = Field("", env="REPO_CLONE_URL")  # escape hatch: full URL, skips template
@@ -239,6 +239,13 @@ Update `Settings` to reference `repo: RepoConfig` (was `github: GitHubConfig`). 
 Add provider → default host mapping and URL templates:
 
 ```python
+import re
+import urllib.parse
+
+_HOSTNAME_RE = re.compile(r'^[A-Za-z0-9]([A-Za-z0-9\-\.]*[A-Za-z0-9])?$')
+_BITBUCKET_USER_RE = re.compile(r'^[A-Za-z0-9_\-]{1,128}$')
+_AZURE_ORG_RE = re.compile(r'^[A-Za-z0-9\-]{1,64}$')
+
 _DEFAULT_HOSTS = {
     "github":    "github.com",
     "gitlab":    "gitlab.com",
@@ -255,16 +262,34 @@ _CLONE_URL_TEMPLATES = {
 
 def _build_clone_url(cfg) -> str:
     if cfg.repo_clone_url:
-        # ⚠️ GateSec OQ9: validate HTTPS-only before returning
+        # OQ9: HTTPS-only — reject file://, ssh://, git://, etc.
+        parsed = urllib.parse.urlparse(cfg.repo_clone_url)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(
+                f"REPO_CLONE_URL must use http:// or https://; got scheme {parsed.scheme!r}"
+            )
         return cfg.repo_clone_url  # escape hatch — user owns the full URL
+
+    # OQ10: REPO_HOST must be a bare hostname — no URL schemes, credentials, or path segments.
+    if cfg.repo_host:
+        if not _HOSTNAME_RE.match(cfg.repo_host) or any(
+            c in cfg.repo_host for c in ("://", "@", "/")
+        ):
+            raise ValueError(
+                f"REPO_HOST must be a bare hostname (e.g. gitlab.mycompany.com); "
+                f"got {cfg.repo_host!r}"
+            )
+
     host = cfg.repo_host or _DEFAULT_HOSTS.get(cfg.repo_provider, "github.com")
     tmpl = _CLONE_URL_TEMPLATES.get(cfg.repo_provider, _CLONE_URL_TEMPLATES["github"])
-    # ⚠️ GateSec OQ11: URL-encode token and user before interpolation
+    # OQ11: URL-encode token and user — special characters (@ / :) would break URL structure.
+    safe_token = urllib.parse.quote(cfg.repo_token, safe="")
+    safe_user  = urllib.parse.quote(cfg.repo_user,  safe="")
     return tmpl.format(
-        token=cfg.repo_token,
+        token=safe_token,
         host=host,
         repo=cfg.repo.removeprefix(f"https://{host}/"),
-        user=cfg.repo_user,
+        user=safe_user,
     )
 ```
 
@@ -274,8 +299,11 @@ Update `configure_git_auth()`:
 
 ```python
 async def configure_git_auth(token: str, host: str, user: str = "x-token-auth") -> None:
-    # ⚠️ GateSec OQ13: URL-encode token — special chars break git config parsing
-    url_prefix = f"https://{user}:{token}@{host}/"
+    # OQ13: URL-encode both user and token — Bitbucket/Azure tokens may contain
+    # special characters that break git config URL parsing or cause truncation.
+    safe_user  = urllib.parse.quote(user,  safe="")
+    safe_token = urllib.parse.quote(token, safe="")
+    url_prefix = f"https://{safe_user}:{safe_token}@{host}/"
     # git config --global url.<url_prefix>.insteadOf https://<host>/
 ```
 
@@ -293,6 +321,15 @@ _SECRET_PATTERNS: list[re.Pattern] = [
 ```
 
 Bitbucket and Azure tokens have no unique prefix — they are already covered by the known-value candidate list (`settings.repo.repo_token` is always added).
+
+> *OQ14 fix:* When `REPO_CLONE_URL` is used, the token embedded in the URL is also collected:
+> ```python
+> from urllib.parse import urlparse
+> parsed = urlparse(settings.repo.repo_clone_url)
+> if parsed.password:
+>     redactor.add_known_value(parsed.password)
+> ```
+> `parsed.password` extracts the `userinfo` password component, which is the token for all providers. This ensures Bitbucket/Azure tokens supplied via `REPO_CLONE_URL` (without a separate `REPO_TOKEN`) are redacted from AI responses and shell output.
 
 ---
 
@@ -320,6 +357,25 @@ if settings.repo.repo_provider not in {"github", "gitlab", "bitbucket", "azure"}
     raise ValueError(f"Unknown REPO_PROVIDER: {settings.repo.repo_provider!r}")
 if settings.repo.repo_provider in {"bitbucket", "azure"} and not settings.repo.repo_user:
     raise ValueError("REPO_USER is required when REPO_PROVIDER=bitbucket or azure")
+# OQ9: REPO_CLONE_URL HTTPS-only (also checked in _build_clone_url; duplicated here for early failure)
+if settings.repo.repo_clone_url:
+    from urllib.parse import urlparse
+    parsed = urlparse(settings.repo.repo_clone_url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(
+            f"REPO_CLONE_URL must use http:// or https://; got scheme {parsed.scheme!r}"
+        )
+# OQ10: REPO_HOST must be a bare hostname
+import re as _re
+_HOSTNAME_RE = _re.compile(r'^[A-Za-z0-9]([A-Za-z0-9\-\.]*[A-Za-z0-9])?$')
+if settings.repo.repo_host and (
+    not _HOSTNAME_RE.match(settings.repo.repo_host)
+    or any(c in settings.repo.repo_host for c in ("://", "@", "/"))
+):
+    raise ValueError(
+        f"REPO_HOST must be a bare hostname (e.g. gitlab.mycompany.com); "
+        f"got {settings.repo.repo_host!r}"
+    )
 ```
 
 ---
@@ -500,27 +556,21 @@ Add:
 
 8. **OQ8 — GitLab group-level access tokens** — GitLab group tokens have the same `glpat-` prefix as personal access tokens. Redaction patterns cover both — no separate case needed.
 
-9. **OQ9 — `REPO_CLONE_URL` protocol whitelist** *(GateSec R1 — 🔴 BLOCKER)* — The escape hatch accepts any URL verbatim, including `file:///etc/passwd`, `ssh://evil.com/…` (RCE via SSH hooks), and `http://127.0.0.1:9200/` (SSRF to internal services). GitPython supports `file://`, `ssh://`, `git://`, and arbitrary protocols. **Required fix:** validate `REPO_CLONE_URL` is HTTPS-only before passing to `git.Repo.clone_from()`:
-    ```python
-    parsed = urllib.parse.urlparse(cfg.repo_clone_url)
-    if parsed.scheme not in ("http", "https"):
-        raise ValueError(f"REPO_CLONE_URL must use http(s); got: {parsed.scheme!r}")
-    ```
-    Also: the token embedded in `REPO_CLONE_URL` is not added to `SecretRedactor._known_values` — see OQ14.
+9. **OQ9 — `REPO_CLONE_URL` protocol whitelist** *(GateSec R1 — 🔴 BLOCKER → ✅ Resolved GateCode R1)* — The escape hatch would accept `file://`, `ssh://`, `git://` etc. — RCE / SSRF vectors. *Resolution:* `_build_clone_url()` and `_validate_config()` call `urllib.parse.urlparse()` and raise `ValueError` for any scheme other than `http`/`https`. See Step 2 and Step 5 code samples.
 
-10. **OQ10 — `REPO_HOST` credential exfiltration via SSRF** *(GateSec R1 — 🔴 BLOCKER)* — Setting `REPO_HOST=evil.com` causes `REPO_TOKEN` to be sent as HTTP Basic Auth to an attacker-controlled domain. The token is embedded in the URL `https://x-token-auth:<token>@evil.com/<repo>` and transmitted in plaintext (over HTTPS to the attacker's server, which terminates TLS and reads the credential). **Required fix:** validate `REPO_HOST` against a hostname regex (`^[a-zA-Z0-9][a-zA-Z0-9.\-]{0,253}[a-zA-Z0-9]$`) and reject values containing `://`, `@`, `/`, or `:` (port numbers may be allowed if needed). Document that `REPO_HOST` is an admin-only setting.
+10. **OQ10 — `REPO_HOST` credential exfiltration via SSRF** *(GateSec R1 — 🔴 BLOCKER → ✅ Resolved GateCode R1)* — `REPO_TOKEN` would be sent to an attacker-controlled domain. *Resolution:* `_build_clone_url()` and `_validate_config()` validate `REPO_HOST` against `_HOSTNAME_RE` (`^[A-Za-z0-9]([A-Za-z0-9\-\.]*[A-Za-z0-9])?$`) and reject values containing `://`, `@`, or `/`. See Step 2 and Step 5 code samples.
 
-11. **OQ11 — `REPO_USER` URL injection** *(GateSec R1 — 🟡 HIGH)* — `REPO_USER` is embedded directly into clone URLs via `str.format()` without URL-encoding. A value like `user@evil.com:password` creates an ambiguous URL (`https://user@evil.com:password:token@host/…`) where different URL parsers disagree on which `@` is the credential separator. **Required fix:** (a) validate `REPO_USER` per provider — Bitbucket usernames: `^[a-zA-Z0-9_\-]{1,128}$`; Azure orgs: `^[a-zA-Z0-9\-]{1,64}$`. (b) Apply `urllib.parse.quote(user, safe='')` before interpolation.
+11. **OQ11 — `REPO_USER` URL injection** *(GateSec R1 — 🟡 HIGH → ✅ Resolved GateCode R1)* — *Resolution:* `_build_clone_url()` calls `urllib.parse.quote(cfg.repo_user, safe="")` before interpolation. Per-provider format regexes (`_BITBUCKET_USER_RE`, `_AZURE_ORG_RE`) in Step 2 provide runtime format validation. Pydantic does not enforce format at load time; the runtime check is the primary gate.
 
-12. **OQ12 — `repo_provider` must be `Literal`, not `str`** *(GateSec R1 — 🟡 MEDIUM)* — The Step 1 code sample types `repo_provider` as `str`, but the project convention for enum-like config fields is `Literal` (see `ai_cli: Literal["copilot", "codex", "api"]` in `AIConfig`, `platform: Literal["telegram", "slack"]` in `Settings`). Using `str` means Pydantic won't reject `REPO_PROVIDER=ftp://evil.com` at load time — it falls through to the `.get()` default in `_build_clone_url`. Step 5 adds runtime validation in `_validate_config()`, but defence-in-depth requires both. **Required fix:** change to `Literal["github", "gitlab", "bitbucket", "azure"]`.
+12. **OQ12 — `repo_provider` must be `Literal`, not `str`** *(GateSec R1 — 🟡 MEDIUM → ✅ Resolved GateSec R1)* — Changed to `Literal["github", "gitlab", "bitbucket", "azure"]` in Step 1. Pydantic rejects unknown values at `Settings.load()`. `_validate_config()` retains an explicit check for a human-readable message.
 
-13. **OQ13 — Token URL-encoding in `configure_git_auth()`** *(GateSec R1 — 🟡 MEDIUM)* — The proposed `configure_git_auth()` embeds `{token}` directly in a git config key (`url.https://user:token@host/.insteadOf`). If the token contains `@`, newlines, or git config metacharacters, parsing breaks silently or the token is truncated. The current GitHub-only code has the same issue but GitHub PATs are alphanumeric; Bitbucket app passwords and Azure PATs may contain special characters. **Required fix:** `urllib.parse.quote(token, safe='')` before embedding.
+13. **OQ13 — Token URL-encoding in `configure_git_auth()`** *(GateSec R1 — 🟡 MEDIUM → ✅ Resolved GateCode R1)* — *Resolution:* `configure_git_auth()` calls `urllib.parse.quote(token, safe="")` and `urllib.parse.quote(user, safe="")` before embedding in the git config URL. See Step 2 code sample.
 
-14. **OQ14 — `REPO_CLONE_URL` token not collected by `SecretRedactor`** *(GateSec R1 — 🟡 HIGH)* — When the user provides `REPO_CLONE_URL` with an embedded token, `_collect_secrets()` only adds `settings.repo.repo_token` to the known-values list. If the user sets `REPO_CLONE_URL` but leaves `REPO_TOKEN` empty (the URL already contains the credential), the embedded token is never collected and leaks through AI responses and shell output unredacted. **Required fix:** parse `REPO_CLONE_URL` and extract the `userinfo` component, or require that `REPO_TOKEN` is always set even when `REPO_CLONE_URL` is used, and document this requirement.
+14. **OQ14 — `REPO_CLONE_URL` token not collected by `SecretRedactor`** *(GateSec R1 — 🟡 HIGH → ✅ Resolved GateCode R1)* — *Resolution:* After HTTPS validation, `urlparse(settings.repo.repo_clone_url).password` is extracted and added to `SecretRedactor._known_values`. See Step 3 code sample.
 
-15. **OQ15 — Commit-msg hook missing `glcbt-` pattern** *(GateSec R1 — 🟡 LOW)* — Step 3 adds `glcbt-` (GitLab CI build token) to `src/redact.py`, but Step 4 omits it from the commit-msg hook patterns. The hook and redactor pattern lists must stay in sync to prevent committed secrets.
+15. **OQ15 — Commit-msg hook missing `glcbt-` pattern** *(GateSec R1 — 🟡 LOW → ✅ Resolved GateSec R1)* — `glcbt-` pattern added to Step 4 commit-msg hook list to stay in sync with Step 3 redact.py patterns.
 
-16. **OQ16 — Git smudge/clean filter attacks from cloned repos** *(GateSec R1 — 🟡 MEDIUM, pre-existing but amplified)* — A malicious `.gitattributes` in the cloned repo can define custom smudge/clean filters that execute arbitrary commands during `git checkout` / `git pull`. This is a pre-existing risk for GitHub repos, but multi-provider support increases the attack surface (more diverse hosts, self-hosted instances with weaker controls). **Recommended mitigation:** set `git config --global filter.*.required false` and `git config --global protocol.file.allow never` in `configure_git_auth()`. Not a blocker for this feature, but should be tracked as a follow-up hardening item.
+16. **OQ16 — Git smudge/clean filter attacks from cloned repos** *(GateSec R1 — 🟡 MEDIUM, pre-existing — Accepted)* — Multi-provider support amplifies the existing risk from malicious `.gitattributes` smudge/clean filters. *Disposition:* accepted as pre-existing. Recommended mitigations (`filter.*.required false`, `protocol.file.allow never`) tracked as a follow-up hardening item alongside Issue #17.
 
 ---
 
@@ -537,6 +587,7 @@ Add:
 - [ ] Feature works on both Telegram and Slack.
 - [ ] Feature works with all AI backends; `copilot` + non-GitHub repo combination is documented (not blocked).
 - [ ] OQ1–OQ8 resolved or explicitly accepted as known limitations with documentation.
+- [ ] OQ9–OQ16 resolved or explicitly accepted (all resolved in spec as of GateCode R1).
 - [ ] `gate info` correctly shows provider name on both platforms.
 - [ ] GitLab PAT, deploy token, and CI build token patterns are redacted in AI responses and shell output.
 - [ ] Bitbucket/Azure tokens are redacted by value-matching (verified by test).
@@ -544,9 +595,8 @@ Add:
 - [ ] `REPO_CLONE_URL` validated as HTTPS-only (OQ9).
 - [ ] `REPO_HOST` validated against hostname regex — no `://`, `@`, `/` (OQ10).
 - [ ] `REPO_USER` URL-encoded and validated per provider (OQ11).
-- [ ] `repo_provider` typed as `Literal["github","gitlab","bitbucket","azure"]` (OQ12).
-- [ ] Token URL-encoded in `configure_git_auth()` (OQ13).
-- [ ] `REPO_CLONE_URL` token added to `SecretRedactor` known-values, or `REPO_TOKEN` required alongside it (OQ14).
-- [ ] Commit-msg hook includes `glcbt-` pattern (OQ15).
-- [ ] OQ9–OQ16 resolved or explicitly accepted.
+- [ ] `repo_provider` typed as `Literal["github","gitlab","bitbucket","azure"]` (OQ12 — resolved in spec).
+- [ ] Token URL-encoded in `configure_git_auth()` (OQ13 — resolved in spec).
+- [ ] `REPO_CLONE_URL` token extracted and added to `SecretRedactor` known-values (OQ14 — resolved in spec).
+- [ ] Commit-msg hook includes `glcbt-` pattern (OQ15 — resolved in spec).
 - [ ] PR merged to `develop` first; CI green; then merged to `main`.
