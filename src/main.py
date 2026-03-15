@@ -120,7 +120,7 @@ async def _startup_slack(settings: Settings, backend, storage: SQLiteStorage, st
     loop = asyncio.get_running_loop()
     stop_event = asyncio.Event()
 
-    bot = SlackBot(settings, backend, storage, start_time, audit)
+    bot = SlackBot(settings, backend, storage, audit=audit, start_time=start_time)
 
     def _handle_sigterm(*_):
         logger.info("Received SIGTERM, shutting down…")

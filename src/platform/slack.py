@@ -134,7 +134,7 @@ class SlackBot:
     """
 
     def __init__(
-        self, settings: Settings, backend: AICLIBackend, storage: ConversationStorage, start_time: float, audit: AuditLog, services=None
+        self, settings: Settings, backend: AICLIBackend, storage: ConversationStorage, services=None, start_time: float = 0.0, audit: AuditLog | None = None
     ) -> None:
         from slack_bolt.async_app import AsyncApp
 
@@ -142,7 +142,8 @@ class SlackBot:
         self._backend = backend
         self._history = storage
         self._start_time = start_time
-        self._audit = audit
+        from src.audit import NullAuditLog
+        self._audit = audit if audit is not None else NullAuditLog()
         self._p = _prefix(settings)
         # (channel, ts) -> pending shell command awaiting confirmation
         self._pending_cmds: dict[tuple[str, str], str] = {}
