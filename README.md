@@ -184,6 +184,8 @@ Copy `.env.example` — it documents every variable with examples.
 | `STREAM_THROTTLE_SECS` | `1.0` | Seconds between streaming message edits |
 | `CONFIRM_DESTRUCTIVE` | `true` | Set `false` to skip confirmation for destructive shell commands |
 | `SKIP_CONFIRM_KEYWORDS` | — | Comma-separated keywords that bypass destructive confirmation (e.g. `push,rm`) |
+| `SHELL_ALLOWLIST` | — | Comma-separated command prefixes permitted by `gate run` (e.g. `git,ls,cat`). Empty = allow all. Shell metacharacters are always rejected regardless of this setting. |
+| `SHELL_READONLY` | `false` | When `true`, restrict `gate run` to a read-only command set (`ls`, `cat`, `head`, `tail`, `grep`, `find`, `git` read-only subcommands). Mutually exclusive with `SHELL_ALLOWLIST` when both are set, `SHELL_READONLY` is checked first. |
 | `PREFIX_ONLY` | `false` | When `true`, ignore messages that don't start with the bot prefix — useful in multi-agent Slack workspaces |
 | `SYSTEM_PROMPT` | — | Optional text prepended to every AI prompt (inline). Use `SYSTEM_PROMPT_FILE` for file-based prompts. |
 | `SLACK_DELETE_THINKING` | `true` | Delete the ⏳ placeholder after posting the final AI response (Slack only). |
