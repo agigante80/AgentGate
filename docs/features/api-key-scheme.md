@@ -17,7 +17,7 @@ key re-use is eliminated.
 |----------|-------|-------|------|-------|
 | GateCode | 1 | -/10 | - | Pending |
 | GateSec  | 1 | -/10 | - | Pending |
-| GateDocs | 1 | -/10 | - | Pending |
+| GateDocs | 1 | 9/10 | 2026-03-16 | Added logger.warning to deprecation code; fixed Roadmap Update section (duplicate→✅ edit); added .github/copilot-instructions.md to Files table and AC; clarified Whisper migration "When" and README upgrading section |
 
 **Status**: ⏳ Pending review
 **Approved**: No — requires all scores ≥ 9/10 in the same round
@@ -181,26 +181,29 @@ If `WHISPER_PROVIDER=openai`, `WHISPER_API_KEY` **must** be set. No fallback.
 ### Deprecation warning (v1.0.0 behaviour)
 
 ```python
-import warnings, os
+import logging, warnings, os
+
+logger = logging.getLogger(__name__)
 
 if os.environ.get("AI_API_KEY"):
-    warnings.warn(
+    _msg = (
         "AI_API_KEY is deprecated and will be removed in v1.1.0. "
         "Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or the backend-specific key instead. "
-        "See docs/features/api-key-scheme.md for the migration guide.",
-        DeprecationWarning,
-        stacklevel=2,
+        "See docs/features/api-key-scheme.md for the migration guide."
     )
+    logger.warning(_msg)          # visible in Docker log streams
+    warnings.warn(_msg, DeprecationWarning, stacklevel=2)
+
 if os.environ.get("CODEX_API_KEY"):
-    warnings.warn(
+    _msg = (
         "CODEX_API_KEY is deprecated and will be removed in v1.1.0. "
-        "Use OPENAI_API_KEY instead.",
-        DeprecationWarning,
-        stacklevel=2,
+        "Use OPENAI_API_KEY instead."
     )
+    logger.warning(_msg)
+    warnings.warn(_msg, DeprecationWarning, stacklevel=2)
 ```
 
-Emit these in `Settings.load()` *after* all sub-configs are constructed so the check runs exactly once at startup.
+Emit these in `Settings.load()` *after* all sub-configs are constructed so the check runs exactly once at startup. Using both `logger.warning()` and `warnings.warn()` ensures the message is visible in Docker log streams (where Python `warnings` output is often suppressed) as well as in test suites that check for `DeprecationWarning`.
 
 ---
 
@@ -381,6 +384,7 @@ Remove `fallback_api_key` from `create_transcriber()` call.
 | `docker-compose.yml.example` | **Edit** | Same as `.env.example` |
 | `docs/roadmap.md` | **Edit** | Mark item done on completion |
 | `docs/features/api-key-scheme.md` | **Edit** | Set status to `Implemented` on merge |
+| `.github/copilot-instructions.md` | **Edit** | Update key-naming notes: document new per-backend scheme (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`), note that `AI_API_KEY`/`CODEX_API_KEY` are removed, and confirm `secret_values()` convention still applies |
 
 ---
 
@@ -434,6 +438,15 @@ Replace the `AI_API_KEY` and `CODEX_API_KEY` rows in the env var table with:
 | `ANTHROPIC_API_KEY` | `""` | Required when `AI_CLI=api` + `AI_PROVIDER=anthropic`. Standard Anthropic env var. |
 | `WHISPER_API_KEY` | `""` | Required (no fallback) when `WHISPER_PROVIDER=openai`. |
 
+Add a `## Upgrading from v0.x to v1.0` section (place before the Changelog or at the end of the README). This section must include:
+
+1. The migration table from the [Migration Guide](#migration-guide) section below.
+2. A note about the startup warning message — self-hosters using the old vars will see this in their container logs:
+   ```
+   WARNING: AI_API_KEY is deprecated and will be removed in v1.1.0. Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or the backend-specific key instead. See docs/features/api-key-scheme.md for the migration guide.
+   ```
+   Without this note, operators may not know the warning is actionable or how to respond to it.
+
 ### `.env.example`
 
 ```bash
@@ -470,11 +483,13 @@ The removal release (v1.1.0) drops them entirely and bumps to `1.1.0`.
 
 ## Roadmap Update
 
-Add to `docs/roadmap.md`:
+Item 2.17 already exists in `docs/roadmap.md`. When this feature is merged to `main`, replace the existing row with the ✅-marked version:
 
 ```markdown
-| 2.17 | API key scheme refactor — explicit per-backend keys; remove AI_API_KEY master fallback | [→ features/api-key-scheme.md](features/api-key-scheme.md) |
+| 2.17 | ✅ API key scheme refactor — explicit per-backend keys; remove `AI_API_KEY` master fallback | [→ features/api-key-scheme.md](features/api-key-scheme.md) |
 ```
+
+> Do not add a new row — the item already appears in the roadmap. Editing in place preserves the table's sequential ordering.
 
 ---
 
@@ -488,7 +503,7 @@ Add to `docs/roadmap.md`:
 | `AI_API_KEY` (used with `AI_CLI=api` + `AI_PROVIDER=openai`) | `OPENAI_API_KEY` | Always |
 | `AI_API_KEY` (used with `AI_CLI=api` + `AI_PROVIDER=anthropic`) | `ANTHROPIC_API_KEY` | Always |
 | `CODEX_API_KEY` | `OPENAI_API_KEY` | Always |
-| `WHISPER_API_KEY` falling back to `AI_API_KEY` | `WHISPER_API_KEY` (set it explicitly) | When using Whisper |
+| `WHISPER_API_KEY` falling back to `AI_API_KEY` | `WHISPER_API_KEY` (set it explicitly) | If you previously omitted `WHISPER_API_KEY` and relied on `AI_API_KEY` as a silent fallback — the fallback is gone; you must now set `WHISPER_API_KEY` explicitly |
 
 No other env vars change. Copilot and Gemini backends are unaffected.
 
@@ -520,6 +535,7 @@ No other env vars change. Copilot and Gemini backends are unaffected.
 - [ ] `create_transcriber()` no longer accepts `fallback_api_key`.
 - [ ] All existing tests pass with no failures (`pytest tests/ -v --tb=short`).
 - [ ] `ruff check src/` reports no new issues.
-- [ ] `README.md`, `.env.example`, `docker-compose.yml.example` updated.
-- [ ] `docs/roadmap.md` entry 2.17 added.
+- [ ] `README.md`, `.env.example`, `docker-compose.yml.example` updated (including `## Upgrading from v0.x to v1.0` section with migration table and startup warning message).
+- [ ] `docs/roadmap.md` entry 2.17 marked ✅.
+- [ ] `.github/copilot-instructions.md` updated to reflect the new per-backend key scheme and removal of `AI_API_KEY` / `CODEX_API_KEY`.
 - [ ] `VERSION` bumped to `1.0.0` on develop before merge to main.
