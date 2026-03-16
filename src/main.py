@@ -10,6 +10,7 @@ from src.ai.factory import create_backend
 from src import runtime
 from src.config import REPO_DIR, DB_PATH, AUDIT_DB_PATH
 from src.audit import AuditLog
+from src import history  # noqa: F401 — registers @storage_registry backends
 from src.logging_setup import configure_logging
 from src._loader import _module_file_exists
 from src.services import Services, ShellService, RepoService
