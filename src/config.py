@@ -194,7 +194,11 @@ class Settings(BaseSettings):
 
     @classmethod
     def load(cls) -> "Settings":
-        return cls(
+        import logging as _logging
+        import os as _os
+        import warnings as _warnings
+
+        instance = cls(
             telegram=TelegramConfig(),
             github=GitHubConfig(),
             log=LogConfig(),
@@ -205,6 +209,25 @@ class Settings(BaseSettings):
             audit=AuditConfig(),
             storage=StorageConfig(),
         )
+
+        _log = _logging.getLogger(__name__)
+        if _os.environ.get("AI_API_KEY"):
+            _msg = (
+                "AI_API_KEY is deprecated and will be removed in v1.1.0. "
+                "Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or the backend-specific key instead. "
+                "See docs/features/api-key-scheme.md for the migration guide."
+            )
+            _log.warning(_msg)
+            _warnings.warn(_msg, DeprecationWarning, stacklevel=2)
+        if _os.environ.get("CODEX_API_KEY"):
+            _msg = (
+                "CODEX_API_KEY is deprecated and will be removed in v1.1.0. "
+                "Use OPENAI_API_KEY instead."
+            )
+            _log.warning(_msg)
+            _warnings.warn(_msg, DeprecationWarning, stacklevel=2)
+
+        return instance
 
 
 # Module-level path constants — import these instead of hardcoding "/repo" or "/data"
