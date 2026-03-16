@@ -35,7 +35,7 @@ GateSec's 8/10 indicates unresolved security concerns after the inline fixes. Th
 | Reviewer | Round | Score | Date | Notes |
 |----------|-------|-------|------|-------|
 | GateCode | 2 | 9/10 | 2026-03-16 | Split Step 1 into PR1/PR2 sub-steps; labelled all Steps PR1 or PR2; fixed executor.py Files table (missing GEMINI_API_KEY, GOOGLE_API_KEY, COPILOT_GITHUB_TOKEN); added Step 7 for .github/copilot-instructions.md; resolved Open Question 2 (deferred, roadmap item 2.18 added); sharpened test_secret_env_keys_correct_names to assert absence of wrong names |
-| GateSec  | 2 | -/10 | - | Pending |
+| GateSec  | 2 | 9/10 | 2026-03-16 | All three round 1 blocking gaps resolved: (1) `_collect_secrets()` delegation — Step 1b, test, and AC all correct; (2) `_SECRET_ENV_KEYS` names — Step 4 uses correct names, test asserts absence of wrong ones; (3) two-PR split — Steps labelled PR1/PR2, AC enforces it. One minor fix: `conftest.py` `clean_env` must also scrub `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY` (promoted to Pydantic fields by the refactor); added to Step 6, Files table, and AC |
 | GateDocs | 2 | -/10 | - | Pending |
 
 ---
@@ -417,7 +417,7 @@ def _validate_config(settings: Settings) -> None:
 - `tests/unit/test_bot.py` — remove references to `ai_api_key` and `codex_api_key` from `_make_settings()`.
 - `tests/unit/test_config.py` (or create) — add tests for deprecation warnings and new `_validate_config()` checks.
 - `tests/integration/test_factory.py` — update to pass `openai_api_key` / `anthropic_api_key`.
-- `conftest.py` — update the autouse credential-scrub fixture to remove `AI_API_KEY` / `CODEX_API_KEY`; add `ANTHROPIC_API_KEY`.
+- `conftest.py` — update the autouse credential-scrub fixture to remove `AI_API_KEY` / `CODEX_API_KEY`; add `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, and `GOOGLE_API_KEY`. `OPENAI_API_KEY` is critical: the refactor promotes it from "injected into a subprocess env" to a first-class Pydantic config field read by both `DirectAIConfig` and `CodexAIConfig` — without scrubbing it, a developer's shell-level key leaks into every test run.
 
 ---
 
@@ -444,7 +444,7 @@ Update the key-naming notes in the instructions file to:
 | `tests/unit/test_bot.py` | **Edit** | Remove `ai_api_key` / `codex_api_key` from `_make_settings()` helpers |
 | `tests/unit/test_config.py` | **Create/Edit** | Tests for deprecation warnings; `_validate_config()` error cases |
 | `tests/integration/test_factory.py` | **Edit** | Pass new key names in fixtures |
-| `tests/conftest.py` | **Edit** | Update credential-scrub autouse fixture |
+| `tests/conftest.py` | **Edit** | Update credential-scrub autouse fixture: remove `AI_API_KEY`/`CODEX_API_KEY`; add `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY` |
 | `docs/features/gemini-cli-backend.md` | **Edit** | Remove `AI_API_KEY` fallback references |
 | `README.md` | **Edit** | Update env var table; remove `AI_API_KEY`, `CODEX_API_KEY`; add `ANTHROPIC_API_KEY` |
 | `.env.example` | **Edit** | Replace `AI_API_KEY` / `CODEX_API_KEY` with explicit per-backend vars |
@@ -617,4 +617,5 @@ No other env vars change. Copilot and Gemini backends are unaffected.
 - [ ] `README.md`, `.env.example`, `docker-compose.yml.example` updated (including `## Upgrading from v0.x to v1.0` section with migration table and startup warning message).
 - [ ] `docs/roadmap.md` entry 2.17 marked ✅.
 - [ ] `.github/copilot-instructions.md` updated to reflect the new per-backend key scheme and removal of `AI_API_KEY` / `CODEX_API_KEY`.
+- [ ] `tests/conftest.py` `clean_env` fixture scrubs `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, and `GOOGLE_API_KEY` (in addition to existing vars). Without this, a developer's real API keys leak into test runs via Pydantic `BaseSettings` auto-parsing.
 - [ ] `VERSION` bumped to `1.0.0` on develop before merge to main.
