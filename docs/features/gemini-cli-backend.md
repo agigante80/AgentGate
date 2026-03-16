@@ -97,9 +97,11 @@ platform settings remain unchanged.
 - **Model selection** — if `AI_MODEL` is set, pass it via `--model <value>`.
   The shorthand is `-m`. If unset, the CLI uses its own default.
 - **Extra opts** — `AI_CLI_OPTS` is split with `shlex` and appended after the
-  mandatory safety flags (`--non-interactive --no-tools`), exactly as an additive
-  extension. The safety flags cannot be removed via `AI_CLI_OPTS`. To enable
-  Gemini's built-in tool use deliberately, set `AI_CLI_OPTS=--yolo`.
+  mandatory safety flags (`--non-interactive --no-tools`). Flags that would negate
+  the safety flags (e.g. `--interactive`, `--tools`) are stripped before building
+  the subprocess command (see `_SAFETY_NEGATIONS` in the implementation) because
+  most CLIs resolve conflicting flags via last-wins semantics. To enable Gemini's
+  built-in tool use deliberately, set `AI_CLI_OPTS=--yolo`.
 - **Timeout** — `send()` applies a 180s hard timeout (same as `CopilotSession`)
   to prevent the process hanging if the API is unavailable.
 - **Tool use / MCP** — `--no-tools` is included in the default safety flags
@@ -138,6 +140,7 @@ platform settings remain unchanged.
 - **Exit code handling** — exit code 0 = success; 1 = general error; 42 = invalid input; 53 = turn limit exceeded. Map non-zero codes to user-facing error messages (don't silently return empty output).
 - **API key validation** — when `AI_CLI=gemini`, `GEMINI_API_KEY` must be non-empty. Add a check in `_validate_config()` in `src/main.py` — same pattern as the Telegram/Slack token checks.
 - **Timeout interaction** — if the AI response feedback feature (`docs/features/ai-response-feedback.md`) is implemented first, the platform-layer timeout replaces the internal 180s timeout. Coordinate: do not add a new internal `asyncio.wait_for()` inside `GeminiBackend` if the platform already wraps it.
+- **`stream()` has no internal timeout** — unlike `send()` (which wraps `proc.communicate()` in `asyncio.wait_for(timeout=180)`), `stream()` reads `proc.stdout` line-by-line without a timeout. If the Gemini CLI hangs mid-stream, the caller blocks indefinitely. This mirrors `CopilotBackend.stream()` (also no timeout), so it is not a regression — but if no platform-layer timeout exists at implementation time, add a background watchdog task that kills `proc` after `TIMEOUT` seconds. See Open Question 9.
 - **`REPO_DIR` and `DB_PATH`** — import from `src/config.py`; never hardcode paths.
 - **`asyncio_mode = auto`** — all `async def test_*` functions run without `@pytest.mark.asyncio`.
 
@@ -164,7 +167,10 @@ from src.registry import backend_registry
 
 logger = logging.getLogger(__name__)
 
-TIMEOUT = 180  # seconds — same as CopilotSession
+TIMEOUT = 180  # seconds — hard cap to prevent process hangs (CopilotBackend has none)
+
+# Flags that would override mandatory safety flags via CLI last-wins semantics.
+_SAFETY_NEGATIONS: frozenset[str] = frozenset({"--interactive", "--tools"})
 
 
 @backend_registry.register("gemini")
@@ -186,7 +192,10 @@ class GeminiBackend(SubprocessMixin, AICLIBackend):
         #   would otherwise bypass AgentGate's SHELL_ALLOWLIST, is_destructive() checks,
         #   confirmation dialogs, and audit logging entirely.
         safety_flags = ["--non-interactive", "--no-tools"]
-        extra = safety_flags + (shlex.split(self._opts) if self._opts else [])
+        user_opts = shlex.split(self._opts) if self._opts else []
+        # Strip flags that negate safety flags — most CLIs use last-wins semantics.
+        user_opts = [o for o in user_opts if o not in _SAFETY_NEGATIONS]
+        extra = safety_flags + user_opts
         cmd = ["gemini", "-p", prompt] + extra
         if self._model:
             cmd += ["--model", self._model]
@@ -581,6 +590,16 @@ class TestMakeCmd:
         assert "--non-interactive" in cmd  # still present — safety flag not replaced
         assert "--no-tools" in cmd          # still present — safety flag not replaced
 
+    def test_safety_negation_flags_stripped(self):
+        """Flags that negate mandatory safety flags are stripped from user opts."""
+        b = GeminiBackend(api_key="k", opts="--tools --interactive --debug")
+        cmd, _ = b._make_cmd("hi")
+        assert "--tools" not in cmd         # negates --no-tools — stripped
+        assert "--interactive" not in cmd   # negates --non-interactive — stripped
+        assert "--debug" in cmd             # non-conflicting opt preserved
+        assert "--non-interactive" in cmd   # safety flag still present
+        assert "--no-tools" in cmd          # safety flag still present
+
 
 # ── send() ─────────────────────────────────────────────────────────────────────
 
@@ -720,6 +739,8 @@ def test_gemini_model_passed_through(self, monkeypatch):
 | 6 | **Trailing footer?** | 🔍 Verify at impl | Copilot CLI appends `Total usage est: …` which `CopilotSession` strips. Check whether Gemini CLI appends similar metadata and strip if needed. |
 | 7 | **Turn limit (rc=53)** | ✅ Documented | Exit code 53 = turn limit exceeded. Handled in `send()` and `stream()` with labelled error messages. |
 | 8 | **`GOOGLE_API_KEY` vs `GEMINI_API_KEY`** | ✅ Clarified | Both accepted by the CLI. AgentGate uses `GEMINI_API_KEY` field (reads `GEMINI_API_KEY` env var) for clarity; `GOOGLE_API_KEY` works as a silent fallback if the CLI prefers it. |
+| 9 | **`stream()` timeout gap** | ⚠️ Address at impl | `send()` has a 180s `asyncio.wait_for` timeout; `stream()` reads stdout indefinitely with no timeout. If no platform-layer timeout exists at implementation time, add a background watchdog that kills the subprocess after `TIMEOUT` seconds. |
+| 10 | **Safety-flag negation via `AI_CLI_OPTS`** | ✅ Resolved — stripped | Most CLIs resolve conflicting flags via last-wins; a user-supplied `--tools` after the prepended `--no-tools` could re-enable Gemini's built-in tools. `_SAFETY_NEGATIONS` denylist strips `--interactive` and `--tools` from user opts before command assembly. |
 
 ---
 
@@ -770,6 +791,7 @@ The detailed test implementations are embedded in the Architecture section (`tes
 | `test_model_flag_absent_when_empty` | No `--model` flag when `AI_MODEL` is empty |
 | `test_custom_opts_appended_after_safety_flags` | Safety flags always prepended; opts are additive, not replacing |
 | `test_custom_opts_parsed_with_shlex` | Custom opts parsed correctly; `--non-interactive` and `--no-tools` still present |
+| `test_safety_negation_flags_stripped` | Flags that negate safety flags (`--tools`, `--interactive`) are stripped from user opts |
 | `test_send_success` | Exit code 0 returns stdout as a string |
 | `test_send_error_rc1` | Exit code 1 returns a user-facing error message |
 | `test_send_error_rc42_invalid_input` | Exit code 42 returns "invalid input" message |
@@ -886,6 +908,7 @@ Potential stretch goal: streaming progressiveness verification (Open Questions i
 - [ ] `VERSION` file bumped to `0.8.0` on `develop` before merge to `main`.
 - [ ] `AI_CLI=gemini` end-to-end: a message reaches the Gemini CLI subprocess and the response is returned to the user in both Telegram and Slack.
 - [ ] `--non-interactive` and `--no-tools` are always included in the subprocess command (cannot be accidentally omitted by `AI_CLI_OPTS`).
+- [ ] `AI_CLI_OPTS` values that negate safety flags (`--interactive`, `--tools`) are stripped before command assembly — verified by `test_safety_negation_flags_stripped`.
 - [ ] `GEMINI_API_KEY` missing triggers a clear error at startup (not a silent hang).
 - [ ] All non-zero exit codes (1, 42, 53) return user-facing error messages (not empty strings or tracebacks).
 - [ ] Subprocess is killed *and waited* on timeout (no zombie `gemini` processes).
@@ -907,7 +930,7 @@ Potential stretch goal: streaming progressiveness verification (Open Questions i
 | Reviewer | Round | Score | Date       | Notes |
 |----------|-------|-------|------------|-------|
 | GateCode | 1     | 9/10  | 2026-03-16 | Added `src/main.py` to Files table; corrected `_load_backends()` code example to match live importlib pattern; corrected roadmap milestone reference from 2.10 → 2.6; flagged future-modularity-debt on factory.py edit |
-| GateSec  | 1     | -/10  | -          | Pending |
+| GateSec  | 1     | 9/10  | 2026-03-16 | GateSec round 1: added safety-flag negation denylist, stream() timeout gap note, 2 new acceptance criteria; no blocking security issues |
 | GateDocs | 1     | -/10  | -          | Pending |
 
 **Status**: 🔄 In review — round 1
