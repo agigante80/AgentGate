@@ -55,15 +55,18 @@ class TestConstruction:
 # ── _make_cmd ─────────────────────────────────────────────────────────────────
 
 class TestMakeCmd:
-    def test_default_cmd_has_non_interactive(self):
+    def test_default_cmd_has_approval_mode_plan(self):
         b = GeminiBackend(api_key="k")
         cmd, _ = b._make_cmd("hello")
-        assert "--non-interactive" in cmd
+        assert "--approval-mode" in cmd
+        assert "plan" in cmd
 
-    def test_default_cmd_has_no_tools(self):
+    def test_default_cmd_no_non_interactive_flag(self):
+        """Non-interactive mode is provided by -p; --non-interactive is not a valid flag."""
         b = GeminiBackend(api_key="k")
         cmd, _ = b._make_cmd("hello")
-        assert "--no-tools" in cmd
+        assert "--non-interactive" not in cmd
+        assert "--no-tools" not in cmd
 
     def test_prompt_in_cmd(self):
         b = GeminiBackend(api_key="k")
@@ -98,39 +101,46 @@ class TestMakeCmd:
 
     def test_custom_opts_appended_after_safety_flags(self):
         """Safety flags are always prepended; custom opts are additive, not replacing."""
-        b = GeminiBackend(api_key="k", opts="--yolo")
+        b = GeminiBackend(api_key="k", opts="--debug")
         cmd, _ = b._make_cmd("hi")
-        assert "--non-interactive" in cmd
-        assert "--no-tools" in cmd
-        assert "--yolo" in cmd
+        assert "--approval-mode" in cmd
+        assert "plan" in cmd
+        assert "--debug" in cmd
 
     def test_custom_opts_parsed_with_shlex(self):
         b = GeminiBackend(api_key="k", opts="--debug --sandbox")
         cmd, _ = b._make_cmd("hi")
         assert "--debug" in cmd
         assert "--sandbox" in cmd
-        assert "--non-interactive" in cmd
-        assert "--no-tools" in cmd
+        assert "--approval-mode" in cmd
+        assert "plan" in cmd
 
     def test_safety_negation_flags_stripped(self):
-        """Flags that negate mandatory safety flags are stripped from user opts."""
-        b = GeminiBackend(api_key="k", opts="--tools --interactive --debug")
+        """--yolo auto-approves all tools and must be stripped from user opts."""
+        b = GeminiBackend(api_key="k", opts="--yolo --debug")
         cmd, _ = b._make_cmd("hi")
-        assert "--tools" not in cmd
-        assert "--interactive" not in cmd
+        assert "--yolo" not in cmd
+        assert "-y" not in cmd
         assert "--debug" in cmd
-        assert "--non-interactive" in cmd
-        assert "--no-tools" in cmd
+        assert "--approval-mode" in cmd
+
+    def test_user_approval_mode_override_stripped(self):
+        """Users cannot override --approval-mode to bypass the plan (read-only) safety flag."""
+        b = GeminiBackend(api_key="k", opts="--approval-mode yolo --debug")
+        cmd, _ = b._make_cmd("hi")
+        # Must have exactly one --approval-mode (ours), set to plan
+        idx = cmd.index("--approval-mode")
+        assert cmd[idx + 1] == "plan"
+        assert cmd.count("--approval-mode") == 1
+        assert "--debug" in cmd
 
     def test_safety_negation_value_forms_stripped(self):
-        """--tools=shell and --interactive=true must also be blocked (value-form bypass)."""
-        b = GeminiBackend(api_key="k", opts="--tools=shell --interactive=true --debug")
+        """--yolo short form -y must also be blocked."""
+        b = GeminiBackend(api_key="k", opts="-y --debug")
         cmd, _ = b._make_cmd("hi")
-        assert not any(c.startswith("--tools") for c in cmd if c != "--no-tools")
-        assert not any(c.startswith("--interactive") for c in cmd if c != "--non-interactive")
+        assert "-y" not in cmd
         assert "--debug" in cmd
-        assert "--non-interactive" in cmd
-        assert "--no-tools" in cmd
+        assert "--approval-mode" in cmd
 
 
 # ── send() ─────────────────────────────────────────────────────────────────────

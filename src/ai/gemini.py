@@ -17,7 +17,9 @@ logger = logging.getLogger(__name__)
 TIMEOUT = 180  # seconds — hard cap to prevent process hangs
 
 # Flags that would override mandatory safety flags via CLI last-wins semantics.
-_SAFETY_NEGATIONS: frozenset[str] = frozenset({"--interactive", "--tools"})
+# --approval-mode yolo/auto_edit would allow Gemini's built-in tools to execute
+# shell commands, file writes, and web searches — bypassing AgentGate's security layer.
+_SAFETY_NEGATIONS: frozenset[str] = frozenset({"--yolo", "-y"})
 
 
 @backend_registry.register("gemini")
@@ -33,20 +35,32 @@ class GeminiBackend(SubprocessMixin, AICLIBackend):
 
     def _make_cmd(self, prompt: str) -> tuple[list[str], dict]:
         env = {**scrubbed_env(), "GEMINI_API_KEY": self._api_key}
-        # Always prepend safety flags — never allow AI_CLI_OPTS to override them.
-        # --non-interactive: prevents auth dialogs and interactive prompts in headless mode.
-        # --no-tools: disables Gemini's built-in shell exec, file writes, and web search, which
-        #   would otherwise bypass AgentGate's SHELL_ALLOWLIST, is_destructive() checks,
-        #   confirmation dialogs, and audit logging entirely.
-        safety_flags = ["--non-interactive", "--no-tools"]
+        # --approval-mode plan: read-only mode — Gemini proposes tool actions but never
+        # executes them. This prevents Gemini's built-in shell exec, file writes, and web
+        # search from bypassing AgentGate's SHELL_ALLOWLIST, is_destructive() checks,
+        # confirmation dialogs, and audit logging.
+        # Non-interactive mode is handled by -p/--prompt (already in the command).
+        safety_flags = ["--approval-mode", "plan"]
         user_opts = shlex.split(self._opts) if self._opts else []
-        # Strip flags that negate safety flags — most CLIs use last-wins semantics.
-        # Match both bare (--tools) and value (--tools=shell) forms.
+        # Strip flags that would override safety flags (e.g. --yolo auto-approves all tools).
         user_opts = [
             o for o in user_opts
             if not any(o == neg or o.startswith(f"{neg}=") for neg in _SAFETY_NEGATIONS)
         ]
-        extra = safety_flags + user_opts
+        # Strip any --approval-mode from user opts so our safety flag always wins.
+        filtered_opts: list[str] = []
+        skip_next = False
+        for o in user_opts:
+            if skip_next:
+                skip_next = False
+                continue
+            if o == "--approval-mode":
+                skip_next = True
+                continue
+            if o.startswith("--approval-mode="):
+                continue
+            filtered_opts.append(o)
+        extra = safety_flags + filtered_opts
         cmd = ["gemini", "-p", prompt] + extra
         if self._model:
             cmd += ["--model", self._model]
