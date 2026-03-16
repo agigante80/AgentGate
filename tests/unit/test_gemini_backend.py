@@ -122,6 +122,16 @@ class TestMakeCmd:
         assert "--non-interactive" in cmd
         assert "--no-tools" in cmd
 
+    def test_safety_negation_value_forms_stripped(self):
+        """--tools=shell and --interactive=true must also be blocked (value-form bypass)."""
+        b = GeminiBackend(api_key="k", opts="--tools=shell --interactive=true --debug")
+        cmd, _ = b._make_cmd("hi")
+        assert not any(c.startswith("--tools") for c in cmd if c != "--no-tools")
+        assert not any(c.startswith("--interactive") for c in cmd if c != "--non-interactive")
+        assert "--debug" in cmd
+        assert "--non-interactive" in cmd
+        assert "--no-tools" in cmd
+
 
 # ── send() ─────────────────────────────────────────────────────────────────────
 

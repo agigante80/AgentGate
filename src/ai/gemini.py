@@ -41,7 +41,11 @@ class GeminiBackend(SubprocessMixin, AICLIBackend):
         safety_flags = ["--non-interactive", "--no-tools"]
         user_opts = shlex.split(self._opts) if self._opts else []
         # Strip flags that negate safety flags — most CLIs use last-wins semantics.
-        user_opts = [o for o in user_opts if o not in _SAFETY_NEGATIONS]
+        # Match both bare (--tools) and value (--tools=shell) forms.
+        user_opts = [
+            o for o in user_opts
+            if not any(o == neg or o.startswith(f"{neg}=") for neg in _SAFETY_NEGATIONS)
+        ]
         extra = safety_flags + user_opts
         cmd = ["gemini", "-p", prompt] + extra
         if self._model:
