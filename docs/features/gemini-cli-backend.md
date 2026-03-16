@@ -301,22 +301,22 @@ ai_cli: Literal["copilot", "codex", "api", "gemini"] = "copilot"
 Add after the existing `ai_cli_opts` field:
 
 ```python
-gemini_api_key: str = ""   # GEMINI_API_KEY — falls back to AI_API_KEY if empty
+gemini_api_key: str = ""   # GEMINI_API_KEY — required when AI_CLI=gemini
 ```
 
 The `gemini_api_key` field reads from `GEMINI_API_KEY` (Pydantic auto-maps field
-name to env var in uppercase). The factory falls back to `ai_api_key` (`AI_API_KEY`)
-so users who already have a generic key set don't need a duplicate.
+name to env var in uppercase). `GEMINI_API_KEY` must be set explicitly — there is no
+fallback to a generic key. See `docs/features/api-key-scheme.md` for the rationale.
 
 Also update `AIConfig.secret_values()` to include the new key so `SecretRedactor`
 scrubs it from all outgoing text (AI responses, error messages, shell output):
 
 ```python
-# Before:
+# Assuming the api-key-scheme refactor (docs/features/api-key-scheme.md) has landed:
 def secret_values(self) -> list[str]:
-    return [v for v in [self.ai_api_key, self.codex.codex_api_key] if v]
+    return [v for v in [self.gemini_api_key] if v]
 
-# After:
+# If implementing Gemini before the api-key-scheme refactor, add to the existing list:
 def secret_values(self) -> list[str]:
     return [v for v in [
         self.ai_api_key,
@@ -397,7 +397,7 @@ Two changes are required:
     if ai.ai_cli == "gemini":
         from src.ai.gemini import GeminiBackend
         return GeminiBackend(
-            api_key=ai.gemini_api_key or ai.ai_api_key,
+            api_key=ai.gemini_api_key,
             model=ai.ai_model,
             opts=ai.ai_cli_opts,
         )
@@ -469,7 +469,7 @@ Two tables must be updated (Telegram section ≈ line 158, Slack section ≈ lin
 
 **Add `GEMINI_API_KEY` row** — insert after the `COPILOT_GITHUB_TOKEN` row:
 ```markdown
-| `GEMINI_API_KEY` | — | API key for the `gemini` backend (from [AI Studio](https://aistudio.google.com/app/apikey)). Falls back to `AI_API_KEY` if unset. |
+| `GEMINI_API_KEY` | — | API key for the `gemini` backend (from [AI Studio](https://aistudio.google.com/app/apikey)). Required; no fallback. |
 ```
 
 **Update `AI_CLI_OPTS` description** — add the Gemini default:
@@ -718,13 +718,12 @@ def test_creates_gemini_backend(self, monkeypatch):
     assert isinstance(backend, GeminiBackend)
     assert backend._api_key == "AIzaTest"
 
-def test_gemini_falls_back_to_ai_api_key(self, monkeypatch):
+def test_gemini_requires_api_key(self, monkeypatch):
     monkeypatch.setenv("AI_CLI", "gemini")
-    monkeypatch.setenv("AI_API_KEY", "fallback-key")
-    # GEMINI_API_KEY not set
-    cfg = AIConfig()
-    backend = create_backend(cfg)
-    assert backend._api_key == "fallback-key"
+    # GEMINI_API_KEY not set — should raise ValueError
+    with pytest.raises(ValueError, match="GEMINI_API_KEY"):
+        cfg = AIConfig()
+        create_backend(cfg)
 
 def test_gemini_model_passed_through(self, monkeypatch):
     monkeypatch.setenv("AI_CLI", "gemini")
@@ -822,7 +821,7 @@ The detailed test implementations are embedded in the Architecture section (`tes
 | Test | What it checks |
 |------|----------------|
 | `test_creates_gemini_backend` | `create_backend()` with `AI_CLI=gemini` returns `GeminiBackend` instance |
-| `test_gemini_falls_back_to_ai_api_key` | If `GEMINI_API_KEY` unset but `AI_API_KEY` set, backend uses the fallback |
+| `test_gemini_requires_api_key` | If `GEMINI_API_KEY` unset, `create_backend()` raises `ValueError` with a clear message |
 | `test_gemini_model_passed_through` | `AI_MODEL` value reaches `GeminiBackend` constructor |
 
 ### Coverage note
