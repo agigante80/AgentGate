@@ -66,6 +66,8 @@ def _validate_config(settings: Settings) -> None:
     ai = settings.ai
     if ai.ai_cli == "codex" and not ai.codex.openai_api_key:
         raise ValueError("OPENAI_API_KEY must be set when AI_CLI=codex")
+    if ai.ai_cli == "gemini" and not ai.gemini_api_key:
+        raise ValueError("GEMINI_API_KEY must be set when AI_CLI=gemini")
     if ai.ai_cli == "api":
         if ai.direct.ai_provider in ("openai", "openai-compat") and not ai.direct.openai_api_key:
             raise ValueError(

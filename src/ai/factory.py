@@ -14,7 +14,7 @@ def _load_backends() -> None:
     import importlib
     import importlib.util
 
-    for mod in ("src.ai.copilot", "src.ai.codex", "src.ai.direct"):
+    for mod in ("src.ai.copilot", "src.ai.codex", "src.ai.direct", "src.ai.gemini"):
         rel_path = mod.replace(".", "/") + ".py"
         if importlib.util.find_spec(mod) is None and not _module_file_exists(rel_path):
             continue
@@ -89,6 +89,17 @@ def create_backend(ai: AIConfig) -> AICLIBackend:
             "codex",
             api_key=codex_key,
             model=codex_model,
+            opts=ai.ai_cli_opts,
+        )
+
+    if ai.ai_cli == "gemini":
+        gemini_key = ai.gemini_api_key
+        if not gemini_key:
+            raise ValueError("GEMINI_API_KEY must be set when AI_CLI=gemini")
+        from src.ai.gemini import GeminiBackend
+        return GeminiBackend(
+            api_key=gemini_key,
+            model=ai.ai_model,
             opts=ai.ai_cli_opts,
         )
 

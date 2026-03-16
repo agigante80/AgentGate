@@ -159,8 +159,9 @@ Copy `.env.example` — it documents every variable with examples.
 
 | Variable | Default | Description |
 |---|---|---|
-| `AI_CLI` | `copilot` | `copilot` \| `codex` \| `api` |
+| `AI_CLI` | `copilot` | `copilot` \| `codex` \| `api` \| `gemini` |
 | `COPILOT_GITHUB_TOKEN` | — | Fine-grained PAT with **Copilot Requests** permission (required for `copilot` backend) |
+| `GEMINI_API_KEY` | — | API key for the `gemini` backend (from [AI Studio](https://aistudio.google.com/app/apikey)). Required when `AI_CLI=gemini`; no fallback. |
 | `AI_MODEL` | — | Model for any backend (e.g. `gpt-4o` for Copilot, `o3` for Codex, `claude-3-5-sonnet-20241022` for API). Codex defaults to `o3` when unset. ⚠️ **Set this so the model name appears in the startup message and `/gate info`** — if unset, only the backend name is shown (e.g. `copilot` instead of `copilot (claude-sonnet-4.6)`). |
 | `COPILOT_MODEL` | — | Per-backend model for `copilot`; falls back to `AI_MODEL` when empty |
 | `AI_PROVIDER` | — | For `api`: `openai` \| `anthropic` \| `ollama` \| `openai-compat` |
@@ -168,7 +169,7 @@ Copy `.env.example` — it documents every variable with examples.
 | `ANTHROPIC_API_KEY` | — | Required when `AI_CLI=api` + `AI_PROVIDER=anthropic`. Standard Anthropic env var. |
 | `CODEX_MODEL` | — | Per-backend model for `codex`; falls back to `AI_MODEL` then `o3` |
 | `AI_BASE_URL` | — | Base URL for Ollama or compatible endpoints |
-| `AI_CLI_OPTS` | — | Raw options passed verbatim to the CLI subprocess. **Empty (default) = full-auto per backend** (Copilot: `--allow-all`; Codex: `--approval-mode full-auto`). **When set, replaces the defaults entirely** — must include full-auto flags if still needed (e.g. `--allow-all --allow-url github.com`). Ignored (with a warning) when `AI_CLI=api`. |
+| `AI_CLI_OPTS` | — | Raw options passed verbatim to the CLI subprocess. **Empty (default) = full-auto per backend** (Copilot: `--allow-all`; Codex: `--approval-mode full-auto`; Gemini: `--non-interactive`). **When set, replaces the defaults entirely** — must include full-auto flags if still needed (e.g. `--allow-all --allow-url github.com`). Ignored (with a warning) when `AI_CLI=api`. |
 | `COPILOT_SKILLS_DIRS` | — | Colon-separated paths to extra Copilot skills directories (mount via Docker volume, e.g. `/skills`) |
 | `SYSTEM_PROMPT_FILE` | — | Path to a markdown file loaded as the AI system message (`AI_CLI=api` only). Must not be inside `REPO_DIR`; mount via a separate Docker volume. |
 
@@ -338,6 +339,16 @@ AI_CLI=api
 AI_PROVIDER=ollama
 AI_MODEL=llama3.2
 AI_BASE_URL=http://host.docker.internal:11434
+```
+
+### Google Gemini CLI
+
+Requires an API key from [Google AI Studio](https://aistudio.google.com/app/apikey).
+
+```env
+AI_CLI=gemini
+GEMINI_API_KEY=AIza...
+AI_MODEL=gemini-2.5-pro  # optional — omit to use CLI default
 ```
 
 ---

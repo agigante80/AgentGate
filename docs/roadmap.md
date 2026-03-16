@@ -24,7 +24,6 @@ If adding a new item, create a feature document using `docs/features/_template.m
 | 2.3 | Copilot session pre-warming — reduce repeated context setup overhead | [→ features/copilot-prewarm.md](features/copilot-prewarm.md) |
 | 2.4 | Token/cost tracking — capture OpenAI usage payloads, surface spend via `/gate status` | [→ features/token-cost-tracking.md](features/token-cost-tracking.md) |
 | 2.5 | `/gate schedule` — recurring shell commands or AI prompts | [→ features/schedule.md](features/schedule.md) |
-| 2.6 | Gemini CLI backend — `AI_CLI=gemini` (Google Gemini CLI) | [→ features/gemini-cli-backend.md](features/gemini-cli-backend.md) |
 | 2.7 | `/gate switch` — hot-swap the AI backend at runtime | [→ features/switch-backend.md](features/switch-backend.md) |
 | 2.8 | Proactive alerts — notify chat on file changes or log keyword matches | [→ features/proactive-alerts.md](features/proactive-alerts.md) |
 | 2.9 | Multi-provider git hosting — GitLab, Bitbucket, Azure DevOps (`REPO_PROVIDER`) | [→ features/multi-provider-git-hosting.md](features/multi-provider-git-hosting.md) |

@@ -131,7 +131,7 @@ class AIConfig(BaseSettings):
 
     model_config = SettingsConfigDict(extra="ignore")
 
-    ai_cli: Literal["copilot", "codex", "api"] = "copilot"
+    ai_cli: Literal["copilot", "codex", "api", "gemini"] = "copilot"
 
     ai_model: str = ""    # AI_MODEL — shared model name; ready_msg and codex fall back to this
 
@@ -142,6 +142,8 @@ class AIConfig(BaseSettings):
     # Ignored (with a warning) when AI_CLI=api (no subprocess).
     ai_cli_opts: str = ""
 
+    gemini_api_key: str = ""  # GEMINI_API_KEY — required when AI_CLI=gemini; no fallback
+
     # Backend-specific sub-configs
     copilot: CopilotAIConfig = Field(default_factory=CopilotAIConfig)
     codex: CodexAIConfig = Field(default_factory=CodexAIConfig)
@@ -150,7 +152,8 @@ class AIConfig(BaseSettings):
     def secret_values(self) -> list[str]:
         # Delegate to nested sub-configs so SecretRedactor._collect_secrets() (which only
         # iterates top-level Settings fields) still discovers all per-backend key values.
-        return self.copilot.secret_values() + self.direct.secret_values() + self.codex.secret_values()
+        base = self.copilot.secret_values() + self.direct.secret_values() + self.codex.secret_values()
+        return base + [v for v in [self.gemini_api_key] if v]
 
 
 class AuditConfig(BaseSettings):

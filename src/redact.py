@@ -35,6 +35,7 @@ _SECRET_PATTERNS: list[re.Pattern] = [
     re.compile(r"sk-org-[A-Za-z0-9\-_]{20,}"),          # OpenAI org-scoped key
     re.compile(r"sk-svcacct-[A-Za-z0-9\-_]{20,}"),      # OpenAI service-account key
     re.compile(r"sk-ant-api03-[A-Za-z0-9\-_]{20,}"),    # Anthropic API key
+    re.compile(r"AIza[0-9A-Za-z_\-]{35}"),              # Google API key (AI Studio / GCP)
     re.compile(r"sk-[A-Za-z0-9\-_]{20,}"),              # OpenAI legacy key
     re.compile(r"Bearer\s+[A-Za-z0-9\-._~+/]{20,}=*"), # Authorization header
     re.compile(r"https?://[^\s@]+:[^\s@]+@[^\s]+"),    # URL with embedded creds

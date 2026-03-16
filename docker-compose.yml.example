@@ -41,6 +41,16 @@ services:
     #   STORAGE_BACKEND=sqlite     # sqlite (default) or memory (non-persistent)
     #   AUDIT_BACKEND=sqlite       # sqlite (default) or null (no audit log)
 
+    # ── AI backend examples ────────────────────────────────────────────────────
+    # GitHub Copilot CLI (default):
+    #   AI_CLI=copilot
+    #   COPILOT_GITHUB_TOKEN=github_pat_...
+    #
+    # Google Gemini CLI:
+    #   AI_CLI=gemini
+    #   GEMINI_API_KEY=AIza...
+    #   AI_MODEL=gemini-2.5-pro      # optional
+
 volumes:
   repo_data:
   data_volume:

@@ -50,6 +50,7 @@ AgentGate is an async Python bot (Telegram **or** Slack) that acts as a gateway 
 - `copilot.py` + `session.py` — **stateless** `CopilotBackend` (`is_stateful = False`). `CopilotSession` spawns `copilot -p <prompt> --allow-all` as a subprocess; the bot provides history via context injection. `COPILOT_SKILLS_DIRS` passes extra skills directories to the CLI.
 - `codex.py` — **stateful** `CodexBackend` (`is_stateful = True`). Manages its own conversation state via the Codex CLI subprocess.
 - `direct.py` — **stateful** `DirectAPIBackend` (`is_stateful = True`) for OpenAI / Anthropic / Ollama. Maintains a `self._messages` list natively. Reads `SYSTEM_PROMPT` (inline text) or `SYSTEM_PROMPT_FILE` (path to a markdown file) to prepend a system message.
+- `gemini.py` — **stateless** `GeminiBackend` (`is_stateful = False`). Spawns `gemini --non-interactive --no-tools -p <prompt>` as a subprocess. Requires `GEMINI_API_KEY`. Safety flags `--non-interactive` and `--no-tools` are always prepended and cannot be overridden via `AI_CLI_OPTS`.
 
 **Stateful vs stateless backends** (`src/bot.py → forward_to_ai`): if `backend.is_stateful` is `True`, the raw prompt is sent directly. If `False`, the last `HISTORY_TURNS` (default `10`) history exchanges from SQLite are prepended via `history.build_context()` before sending. Set `HISTORY_TURNS=0` to disable injection only (history is still stored).
 

@@ -1,6 +1,6 @@
 # Gemini CLI Backend
 
-> Status: **Approved** | Priority: Medium | Last reviewed: 2026-03-16
+> Status: **Implemented** | Priority: Medium | Last reviewed: 2026-03-16
 
 Users who have a Google AI Studio account (including the free tier) currently have
 no way to route AgentGate through Gemini models — they must use OpenAI, Anthropic,

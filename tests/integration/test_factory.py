@@ -7,6 +7,7 @@ from src.ai.factory import create_backend
 from src.ai.copilot import CopilotBackend
 from src.ai.codex import CodexBackend
 from src.ai.direct import DirectAPIBackend
+from src.ai.gemini import GeminiBackend
 
 
 class TestBackendFactory:
@@ -187,3 +188,26 @@ class TestBackendFactory:
         cfg = AIConfig()
         with pytest.raises(ValueError, match="SYSTEM_PROMPT_FILE"):
             create_backend(cfg)
+
+    def test_creates_gemini_backend(self, monkeypatch):
+        monkeypatch.setenv("AI_CLI", "gemini")
+        monkeypatch.setenv("GEMINI_API_KEY", "AIzaTest")
+        cfg = AIConfig()
+        backend = create_backend(cfg)
+        assert isinstance(backend, GeminiBackend)
+        assert backend._api_key == "AIzaTest"
+
+    def test_gemini_requires_api_key(self, monkeypatch):
+        monkeypatch.setenv("AI_CLI", "gemini")
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        cfg = AIConfig()
+        with pytest.raises(ValueError, match="GEMINI_API_KEY"):
+            create_backend(cfg)
+
+    def test_gemini_model_passed_through(self, monkeypatch):
+        monkeypatch.setenv("AI_CLI", "gemini")
+        monkeypatch.setenv("GEMINI_API_KEY", "k")
+        monkeypatch.setenv("AI_MODEL", "gemini-2.0-flash")
+        cfg = AIConfig()
+        backend = create_backend(cfg)
+        assert backend._model == "gemini-2.0-flash"

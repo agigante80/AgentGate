@@ -32,6 +32,9 @@ RUN npm install -g @github/copilot@1.0.5
 # OpenAI Codex CLI — pinned version (update via Dependabot)
 RUN npm install -g @openai/codex@0.114.0
 
+# Google Gemini CLI — pinned version (update via Dependabot)
+RUN npm install -g @google/gemini-cli@0.33.1
+
 # Python dependencies — installed as root so packages are system-wide and
 # accessible regardless of which UID the container runs as at runtime.
 WORKDIR /app
