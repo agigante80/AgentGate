@@ -17,10 +17,26 @@ key re-use is eliminated.
 |----------|-------|-------|------|-------|
 | GateCode | 1 | 9/10 | 2026-03-16 | Fixed Step 3 call-sites (src/main.py → src/bot.py); added src/bot.py and src/platform/slack.py to Files table; clarified test_bot.py line 204/271 ai_api_key removals |
 | GateSec  | 1 | 8/10 | 2026-03-16 | GateSec round 1: three security gaps — (1) `_collect_secrets()` blind spot for nested sub-config API keys (redaction leak), (2) `_SECRET_ENV_KEYS` uses wrong env var names (`TELEGRAM_BOT_TOKEN` / `GITHUB_TOKEN` instead of `TG_BOT_TOKEN` / `GITHUB_REPO_TOKEN`), (3) deprecation design says "still honour" old vars but implementation removes them outright; all three fixed inline |
-| GateDocs | 1 | 9/10 | 2026-03-16 | Added logger.warning to deprecation code; fixed Roadmap Update section (duplicate→✅ edit); added .github/copilot-instructions.md to Files table and AC; clarified Whisper migration "When" and README upgrading section |
+| GateDocs | 1 | 9/10 | 2026-03-16 | Fixed Migration Guide heading inconsistency ("0.x to 1.0" → "v0.x to v1.0"); added AC items for GEMINI_API_KEY/GOOGLE_API_KEY/COPILOT_GITHUB_TOKEN and for two-PR split; flagged Open Question 2 for roadmap tracking |
 
-**Status**: ⏳ Pending review
+**Status**: ⏳ Round 1 incomplete — GateSec 8/10 blocks approval; round 2 required
 **Approved**: No — requires all scores ≥ 9/10 in the same round
+
+### Round 1 blocking gaps (for round 2 addressal)
+
+GateSec's 8/10 indicates unresolved security concerns after the inline fixes. The following gaps remain open for GateSec to resolve in round 2 — implementers and reviewers should consult the doc for full details:
+
+- _Secret collector coverage_ — `SecretRedactor._collect_secrets()` only traverses top-level `Settings` fields; nested sub-configs (`DirectAIConfig`, `CodexAIConfig`) are not reached. `AIConfig.secret_values()` must delegate to its nested sub-configs (see Architecture Notes). A unit test asserting this delegation is required (see Test Plan). The Architecture Notes section documents the fix; verify the test plan covers it end-to-end.
+- _`_SECRET_ENV_KEYS` name correctness_ — Any change to the set must preserve `TG_BOT_TOKEN` and `GITHUB_REPO_TOKEN` exactly. A regression here causes `scrubbed_env()` to silently stop filtering those tokens. The AC now includes an explicit checkbox; the test `test_secret_env_keys_correct_names` must be extended to also assert absence of renamed variants.
+- _Two-PR implementation split_ — The deprecation design (warn + keep in v1.0.0; hard removal in v1.1.0) must be enforced at the PR level. A single PR delivering hard removal in v1.0.0 is a breaking change with no migration window. The AC now includes a checkbox for this split.
+
+### Round 2 pending
+
+| Reviewer | Round | Score | Date | Notes |
+|----------|-------|-------|------|-------|
+| GateCode | 2 | -/10 | - | Pending |
+| GateSec  | 2 | -/10 | - | Pending |
+| GateDocs | 2 | -/10 | - | Pending |
 
 ---
 
@@ -510,7 +526,7 @@ Item 2.17 already exists in `docs/roadmap.md`. When this feature is merged to `m
 
 ## Migration Guide
 
-> Include this section in `README.md` under a `## Upgrading from 0.x to 1.0` heading.
+> Include this section in `README.md` under a `## Upgrading from v0.x to v1.0` heading.
 
 | Old env var | New env var | When |
 |---|---|---|
@@ -528,7 +544,7 @@ No other env vars change. Copilot and Gemini backends are unaffected.
 
 1. **Existing deployments with only `AI_API_KEY` set** — The deprecation warning in v1.0.0 must surface clearly in container logs. `logger.warning()` (not `warnings.warn()`) is more visible in Docker log streams — use both.
 
-2. **`AI_CLI=api` with no `AI_PROVIDER`** — Current default is `""`. Should we require `AI_PROVIDER` to be explicitly set? Proposed: yes — add validation that `AI_PROVIDER` is non-empty when `AI_CLI=api`. This is a separate but related cleanup.
+2. **`AI_CLI=api` with no `AI_PROVIDER`** — Current default is `""`. Should we require `AI_PROVIDER` to be explicitly set? Proposed: yes — add validation that `AI_PROVIDER` is non-empty when `AI_CLI=api`. This is a separate but related cleanup. _GateDocs note: if this is in scope for this feature, add an AC item and a row to the Files to Change table for `_validate_config()`; if deferred, add a roadmap item (suggested: 2.18) so it is not lost._
 
 3. **`openai-compat` provider** — Uses `OPENAI_API_KEY` but with a custom `AI_BASE_URL`. The key may be a non-OpenAI key (e.g. Azure). Is `OPENAI_API_KEY` the right name? Alternative: `COMPAT_API_KEY`. Decision deferred — `OPENAI_API_KEY` is widely understood and most compat endpoints accept it.
 
@@ -552,8 +568,10 @@ No other env vars change. Copilot and Gemini backends are unaffected.
 - [ ] `AIConfig.secret_values()` delegates to `self.direct.secret_values() + self.codex.secret_values()` so that `SecretRedactor._collect_secrets()` (which only iterates top-level `Settings` fields) still discovers all API key values.
 - [ ] `DirectAIConfig.secret_values()` returns `openai_api_key` and `anthropic_api_key`.
 - [ ] `_SECRET_ENV_KEYS` in `executor.py` contains `ANTHROPIC_API_KEY` and does not contain `AI_API_KEY` or `CODEX_API_KEY`.
+- [ ] `_SECRET_ENV_KEYS` contains `GEMINI_API_KEY`, `GOOGLE_API_KEY`, and `COPILOT_GITHUB_TOKEN` (all added in Step 4; absence would leak these values into subprocess environments).
 - [ ] `_SECRET_ENV_KEYS` preserves `TG_BOT_TOKEN` and `GITHUB_REPO_TOKEN` (the actual env var names — not `TELEGRAM_BOT_TOKEN` / `GITHUB_TOKEN`).
 - [ ] `create_transcriber()` no longer accepts `fallback_api_key`.
+- [ ] Implementation is delivered as two separate PRs: PR 1 (v1.0.0) adds deprecation warnings and keeps `AI_API_KEY`/`CODEX_API_KEY` functional; PR 2 (v1.1.0) removes the fields and fallback logic. A single PR that removes fields in v1.0.0 violates the Axis 1 design and turns Option B into Option C.
 - [ ] All existing tests pass with no failures (`pytest tests/ -v --tb=short`).
 - [ ] `ruff check src/` reports no new issues.
 - [ ] `README.md`, `.env.example`, `docker-compose.yml.example` updated (including `## Upgrading from v0.x to v1.0` section with migration table and startup warning message).
