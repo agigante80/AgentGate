@@ -152,7 +152,10 @@ subsystem must verify the following before a ≥ 9 score can be awarded:
 
 When it is your turn:
 
-1. **Sync to `develop`** — `git pull --rebase origin develop`
+1. **Sync to `develop`** — `git pull --rebase origin develop`, then verify the
+   commit SHA from the delegation message is in your history (`git log --oneline | head`).
+   If the SHA is missing, the push from the previous reviewer may not have landed — do not
+   proceed until it is present.
    _(Note: avoid `git reset --hard` — it silently discards uncommitted work.)_
 2. **Read the current doc** — `docs/features/<feature>.md`
 3. **Edit the doc** — make inline improvements (fill gaps, fix inaccuracies, add notes).
@@ -335,6 +338,8 @@ does not replace the `[DELEGATE]` handoff or the Team Review table.
   A 6/10 score with a list of gaps is only useful if those gaps are also fixed or
   detailed enough that the next round can fix them.
 - If the feature doc does not yet have a Team Review table, the first reviewer adds it.
+- Team Review table rows from prior rounds are *append-only* — never delete or modify
+  historical rows. They form the audit trail for the review chain.
 - The process applies to any file under `docs/features/` (except `_template.md`) and
   to guide files under `docs/guides/` when explicitly requested.
 
@@ -348,7 +353,7 @@ does not replace the `[DELEGATE]` handoff or the Team Review table.
 | GateSec  | 1     | 9/10  | 2026-03-14 | Added security scoring floor, SecretRedactor coverage rule, threat model requirement |
 | GateDocs | 1     | 9/10  | 2026-03-16 | Added trigger→chain pointer in "How to Trigger"; guide is authoritative and complete |
 | GateCode | 2     | 9/10  | 2026-03-16 | Moved orphaned Notes bullets into Notes section; expanded scope to include docs/guides/ |
-| GateSec  | 2     | -/10  | -          | Pending |
+| GateSec  | 2     | 9/10  | 2026-03-16 | Added commit-SHA verification step and audit-trail integrity rule for Team Review rows |
 | GateDocs | 2     | -/10  | -          | Pending |
 
 **Status**: 🔄 Round 2 in progress
