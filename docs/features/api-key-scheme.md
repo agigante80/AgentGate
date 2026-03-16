@@ -1,6 +1,6 @@
 # API Key Scheme Refactor (`AI_API_KEY` removal)
 
-> Status: **Planned** | Priority: High | Last reviewed: 2026-03-16
+> Status: **Approved** | Priority: High | Last reviewed: 2026-03-16
 
 Replace the opaque `AI_API_KEY` master-fallback pattern with explicit, per-backend API
 key variables. Each backend declares exactly which env var it requires; silent cross-backend
@@ -19,8 +19,8 @@ key re-use is eliminated.
 | GateSec  | 1 | 8/10 | 2026-03-16 | GateSec round 1: three security gaps — (1) `_collect_secrets()` blind spot for nested sub-config API keys (redaction leak), (2) `_SECRET_ENV_KEYS` uses wrong env var names (`TELEGRAM_BOT_TOKEN` / `GITHUB_TOKEN` instead of `TG_BOT_TOKEN` / `GITHUB_REPO_TOKEN`), (3) deprecation design says "still honour" old vars but implementation removes them outright; all three fixed inline |
 | GateDocs | 1 | 9/10 | 2026-03-16 | Fixed Migration Guide heading inconsistency ("0.x to 1.0" → "v0.x to v1.0"); added AC items for GEMINI_API_KEY/GOOGLE_API_KEY/COPILOT_GITHUB_TOKEN and for two-PR split; flagged Open Question 2 for roadmap tracking |
 
-**Status**: ⏳ Round 1 incomplete — GateSec 8/10 blocks approval; round 2 required
-**Approved**: No — requires all scores ≥ 9/10 in the same round
+**Status**: ✅ Approved — all round 2 scores ≥ 9/10
+**Approved**: Yes — GateCode 9/10 | GateSec 9/10 | GateDocs 9/10 (round 2, 2026-03-16)
 
 ### Round 1 blocking gaps (for round 2 addressal)
 
@@ -36,7 +36,7 @@ GateSec's 8/10 indicates unresolved security concerns after the inline fixes. Th
 |----------|-------|-------|------|-------|
 | GateCode | 2 | 9/10 | 2026-03-16 | Split Step 1 into PR1/PR2 sub-steps; labelled all Steps PR1 or PR2; fixed executor.py Files table (missing GEMINI_API_KEY, GOOGLE_API_KEY, COPILOT_GITHUB_TOKEN); added Step 7 for .github/copilot-instructions.md; resolved Open Question 2 (deferred, roadmap item 2.18 added); sharpened test_secret_env_keys_correct_names to assert absence of wrong names |
 | GateSec  | 2 | 9/10 | 2026-03-16 | All three round 1 blocking gaps resolved: (1) `_collect_secrets()` delegation — Step 1b, test, and AC all correct; (2) `_SECRET_ENV_KEYS` names — Step 4 uses correct names, test asserts absence of wrong ones; (3) two-PR split — Steps labelled PR1/PR2, AC enforces it. One minor fix: `conftest.py` `clean_env` must also scrub `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY` (promoted to Pydantic fields by the refactor); added to Step 6, Files table, and AC |
-| GateDocs | 2 | -/10 | - | Pending |
+| GateDocs | 2 | 9/10 | 2026-03-16 | Fixed Version Bump rationale (v1.0.0 is non-breaking; clarified intentional SemVer deviation for v1.1.0); added inline import note to Step 1a; added tracking note to Open Question 3 |
 
 ---
 
@@ -277,7 +277,9 @@ Emit these in `Settings.load()` *after* all sub-configs are constructed so the c
 **Step 1a \[PR1\]** — add deprecation warnings in `Settings.load()` only; all existing fields (`ai_api_key`, `codex_api_key`) remain:
 
 ```python
-# In Settings.load() — add immediately after all sub-configs are constructed:
+# In Settings.load() — add immediately after all sub-configs are constructed.
+# Note: move these imports to module level in the actual implementation;
+# they are shown inline here for self-contained readability only.
 import logging, warnings, os as _os
 
 _log = logging.getLogger(__name__)
@@ -544,8 +546,9 @@ Mark item 2.17 done (✅) when merged to `main`.
 
 This is a **MAJOR** version bump: `0.22.x` → `1.0.0`.
 
-Rationale: `AI_API_KEY` and `CODEX_API_KEY` are removed (breaking). Any deployment using
-either env var will fail at startup if not migrated.
+Rationale: The v1.0.0 release initiates the breaking migration cycle — the API key scheme changes fundamentally and operators must act before v1.1.0. The MAJOR bump is taken at the *start* of this cycle to signal the change clearly, even though v1.0.0 itself is non-breaking (old vars are still accepted with a warning).
+
+> **SemVer note:** v1.1.0 (hard removal) is technically also a breaking change and would warrant a second MAJOR bump under strict SemVer. The project opts for a MINOR increment within the 1.x line to avoid a v2.0.0 one release after v1.0.0. This is a deliberate project convention, not an oversight.
 
 The deprecation release (v1.0.0) still accepts the old vars but logs a startup warning.
 The removal release (v1.1.0) drops them entirely and bumps to `1.1.0`.
@@ -586,7 +589,7 @@ No other env vars change. Copilot and Gemini backends are unaffected.
 
 2. **`AI_CLI=api` with no `AI_PROVIDER`** — Current default is `""`. Should we require `AI_PROVIDER` to be explicitly set? Proposed: yes — add validation that `AI_PROVIDER` is non-empty when `AI_CLI=api`. This is a separate but related cleanup. _GateDocs note: if this is in scope for this feature, add an AC item and a row to the Files to Change table for `_validate_config()`; if deferred, add a roadmap item (suggested: 2.18) so it is not lost._ **Decision (round 2): deferred — out of scope for this feature. Tracked as roadmap item 2.18 (`AI_PROVIDER` explicit-required validation). No AC item added here.**
 
-3. **`openai-compat` provider** — Uses `OPENAI_API_KEY` but with a custom `AI_BASE_URL`. The key may be a non-OpenAI key (e.g. Azure). Is `OPENAI_API_KEY` the right name? Alternative: `COMPAT_API_KEY`. Decision deferred — `OPENAI_API_KEY` is widely understood and most compat endpoints accept it.
+3. **`openai-compat` provider** — Uses `OPENAI_API_KEY` but with a custom `AI_BASE_URL`. The key may be a non-OpenAI key (e.g. Azure). Is `OPENAI_API_KEY` the right name? Alternative: `COMPAT_API_KEY`. Decision deferred — `OPENAI_API_KEY` is widely understood and most compat endpoints accept it. _GateDocs note: if Azure AD token auth or a dedicated `COMPAT_API_KEY` is needed in future, it should be tracked as a separate roadmap item rather than reopening this feature. Suggested: 2.19._
 
 4. **Codex subprocess env** — `codex.py` currently injects the key as `OPENAI_API_KEY` into the subprocess. With the refactor the value comes from a field also named `openai_api_key`. The injection line stays identical — verify the env var name in the subprocess is still `OPENAI_API_KEY`, not the Python field name.
 
