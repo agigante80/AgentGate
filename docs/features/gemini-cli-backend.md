@@ -1,6 +1,10 @@
 # Gemini CLI Backend
 
-> Status: **Planned** | Priority: Medium | Last reviewed: 2026-03-11
+> Status: **Approved** | Priority: Medium | Last reviewed: 2026-03-16
+
+Users who have a Google AI Studio account (including the free tier) currently have
+no way to route AgentGate through Gemini models — they must use OpenAI, Anthropic,
+or a GitHub Copilot subscription. This feature closes that gap.
 
 Add `AI_CLI=gemini` as a first-class backend, backed by Google's official
 [Gemini CLI](https://github.com/google-gemini/gemini-cli) (`@google/gemini-cli`).
@@ -68,12 +72,16 @@ The Gemini CLI has **two distinct flags** that are often confused:
 ```env
 AI_CLI=gemini
 GEMINI_API_KEY=AIza...          # from https://aistudio.google.com/app/apikey
+# GOOGLE_API_KEY=AIza...        # alternative name accepted by the CLI; GEMINI_API_KEY preferred
 AI_MODEL=gemini-2.5-pro         # optional — omit to use CLI default
 AI_CLI_OPTS=                    # optional verbatim extra flags passed to gemini
 ```
 
 `GOOGLE_API_KEY` is accepted as an alternative to `GEMINI_API_KEY` by the CLI
 itself, but `GEMINI_API_KEY` is preferred for clarity in AgentGate `.env` files.
+AgentGate reads `GEMINI_API_KEY`; the CLI will silently also accept `GOOGLE_API_KEY`
+if set in the environment — both are stripped from subprocesses via `_SECRET_ENV_KEYS`
+and redacted by `SecretRedactor`.
 
 > ⚠️ **API key required for Docker.** The free personal-account flow requires a
 > browser for first-time OAuth. Use an API key from Google AI Studio for all
@@ -266,6 +274,8 @@ class GeminiBackend(SubprocessMixin, AICLIBackend):
 | `src/redact.py` | Add Google API key regex (`AIza...`) to `_SECRET_PATTERNS` | 1 line |
 | `Dockerfile` | Add `npm install -g @google/gemini-cli` (Node.js **already present**) | 1 line |
 | `README.md` | Add `gemini` to `AI_CLI` row; add `GEMINI_API_KEY` row (×2 — Telegram + Slack sections) | ~4 lines |
+| `.github/copilot-instructions.md` | Add `GeminiBackend` description to the AI backends section | ~3 lines |
+| `docker-compose.yml.example` | Add commented Gemini block (`AI_CLI`, `GEMINI_API_KEY`, `AI_MODEL`) | ~4 lines |
 | `tests/unit/test_gemini_backend.py` | **New** — unit tests (see below) | ~80 lines |
 | `tests/contract/test_backends_contract.py` | Add `GeminiBackend` to `ALL_BACKENDS` | ~5 lines |
 | `tests/integration/test_factory.py` | Add factory test for `AI_CLI=gemini` | ~10 lines |
@@ -931,6 +941,7 @@ Potential stretch goal: streaming progressiveness verification (Open Questions i
 |----------|-------|-------|------------|-------|
 | GateCode | 1     | 9/10  | 2026-03-16 | Added `src/main.py` to Files table; corrected `_load_backends()` code example to match live importlib pattern; corrected roadmap milestone reference from 2.10 → 2.6; flagged future-modularity-debt on factory.py edit |
 | GateSec  | 1     | 9/10  | 2026-03-16 | GateSec round 1: added safety-flag negation denylist, stream() timeout gap note, 2 new acceptance criteria; no blocking security issues |
-| GateDocs | 1     | -/10  | -          | Pending |
+| GateDocs | 1     | 9/10  | 2026-03-16 | Added user-facing problem context; added GOOGLE_API_KEY note in Usage block; added .github/copilot-instructions.md and docker-compose.yml.example to Files table |
 
-**Status**: 🔄 In review — round 1
+**Status**: ✅ Approved — round 1, all scores ≥ 9
+**Approved**: Yes — ready to implement
