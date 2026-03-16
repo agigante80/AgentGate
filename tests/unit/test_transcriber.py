@@ -74,16 +74,10 @@ class TestCreateTranscriber:
             t = create_transcriber(cfg)
         assert isinstance(t, OpenAITranscriber)
 
-    def test_openai_provider_falls_back_to_ai_key(self):
-        cfg = VoiceConfig(whisper_provider="openai", whisper_api_key="")
-        with patch("openai.AsyncOpenAI"):
-            t = create_transcriber(cfg, fallback_api_key="sk-fallback")
-        assert isinstance(t, OpenAITranscriber)
-
     def test_openai_provider_no_key_raises(self):
         cfg = VoiceConfig(whisper_provider="openai", whisper_api_key="")
         with pytest.raises(ValueError, match="WHISPER_API_KEY"):
-            create_transcriber(cfg, fallback_api_key="")
+            create_transcriber(cfg)
 
     def test_local_provider_raises_not_implemented(self):
         cfg = VoiceConfig(whisper_provider="local")

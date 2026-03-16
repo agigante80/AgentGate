@@ -49,10 +49,23 @@ def create_backend(ai: AIConfig) -> AICLIBackend:
                 system_prompt = Path(resolved).read_text()
             except OSError as exc:
                 logger.warning("Could not read SYSTEM_PROMPT_FILE %r: %s", ai.direct.system_prompt_file, exc)
+
+        provider = ai.direct.ai_provider
+        if provider in ("openai", "openai-compat"):
+            api_key = ai.direct.openai_api_key
+            if not api_key:
+                raise ValueError("OPENAI_API_KEY must be set when AI_CLI=api and AI_PROVIDER=openai")
+        elif provider == "anthropic":
+            api_key = ai.direct.anthropic_api_key
+            if not api_key:
+                raise ValueError("ANTHROPIC_API_KEY must be set when AI_CLI=api and AI_PROVIDER=anthropic")
+        else:
+            api_key = ""  # ollama or empty provider — no auth needed
+
         return backend_registry.create(
             "api",
-            provider=ai.direct.ai_provider,
-            api_key=ai.ai_api_key,
+            provider=provider,
+            api_key=api_key,
             model=ai.ai_model,
             base_url=ai.direct.ai_base_url,
             system_prompt=system_prompt,
@@ -67,7 +80,9 @@ def create_backend(ai: AIConfig) -> AICLIBackend:
         )
 
     if ai.ai_cli == "codex":
-        codex_key = ai.codex.codex_api_key or ai.ai_api_key
+        codex_key = ai.codex.openai_api_key
+        if not codex_key:
+            raise ValueError("OPENAI_API_KEY must be set when AI_CLI=codex")
         codex_model = ai.codex.codex_model or ai.ai_model or "o3"
         return backend_registry.create(
             "codex",

@@ -201,7 +201,6 @@ class TestCmdDiffSanitization:
         settings.slack.slack_app_token = ""
         settings.ai = MagicMock(spec=AIConfig)
         settings.ai.ai_cli = "api"
-        settings.ai.ai_api_key = "sk-test"
         settings.github = MagicMock(spec=GitHubConfig)
         settings.github.github_repo_token = ""
         settings.github.github_repo = ""
@@ -268,7 +267,6 @@ class TestCmdDiffSanitization:
         settings.slack.slack_app_token = ""
         settings.ai = MagicMock(spec=AIConfig)
         settings.ai.ai_cli = "api"
-        settings.ai.ai_api_key = "sk-test"
         settings.github = MagicMock(spec=GitHubConfig)
         settings.github.github_repo_token = ""
         settings.github.github_repo = ""

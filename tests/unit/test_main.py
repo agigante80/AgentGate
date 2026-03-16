@@ -26,7 +26,16 @@ def _make_settings(platform="telegram", bot_token="abc:token", chat_id="99999",
     bot.bot_cmd_prefix = "gate"
     bot.history_turns = 10
     ai = MagicMock(spec=AIConfig)
-    ai.ai_cli = "api"
+    ai.ai_cli = "copilot"  # no key check for copilot
+    ai.codex = MagicMock()
+    ai.codex.openai_api_key = ""
+    ai.direct = MagicMock()
+    ai.direct.ai_provider = ""
+    ai.direct.openai_api_key = ""
+    ai.direct.anthropic_api_key = ""
+    voice = MagicMock()
+    voice.whisper_provider = "none"
+    voice.whisper_api_key = ""
     gh = MagicMock(spec=GitHubConfig)
     gh.github_repo = "owner/repo"
     gh.branch = "main"
@@ -37,6 +46,7 @@ def _make_settings(platform="telegram", bot_token="abc:token", chat_id="99999",
     s.slack = slack
     s.bot = bot
     s.ai = ai
+    s.voice = voice
     s.github = gh
     s.log = log
     audit = MagicMock(spec=AuditConfig)

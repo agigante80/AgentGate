@@ -259,9 +259,7 @@ class _BotHandlers:
     def _init_transcriber(self, settings: Settings) -> "transcriber_mod.Transcriber | None":
         """Create the transcriber from config, or return None when disabled."""
         try:
-            tx = transcriber_mod.create_transcriber(
-                settings.voice, fallback_api_key=settings.ai.ai_api_key
-            )
+            tx = transcriber_mod.create_transcriber(settings.voice)
             return None if isinstance(tx, transcriber_mod.NullTranscriber) else tx
         except NotImplementedError as exc:
             logger.warning("Voice transcription unavailable: %s", exc)

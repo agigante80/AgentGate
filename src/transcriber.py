@@ -42,7 +42,7 @@ class OpenAITranscriber(Transcriber):
         return transcript.text.strip()
 
 
-def create_transcriber(config: "VoiceConfig", fallback_api_key: str = "") -> Transcriber:
+def create_transcriber(config: "VoiceConfig") -> Transcriber:
     """Factory: return the appropriate Transcriber based on config."""
     provider = config.whisper_provider
 
@@ -50,10 +50,10 @@ def create_transcriber(config: "VoiceConfig", fallback_api_key: str = "") -> Tra
         return NullTranscriber()
 
     if provider == "openai":
-        api_key = config.whisper_api_key or fallback_api_key
+        api_key = config.whisper_api_key
         if not api_key:
             raise ValueError(
-                "WHISPER_API_KEY (or AI_API_KEY) must be set when WHISPER_PROVIDER=openai"
+                "WHISPER_API_KEY must be set when WHISPER_PROVIDER=openai"
             )
         return OpenAITranscriber(api_key=api_key, model=config.whisper_model)
 

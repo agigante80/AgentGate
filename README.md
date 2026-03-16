@@ -164,8 +164,8 @@ Copy `.env.example` — it documents every variable with examples.
 | `AI_MODEL` | — | Model for any backend (e.g. `gpt-4o` for Copilot, `o3` for Codex, `claude-3-5-sonnet-20241022` for API). Codex defaults to `o3` when unset. ⚠️ **Set this so the model name appears in the startup message and `/gate info`** — if unset, only the backend name is shown (e.g. `copilot` instead of `copilot (claude-sonnet-4.6)`). |
 | `COPILOT_MODEL` | — | Per-backend model for `copilot`; falls back to `AI_MODEL` when empty |
 | `AI_PROVIDER` | — | For `api`: `openai` \| `anthropic` \| `ollama` \| `openai-compat` |
-| `AI_API_KEY` | — | API key for `codex` or `api` backends |
-| `CODEX_API_KEY` | — | Per-backend API key for `codex`; falls back to `AI_API_KEY` |
+| `OPENAI_API_KEY` | — | Required when `AI_CLI=codex` or `AI_CLI=api` + `AI_PROVIDER=openai`. Standard OpenAI env var. |
+| `ANTHROPIC_API_KEY` | — | Required when `AI_CLI=api` + `AI_PROVIDER=anthropic`. Standard Anthropic env var. |
 | `CODEX_MODEL` | — | Per-backend model for `codex`; falls back to `AI_MODEL` then `o3` |
 | `AI_BASE_URL` | — | Base URL for Ollama or compatible endpoints |
 | `AI_CLI_OPTS` | — | Raw options passed verbatim to the CLI subprocess. **Empty (default) = full-auto per backend** (Copilot: `--allow-all`; Codex: `--approval-mode full-auto`). **When set, replaces the defaults entirely** — must include full-auto flags if still needed (e.g. `--allow-all --allow-url github.com`). Ignored (with a warning) when `AI_CLI=api`. |
@@ -222,7 +222,7 @@ environment:
 | Variable | Default | Description |
 |---|---|---|
 | `WHISPER_PROVIDER` | `none` | `none` \| `openai` — enables Telegram voice message transcription |
-| `WHISPER_API_KEY` | — | API key for Whisper (falls back to `AI_API_KEY` when provider is `openai`) |
+| `WHISPER_API_KEY` | — | Required (no fallback) when `WHISPER_PROVIDER=openai`. |
 | `WHISPER_MODEL` | `whisper-1` | Whisper model name |
 
 ### Audit
@@ -313,7 +313,7 @@ COPILOT_GITHUB_TOKEN=github_pat_...
 
 ```env
 AI_CLI=codex
-AI_API_KEY=sk-...
+OPENAI_API_KEY=sk-...
 AI_MODEL=o3
 ```
 
@@ -322,8 +322,15 @@ AI_MODEL=o3
 ```env
 AI_CLI=api
 AI_PROVIDER=anthropic
-AI_API_KEY=sk-ant-...
+ANTHROPIC_API_KEY=sk-ant-...
 AI_MODEL=claude-3-5-sonnet-20241022
+```
+
+```env
+AI_CLI=api
+AI_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+AI_MODEL=gpt-4o
 ```
 
 ```env
@@ -342,6 +349,32 @@ AI_BASE_URL=http://host.docker.internal:11434
 - Destructive shell ops require confirmation
 - Non-root user inside container
 - Fine-grained GitHub token scoped to one repo
+
+---
+
+## Upgrading from v0.x to v1.0
+
+### API key changes (v1.0.0 → v1.1.0)
+
+The `AI_API_KEY` master-fallback and `CODEX_API_KEY` alias were removed. Each backend now has its own explicit key:
+
+| Old env var | New env var | When |
+|---|---|---|
+| `AI_API_KEY` (used with `AI_CLI=codex`) | `OPENAI_API_KEY` | Always |
+| `AI_API_KEY` (used with `AI_CLI=api` + `AI_PROVIDER=openai`) | `OPENAI_API_KEY` | Always |
+| `AI_API_KEY` (used with `AI_CLI=api` + `AI_PROVIDER=anthropic`) | `ANTHROPIC_API_KEY` | Always |
+| `CODEX_API_KEY` | `OPENAI_API_KEY` | Always |
+| `WHISPER_API_KEY` relying on `AI_API_KEY` fallback | `WHISPER_API_KEY` (set it explicitly) | If previously omitted |
+
+**v1.0.0 behaviour:** old vars are still accepted but a startup warning is emitted:
+
+```
+WARNING: AI_API_KEY is deprecated and will be removed in v1.1.0.
+Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or the backend-specific key instead.
+See docs/features/api-key-scheme.md for the migration guide.
+```
+
+Update your `.env` or `docker-compose.yml` before upgrading to v1.1.0.
 
 ---
 

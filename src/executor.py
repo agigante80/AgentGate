@@ -19,10 +19,12 @@ _SECRET_ENV_KEYS: frozenset[str] = frozenset({
     "SLACK_BOT_TOKEN",
     "SLACK_APP_TOKEN",
     "GITHUB_REPO_TOKEN",
-    "AI_API_KEY",
-    "CODEX_API_KEY",
     "WHISPER_API_KEY",
     "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "COPILOT_GITHUB_TOKEN",
 })
 
 

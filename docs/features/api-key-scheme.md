@@ -1,6 +1,6 @@
 # API Key Scheme Refactor (`AI_API_KEY` removal)
 
-> Status: **Approved** | Priority: High | Last reviewed: 2026-03-16
+> Status: **Implemented** | Priority: High | Last reviewed: 2026-03-16
 
 Replace the opaque `AI_API_KEY` master-fallback pattern with explicit, per-backend API
 key variables. Each backend declares exactly which env var it requires; silent cross-backend

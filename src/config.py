@@ -90,12 +90,15 @@ class CopilotAIConfig(BaseSettings):
 
 
 class CodexAIConfig(BaseSettings):
-    """Fields exclusive to AI_CLI=codex. Both fall back to AIConfig shared fields when empty."""
+    """Fields exclusive to AI_CLI=codex."""
 
     model_config = SettingsConfigDict(extra="ignore")
 
-    codex_api_key: str = ""  # CODEX_API_KEY — falls back to AIConfig.ai_api_key when empty
-    codex_model: str = ""    # CODEX_MODEL — falls back to AIConfig.ai_model when empty, then "o3"
+    openai_api_key: str = ""  # OPENAI_API_KEY — required when AI_CLI=codex; passed into subprocess
+    codex_model: str = ""     # CODEX_MODEL — falls back to AIConfig.ai_model when empty, then "o3"
+
+    def secret_values(self) -> list[str]:
+        return [v for v in [self.openai_api_key] if v]
 
 
 class DirectAIConfig(BaseSettings):
@@ -105,25 +108,27 @@ class DirectAIConfig(BaseSettings):
 
     # System prompt file — path to a markdown file loaded as the system message.
     # Must not point inside REPO_DIR; mount it via a separate Docker volume.
-    system_prompt_file: str = ""  # SYSTEM_PROMPT_FILE — e.g. /skills/sec-agent.md
+    system_prompt_file: str = ""     # SYSTEM_PROMPT_FILE — e.g. /skills/sec-agent.md
     ai_provider: Literal["openai", "anthropic", "ollama", "openai-compat", ""] = ""
-    ai_base_url: str = ""         # AI_BASE_URL — custom base URL for OpenAI-compat/Ollama
+    ai_base_url: str = ""            # AI_BASE_URL — custom base URL for OpenAI-compat/Ollama
+    openai_api_key: str = ""         # OPENAI_API_KEY — required when AI_PROVIDER=openai/openai-compat
+    anthropic_api_key: str = ""      # ANTHROPIC_API_KEY — required when AI_PROVIDER=anthropic
+
+    def secret_values(self) -> list[str]:
+        return [v for v in [self.openai_api_key, self.anthropic_api_key] if v]
 
 
 class AIConfig(BaseSettings):
     """Top-level AI configuration.
 
-    Shared fields (ai_api_key, ai_model, ai_cli_opts) are accessible at this level and
-    serve as fallbacks for backend-specific sub-configs. Backend-exclusive fields live in
-    the copilot / codex / direct nested configs.
+    Shared fields (ai_model, ai_cli_opts) are accessible at this level.
+    Backend-exclusive fields live in the copilot / codex / direct nested configs.
     """
 
     model_config = SettingsConfigDict(extra="ignore")
 
     ai_cli: Literal["copilot", "codex", "api"] = "copilot"
 
-    # Shared fields — used as fallbacks and by non-factory code (redact.py, ready_msg.py, voice)
-    ai_api_key: str = ""  # AI_API_KEY — shared secret; codex and voice fall back to this
     ai_model: str = ""    # AI_MODEL — shared model name; ready_msg and codex fall back to this
 
     # CLI options passthrough — passed verbatim to the backend CLI subprocess.
@@ -139,12 +144,9 @@ class AIConfig(BaseSettings):
     direct: DirectAIConfig = Field(default_factory=DirectAIConfig)
 
     def secret_values(self) -> list[str]:
-        # codex_api_key lives on the nested CodexAIConfig sub-config (self.codex),
-        # not as a flat field on AIConfig.
-        return [v for v in [
-            self.ai_api_key,
-            self.codex.codex_api_key,
-        ] if v]
+        # Delegate to nested sub-configs so SecretRedactor._collect_secrets() (which only
+        # iterates top-level Settings fields) still discovers all per-backend key values.
+        return self.direct.secret_values() + self.codex.secret_values()
 
 
 class AuditConfig(BaseSettings):
@@ -160,7 +162,7 @@ class VoiceConfig(BaseSettings):
     model_config = SettingsConfigDict(extra="ignore")
 
     whisper_provider: Literal["none", "openai", "local", "google"] = "none"
-    whisper_api_key: str = ""  # Falls back to AIConfig.ai_api_key when provider=openai
+    whisper_api_key: str = ""  # WHISPER_API_KEY — required (no fallback) when WHISPER_PROVIDER=openai
     whisper_model: str = "whisper-1"  # For local Whisper: tiny|base|small|medium|large
 
     def secret_values(self) -> list[str]:

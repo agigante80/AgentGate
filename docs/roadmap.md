@@ -35,7 +35,7 @@ If adding a new item, create a feature document using `docs/features/_template.m
 | 2.14 | Prometheus metrics endpoint — expose request/error/latency metrics via `/metrics` | [→ features/metrics-endpoint.md](features/metrics-endpoint.md) |
 | 2.15 | Remote control fork project — `gate fork` subcommands for cross-repo cherry-pick workflows | [→ features/remote-control-fork-project.md](features/remote-control-fork-project.md) |
 | 2.16 | Supply-chain hardening — `detect-secrets` CI gate + dependency pinning | [→ features/supply-chain-hardening.md](features/supply-chain-hardening.md) |
-| 2.17 | API key scheme refactor — explicit per-backend keys; remove `AI_API_KEY` master fallback | [→ features/api-key-scheme.md](features/api-key-scheme.md) |
+| 2.17 | ✅ API key scheme refactor — explicit per-backend keys; remove `AI_API_KEY` master fallback | [→ features/api-key-scheme.md](features/api-key-scheme.md) |
 | 2.18 | `AI_PROVIDER` explicit validation — require `AI_PROVIDER` to be non-empty when `AI_CLI=api`; raise clear `ValueError` at startup | _(spec TBD)_ |
 
 ---

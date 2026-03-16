@@ -125,10 +125,10 @@ class TestAIConfig:
 
     def test_codex_backend(self, monkeypatch):
         monkeypatch.setenv("AI_CLI", "codex")
-        monkeypatch.setenv("AI_API_KEY", "sk-test")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
         cfg = AIConfig()
         assert cfg.ai_cli == "codex"
-        assert cfg.ai_api_key == "sk-test"
+        assert cfg.codex.openai_api_key == "sk-test"
 
     def test_invalid_backend_raises(self, monkeypatch):
         monkeypatch.setenv("AI_CLI", "unknown")
@@ -160,12 +160,33 @@ class TestSecretValues:
         assert "xapp-xyz" in cfg.secret_values()
 
     def test_ai_config_secret_values(self, monkeypatch):
-        monkeypatch.setenv("AI_API_KEY", "sk-testkey")
-        monkeypatch.setenv("CODEX_API_KEY", "codex-key-12345")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-key")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-key")
         cfg = AIConfig()
         secrets = cfg.secret_values()
-        assert "sk-testkey" in secrets
-        assert "codex-key-12345" in secrets
+        assert "sk-openai-key" in secrets
+        assert "sk-ant-key" in secrets
+
+    def test_ai_config_no_ai_api_key_field(self):
+        """AIConfig must not have an ai_api_key field after the refactor."""
+        cfg = AIConfig()
+        assert not hasattr(cfg, "ai_api_key"), (
+            "ai_api_key was removed in v1.1.0 — do not re-add it"
+        )
+
+    def test_ai_config_delegates_to_nested_secrets(self, monkeypatch):
+        """AIConfig.secret_values() includes values from DirectAIConfig and CodexAIConfig."""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-delegated-key")
+        cfg = AIConfig()
+        assert "sk-delegated-key" in cfg.secret_values()
+
+    def test_direct_config_secret_values(self, monkeypatch):
+        """DirectAIConfig.secret_values() returns both openai_api_key and anthropic_api_key."""
+        from src.config import DirectAIConfig
+        cfg = DirectAIConfig(openai_api_key="sk-oai", anthropic_api_key="sk-ant")
+        secrets = cfg.secret_values()
+        assert "sk-oai" in secrets
+        assert "sk-ant" in secrets
 
     def test_voice_config_secret_values(self):
         from src.config import VoiceConfig
@@ -209,3 +230,98 @@ class TestStorageConfig:
         from src.config import StorageConfig
         cfg = StorageConfig()
         assert cfg.audit_backend == "null"
+
+
+class TestDeprecationWarnings:
+    def test_ai_api_key_deprecation_warning(self, monkeypatch):
+        """Setting AI_API_KEY env var triggers DeprecationWarning at Settings.load()."""
+        monkeypatch.setenv("AI_API_KEY", "sk-old-key")
+        from src.config import Settings
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            Settings.load()
+        assert any(issubclass(x.category, DeprecationWarning) and "AI_API_KEY" in str(x.message) for x in w)
+
+    def test_codex_api_key_deprecation_warning(self, monkeypatch):
+        """Setting CODEX_API_KEY env var triggers DeprecationWarning at Settings.load()."""
+        monkeypatch.setenv("CODEX_API_KEY", "codex-old-key")
+        from src.config import Settings
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            Settings.load()
+        assert any(issubclass(x.category, DeprecationWarning) and "CODEX_API_KEY" in str(x.message) for x in w)
+
+    def test_no_warning_when_keys_absent(self, monkeypatch):
+        """No DeprecationWarning when old vars are not set."""
+        from src.config import Settings
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            Settings.load()
+        dep_msgs = [str(x.message) for x in w if issubclass(x.category, DeprecationWarning)]
+        assert not any("AI_API_KEY" in m or "CODEX_API_KEY" in m for m in dep_msgs)
+
+
+class TestValidateConfig:
+    def _slack_settings(self, monkeypatch, **extra_env):
+        """Create a settings object with valid Slack platform config."""
+        monkeypatch.setenv("PLATFORM", "slack")
+        monkeypatch.setenv("SLACK_BOT_TOKEN", "xoxb-test")
+        monkeypatch.setenv("SLACK_APP_TOKEN", "xapp-test")
+        monkeypatch.setenv("SLACK_CHANNEL_ID", "C123")
+        for k, v in extra_env.items():
+            monkeypatch.setenv(k, v)
+        from src.config import Settings
+        return Settings.load()
+
+    def test_validate_codex_requires_openai_key(self, monkeypatch):
+        settings = self._slack_settings(monkeypatch, AI_CLI="codex")
+        from src.main import _validate_config
+        with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+            _validate_config(settings)
+
+    def test_validate_api_openai_requires_key(self, monkeypatch):
+        settings = self._slack_settings(monkeypatch, AI_CLI="api", AI_PROVIDER="openai")
+        from src.main import _validate_config
+        with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+            _validate_config(settings)
+
+    def test_validate_api_anthropic_requires_key(self, monkeypatch):
+        settings = self._slack_settings(monkeypatch, AI_CLI="api", AI_PROVIDER="anthropic")
+        from src.main import _validate_config
+        with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
+            _validate_config(settings)
+
+    def test_validate_ollama_no_key_needed(self, monkeypatch):
+        """AI_CLI=api + AI_PROVIDER=ollama passes validation without any API key."""
+        settings = self._slack_settings(monkeypatch, AI_CLI="api", AI_PROVIDER="ollama")
+        from src.main import _validate_config
+        _validate_config(settings)  # must not raise
+
+    def test_validate_whisper_requires_key(self, monkeypatch):
+        settings = self._slack_settings(monkeypatch, WHISPER_PROVIDER="openai")
+        from src.main import _validate_config
+        with pytest.raises(ValueError, match="WHISPER_API_KEY"):
+            _validate_config(settings)
+
+
+class TestSecretEnvKeys:
+    def test_secret_env_keys_correct_names(self):
+        """_SECRET_ENV_KEYS must use the actual env var names — wrong names cause token leaks."""
+        from src.executor import _SECRET_ENV_KEYS
+        # Correct names that must be present
+        assert "TG_BOT_TOKEN" in _SECRET_ENV_KEYS
+        assert "GITHUB_REPO_TOKEN" in _SECRET_ENV_KEYS
+        assert "ANTHROPIC_API_KEY" in _SECRET_ENV_KEYS
+        assert "OPENAI_API_KEY" in _SECRET_ENV_KEYS
+        assert "GEMINI_API_KEY" in _SECRET_ENV_KEYS
+        assert "GOOGLE_API_KEY" in _SECRET_ENV_KEYS
+        assert "COPILOT_GITHUB_TOKEN" in _SECRET_ENV_KEYS
+        # Wrong names must NOT be present (regressions would cause silent token leaks)
+        assert "TELEGRAM_BOT_TOKEN" not in _SECRET_ENV_KEYS
+        assert "GITHUB_TOKEN" not in _SECRET_ENV_KEYS
+        # Removed vars must not be present
+        assert "AI_API_KEY" not in _SECRET_ENV_KEYS
+        assert "CODEX_API_KEY" not in _SECRET_ENV_KEYS

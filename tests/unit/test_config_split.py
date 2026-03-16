@@ -1,4 +1,4 @@
-"""Unit tests for AIConfig split — sub-config isolation and fallback logic (feature 1.4)."""
+"""Unit tests for AIConfig split — sub-config isolation and per-backend key logic."""
 import os
 import pytest
 from unittest.mock import patch, MagicMock
@@ -24,10 +24,10 @@ class TestSubConfigEnvReading:
         cfg = CopilotAIConfig()
         assert cfg.copilot_model == ""
 
-    def test_codex_sub_config_reads_api_key(self, monkeypatch):
-        monkeypatch.setenv("CODEX_API_KEY", "codex-secret-key")
+    def test_codex_sub_config_reads_openai_key(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-codex-key")
         cfg = CodexAIConfig()
-        assert cfg.codex_api_key == "codex-secret-key"
+        assert cfg.openai_api_key == "sk-codex-key"
 
     def test_codex_sub_config_reads_model(self, monkeypatch):
         monkeypatch.setenv("CODEX_MODEL", "o3-mini")
@@ -49,15 +49,20 @@ class TestSubConfigEnvReading:
         cfg = DirectAIConfig()
         assert cfg.system_prompt_file == "/skills/sec-agent.md"
 
+    def test_direct_sub_config_reads_openai_key(self, monkeypatch):
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-oai-direct")
+        cfg = DirectAIConfig()
+        assert cfg.openai_api_key == "sk-oai-direct"
+
+    def test_direct_sub_config_reads_anthropic_key(self, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-direct")
+        cfg = DirectAIConfig()
+        assert cfg.anthropic_api_key == "sk-ant-direct"
+
 
 # ── AIConfig shared fields remain at top level ────────────────────────────────
 
 class TestAIConfigSharedFields:
-    def test_ai_api_key_at_top_level(self, monkeypatch):
-        monkeypatch.setenv("AI_API_KEY", "shared-key")
-        cfg = AIConfig()
-        assert cfg.ai_api_key == "shared-key"
-
     def test_ai_model_at_top_level(self, monkeypatch):
         monkeypatch.setenv("AI_MODEL", "gpt-4o")
         cfg = AIConfig()
@@ -79,36 +84,38 @@ class TestAIConfigSharedFields:
         assert isinstance(cfg.codex, CodexAIConfig)
         assert isinstance(cfg.direct, DirectAIConfig)
 
+    def test_no_ai_api_key_field(self):
+        """ai_api_key was removed in v1.1.0 — AIConfig must not have this field."""
+        cfg = AIConfig()
+        assert not hasattr(cfg, "ai_api_key")
 
-# ── Codex fallback logic ───────────────────────────────────────────────────────
 
-class TestCodexFallback:
-    def test_codex_uses_specific_api_key_when_set(self, monkeypatch):
-        """CODEX_API_KEY takes precedence over AI_API_KEY."""
+# ── Codex explicit key ────────────────────────────────────────────────────────
+
+class TestCodexKeyBehavior:
+    def test_codex_uses_openai_api_key(self, monkeypatch):
+        """Codex backend reads OPENAI_API_KEY directly."""
         monkeypatch.setenv("AI_CLI", "codex")
-        monkeypatch.setenv("CODEX_API_KEY", "codex-specific-key")
-        monkeypatch.setenv("AI_API_KEY", "shared-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-codex-openai")
         from src.ai.factory import create_backend
         cfg = AIConfig()
         backend = create_backend(cfg)
-        assert backend._api_key == "codex-specific-key"
+        assert backend._api_key == "sk-codex-openai"
 
-    def test_codex_falls_back_to_shared_api_key(self, monkeypatch):
-        """When CODEX_API_KEY is empty, falls back to AI_API_KEY."""
+    def test_codex_raises_without_openai_key(self, monkeypatch):
+        """Codex backend raises ValueError when OPENAI_API_KEY is not set."""
         monkeypatch.setenv("AI_CLI", "codex")
-        monkeypatch.delenv("CODEX_API_KEY", raising=False)
-        monkeypatch.setenv("AI_API_KEY", "shared-key")
         from src.ai.factory import create_backend
         cfg = AIConfig()
-        backend = create_backend(cfg)
-        assert backend._api_key == "shared-key"
+        with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+            create_backend(cfg)
 
     def test_codex_uses_specific_model_when_set(self, monkeypatch):
         """CODEX_MODEL takes precedence over AI_MODEL."""
         monkeypatch.setenv("AI_CLI", "codex")
         monkeypatch.setenv("CODEX_MODEL", "o3-mini")
         monkeypatch.setenv("AI_MODEL", "o4")
-        monkeypatch.setenv("AI_API_KEY", "key")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-key")
         from src.ai.factory import create_backend
         cfg = AIConfig()
         backend = create_backend(cfg)
@@ -119,7 +126,7 @@ class TestCodexFallback:
         monkeypatch.setenv("AI_CLI", "codex")
         monkeypatch.delenv("CODEX_MODEL", raising=False)
         monkeypatch.setenv("AI_MODEL", "o4")
-        monkeypatch.setenv("AI_API_KEY", "key")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-key")
         from src.ai.factory import create_backend
         cfg = AIConfig()
         backend = create_backend(cfg)
@@ -130,7 +137,7 @@ class TestCodexFallback:
         monkeypatch.setenv("AI_CLI", "codex")
         monkeypatch.delenv("CODEX_MODEL", raising=False)
         monkeypatch.delenv("AI_MODEL", raising=False)
-        monkeypatch.setenv("AI_API_KEY", "key")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-key")
         from src.ai.factory import create_backend
         cfg = AIConfig()
         backend = create_backend(cfg)
@@ -143,7 +150,6 @@ class TestSubprocessEnvIsolation:
     def test_copilot_subprocess_env_does_not_inject_openai_key_from_config(self, monkeypatch):
         """CopilotBackend should not inject OPENAI_API_KEY unless it was already in os.environ."""
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-        monkeypatch.setenv("AI_API_KEY", "shared-key")
         monkeypatch.setenv("COPILOT_SKILLS_DIRS", "")
 
         from src.ai.copilot import CopilotBackend
@@ -216,7 +222,7 @@ class TestFactoryPaths:
     def test_factory_direct_uses_sub_config_provider(self, monkeypatch):
         monkeypatch.setenv("AI_CLI", "api")
         monkeypatch.setenv("AI_PROVIDER", "anthropic")
-        monkeypatch.setenv("AI_API_KEY", "ant-key")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-key")
         monkeypatch.setenv("AI_MODEL", "claude-3-5-sonnet-20241022")
         from src.ai.factory import create_backend
         from src.ai.direct import DirectAPIBackend
@@ -225,22 +231,31 @@ class TestFactoryPaths:
         assert isinstance(backend, DirectAPIBackend)
         assert backend._provider == "anthropic"
 
-    def test_factory_direct_uses_shared_api_key(self, monkeypatch):
+    def test_factory_direct_uses_openai_key_for_openai(self, monkeypatch):
         monkeypatch.setenv("AI_CLI", "api")
         monkeypatch.setenv("AI_PROVIDER", "openai")
-        monkeypatch.setenv("AI_API_KEY", "shared-openai-key")
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-key")
         monkeypatch.setenv("AI_MODEL", "gpt-4o")
         from src.ai.factory import create_backend
         cfg = AIConfig()
         backend = create_backend(cfg)
-        assert backend._api_key == "shared-openai-key"
+        assert backend._api_key == "sk-openai-key"
+
+    def test_factory_direct_uses_anthropic_key_for_anthropic(self, monkeypatch):
+        monkeypatch.setenv("AI_CLI", "api")
+        monkeypatch.setenv("AI_PROVIDER", "anthropic")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-val")
+        from src.ai.factory import create_backend
+        cfg = AIConfig()
+        backend = create_backend(cfg)
+        assert backend._api_key == "sk-ant-val"
 
 
 # ── SecretRedactor coverage ────────────────────────────────────────────────────
 
 class TestRedactorCoverage:
-    def test_redactor_collects_codex_api_key(self):
-        """CODEX_API_KEY must be in the redactor's known-values list."""
+    def test_redactor_collects_openai_api_key(self):
+        """OPENAI_API_KEY must be redacted from outgoing text."""
         from src.redact import SecretRedactor
 
         s = MagicMock()
@@ -249,13 +264,28 @@ class TestRedactorCoverage:
         s.slack.slack_bot_token = ""
         s.slack.slack_app_token = ""
         s.github.github_repo_token = ""
-        s.ai.ai_api_key = "shared-key-value-long"
-        s.ai.codex.codex_api_key = "codex-only-secret-key"
-        # Protocol-based: secret_values() is what SecretRedactor calls on sub-configs
-        s.ai.secret_values.return_value = ["shared-key-value-long", "codex-only-secret-key"]
+        s.ai.secret_values.return_value = ["sk-secret-openai-key"]
         s.voice.whisper_api_key = ""
 
         redactor = SecretRedactor(s)
-        assert "codex-only-secret-key" not in redactor.redact(
-            "The key is codex-only-secret-key"
+        assert "sk-secret-openai-key" not in redactor.redact(
+            "The key is sk-secret-openai-key"
+        )
+
+    def test_redactor_collects_anthropic_key(self):
+        """ANTHROPIC_API_KEY must be redacted from outgoing text."""
+        from src.redact import SecretRedactor
+
+        s = MagicMock()
+        s.bot.allow_secrets = False
+        s.telegram.bot_token = ""
+        s.slack.slack_bot_token = ""
+        s.slack.slack_app_token = ""
+        s.github.github_repo_token = ""
+        s.ai.secret_values.return_value = ["sk-ant-secret-anthropic-key"]
+        s.voice.whisper_api_key = ""
+
+        redactor = SecretRedactor(s)
+        assert "sk-ant-secret-anthropic-key" not in redactor.redact(
+            "The key is sk-ant-secret-anthropic-key"
         )

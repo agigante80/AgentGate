@@ -63,6 +63,24 @@ def _validate_config(settings: Settings) -> None:
                 "set it to the channel where the bot should operate"
             )
 
+    ai = settings.ai
+    if ai.ai_cli == "codex" and not ai.codex.openai_api_key:
+        raise ValueError("OPENAI_API_KEY must be set when AI_CLI=codex")
+    if ai.ai_cli == "api":
+        if ai.direct.ai_provider in ("openai", "openai-compat") and not ai.direct.openai_api_key:
+            raise ValueError(
+                "OPENAI_API_KEY must be set when AI_CLI=api and "
+                f"AI_PROVIDER={ai.direct.ai_provider}"
+            )
+        if ai.direct.ai_provider == "anthropic" and not ai.direct.anthropic_api_key:
+            raise ValueError(
+                "ANTHROPIC_API_KEY must be set when AI_CLI=api and AI_PROVIDER=anthropic"
+            )
+
+    voice = settings.voice
+    if voice.whisper_provider == "openai" and not voice.whisper_api_key:
+        raise ValueError("WHISPER_API_KEY must be set when WHISPER_PROVIDER=openai")
+
 
 def _load_platforms() -> None:
     """Import platform modules so their @platform_registry.register() decorators fire."""
