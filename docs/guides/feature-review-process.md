@@ -157,7 +157,7 @@ When it is your turn:
    If the SHA is missing, the push from the previous reviewer may not have landed — do not
    proceed until it is present.
    _(Note: avoid `git reset --hard` — it silently discards uncommitted work.)_
-2. **Read the current doc** — `docs/features/<feature>.md`
+2. **Read the current doc** — `<doc-path>` (e.g. `docs/features/<feature>.md` or `docs/guides/<guide>.md`)
 3. **Edit the doc** — make inline improvements (fill gaps, fix inaccuracies, add notes).
    Write directly in the doc; do not leave comments-only. The doc should be better after
    your review than before.
@@ -173,9 +173,10 @@ When it is your turn:
 
 ---
 
-## Team Review Table (added to every feature doc)
+## Team Review Table (added to every doc under review)
 
-Each feature doc contains this section immediately after the status line:
+Each doc under review contains this section. For feature specs, place it immediately after the
+status line; for guide files, place it at the end of the document (before any appendices).
 
 ```markdown
 ## Team Review
@@ -200,7 +201,7 @@ date (ISO format: `YYYY-MM-DD`) and a one-sentence note summarising your key fin
 ### GateCode → GateSec
 
 ```
-[DELEGATE: sec Feature doc review of `docs/features/<feature>.md` — round <N>.
+[DELEGATE: sec Feature doc review of `<doc-path>` — round <N>.
 Branch: develop | Commit: <SHA>
 GateCode score: <X>/10. Please sync to that commit, review the doc, make inline improvements,
 update your row in the Team Review table with your score, commit to develop, and DELEGATE
@@ -210,7 +211,7 @@ to docs when done. See `docs/guides/feature-review-process.md` for the full prot
 ### GateSec → GateDocs
 
 ```
-[DELEGATE: docs Feature doc review of `docs/features/<feature>.md` — round <N>.
+[DELEGATE: docs Feature doc review of `<doc-path>` — round <N>.
 Branch: develop | Commit: <SHA>
 GateCode: <X>/10 | GateSec: <Y>/10. Please sync to that commit, review the doc, make inline
 improvements, update your row in the Team Review table with your score, and commit to develop.
@@ -223,7 +224,7 @@ See `docs/guides/feature-review-process.md` for the full protocol.]
 ### GateDocs → GateCode (re-review round)
 
 ```
-[DELEGATE: dev Feature doc re-review of `docs/features/<feature>.md` — round <N+1>.
+[DELEGATE: dev Feature doc re-review of `<doc-path>` — round <N+1>.
 Branch: develop | Commit: <SHA>
 Round <N> scores: GateCode <X>/10 | GateSec <Y>/10 | GateDocs <Z>/10.
 See doc for blocking gaps (do not list specifics here). Please sync to that commit, address the
@@ -242,7 +243,8 @@ When GateDocs completes the final review and all scores in that round are ≥ 9:
    **Status**: ✅ Approved — round <N>, all scores ≥ 9
    **Approved**: Yes — ready to implement
    ```
-2. Change the top-level status line from `Planned` to `Approved`:
+2. Change the top-level status line from `Planned` to `Approved` (applies to feature specs
+   with a formal status header; skip for guide files):
    ```markdown
    > Status: **Approved** | Priority: … | Last reviewed: YYYY-MM-DD
    ```
@@ -250,7 +252,7 @@ When GateDocs completes the final review and all scores in that round are ≥ 9:
 4. Post approval to the channel by including this text in your **response** (no DELEGATE — you
    are already in the channel):
    ```
-   ✅ `docs/features/<feature>.md` is approved (round <N>).
+   ✅ `<doc-path>` is approved (round <N>).
    Scores: GateCode <X>/10 | GateSec <Y>/10 | GateDocs <Z>/10.
    Ready to implement. Assign to a milestone or ask me to open the implementation PR.
    ```
@@ -354,7 +356,7 @@ does not replace the `[DELEGATE]` handoff or the Team Review table.
 | GateDocs | 1     | 9/10  | 2026-03-16 | Added trigger→chain pointer in "How to Trigger"; guide is authoritative and complete |
 | GateCode | 2     | 9/10  | 2026-03-16 | Moved orphaned Notes bullets into Notes section; expanded scope to include docs/guides/ |
 | GateSec  | 2     | 9/10  | 2026-03-16 | Added commit-SHA verification step and audit-trail integrity rule for Team Review rows |
-| GateDocs | 2     | -/10  | -          | Pending |
+| GateDocs | 2     | 9/10  | 2026-03-16 | Generalised doc-path placeholders and Team Review table placement for guide files |
 
-**Status**: 🔄 Round 2 in progress
-**Approved**: Yes (round 1) — round 2 review underway
+**Status**: ✅ Approved — round 2, all scores ≥ 9
+**Approved**: Yes — ready to implement
