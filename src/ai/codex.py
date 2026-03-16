@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import shlex
 import subprocess
 from collections.abc import AsyncGenerator
@@ -53,6 +54,11 @@ class CodexBackend(SubprocessMixin, AICLIBackend):
 
     def _make_cmd(self, prompt: str) -> tuple[list[str], dict]:
         env = {**scrubbed_env(), "OPENAI_API_KEY": self._api_key}
+        # Re-inject the GitHub token as GH_TOKEN so `gh` CLI and raw git operations
+        # work in model shell commands. scrubbed_env() strips GITHUB_REPO_TOKEN.
+        if github_token := os.environ.get("GITHUB_REPO_TOKEN"):
+            env["GH_TOKEN"] = github_token
+            env["GITHUB_TOKEN"] = github_token
         # --dangerously-bypass-approvals-and-sandbox: removes the workspace-write network sandbox
         # so model shell commands (git fetch, curl, etc.) have full outbound access.
         # Docker is the external isolation boundary; intended for exactly this use case.

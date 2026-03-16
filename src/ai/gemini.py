@@ -5,6 +5,7 @@ History is injected by the bot layer via build_prompt() (stateless pattern).
 """
 import asyncio
 import logging
+import os
 import shlex
 from collections.abc import AsyncGenerator
 
@@ -30,6 +31,13 @@ class GeminiBackend(SubprocessMixin, AICLIBackend):
 
     def _make_cmd(self, prompt: str) -> tuple[list[str], dict]:
         env = {**scrubbed_env(), "GEMINI_API_KEY": self._api_key}
+        # Re-inject the GitHub token as GH_TOKEN so the `gh` CLI and raw git
+        # operations work inside run_shell_command calls. Gemini shell commands
+        # inherit the subprocess env; we explicitly pass GH_TOKEN because
+        # scrubbed_env() strips GITHUB_REPO_TOKEN for safety.
+        if github_token := os.environ.get("GITHUB_REPO_TOKEN"):
+            env["GH_TOKEN"] = github_token
+            env["GITHUB_TOKEN"] = github_token
         # --yolo: auto-approve all Gemini tool calls (file reads, file writes, and shell
         # commands). Docker container isolation is the containment boundary — Gemini can
         # only affect what is mounted into the container. File changes are git-tracked.
