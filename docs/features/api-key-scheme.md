@@ -16,7 +16,7 @@ key re-use is eliminated.
 | Reviewer | Round | Score | Date | Notes |
 |----------|-------|-------|------|-------|
 | GateCode | 1 | 9/10 | 2026-03-16 | Fixed Step 3 call-sites (src/main.py → src/bot.py); added src/bot.py and src/platform/slack.py to Files table; clarified test_bot.py line 204/271 ai_api_key removals |
-| GateSec  | 1 | -/10 | - | Pending |
+| GateSec  | 1 | 8/10 | 2026-03-16 | GateSec round 1: three security gaps — (1) `_collect_secrets()` blind spot for nested sub-config API keys (redaction leak), (2) `_SECRET_ENV_KEYS` uses wrong env var names (`TELEGRAM_BOT_TOKEN` / `GITHUB_TOKEN` instead of `TG_BOT_TOKEN` / `GITHUB_REPO_TOKEN`), (3) deprecation design says "still honour" old vars but implementation removes them outright; all three fixed inline |
 | GateDocs | 1 | 9/10 | 2026-03-16 | Added logger.warning to deprecation code; fixed Roadmap Update section (duplicate→✅ edit); added .github/copilot-instructions.md to Files table and AC; clarified Whisper migration "When" and README upgrading section |
 
 **Status**: ⏳ Pending review
@@ -209,10 +209,17 @@ Emit these in `Settings.load()` *after* all sub-configs are constructed so the c
 
 ## Architecture Notes
 
-- **`secret_values()` protocol** — Every sub-config implements `secret_values() -> list[str]`. When adding `openai_api_key` / `anthropic_api_key` to `DirectAIConfig`, add both to its `secret_values()`. Remove `ai_api_key` and `codex_api_key` from `AIConfig.secret_values()`.
-- **`_SECRET_ENV_KEYS` in `executor.py`** — Remove `AI_API_KEY` and `CODEX_API_KEY`; add `ANTHROPIC_API_KEY`. `OPENAI_API_KEY` and `GEMINI_API_KEY` are already present.
+- **`secret_values()` protocol** — Every sub-config implements `secret_values() -> list[str]`. When adding `openai_api_key` / `anthropic_api_key` to `DirectAIConfig`, add both to its `secret_values()`. **Critical: `SecretRedactor._collect_secrets()` only iterates top-level `Settings` fields** (telegram, slack, github, bot, ai, voice, audit, storage). `DirectAIConfig` and `CodexAIConfig` are _nested_ inside `AIConfig` (accessed as `settings.ai.direct` / `settings.ai.codex`), so their `secret_values()` methods will never be called by the collector. Setting `AIConfig.secret_values()` to `return []` would silently drop all API key values from redaction, leaking `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` in AI responses and shell output. **Fix: `AIConfig.secret_values()` must delegate** to its nested sub-configs:
+  ```python
+  # AIConfig.secret_values() — post-refactor
+  def secret_values(self) -> list[str]:
+      return self.direct.secret_values() + self.codex.secret_values()
+  ```
+  This preserves the existing pattern (today `AIConfig` already manually includes `self.codex.codex_api_key`) without modifying `_collect_secrets()` or `_KNOWN_SUBCONFIGS`.
+- **`_SECRET_ENV_KEYS` in `executor.py`** — Remove `AI_API_KEY` and `CODEX_API_KEY`; add `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, and `COPILOT_GITHUB_TOKEN`. `OPENAI_API_KEY` is already present. **Use the actual env var names from `src/config.py`**: `TG_BOT_TOKEN` (not `TELEGRAM_BOT_TOKEN`) and `GITHUB_REPO_TOKEN` (not `GITHUB_TOKEN`). Using the wrong names would cause `scrubbed_env()` to stop filtering those tokens, leaking them into subprocess environments.
 - **`create_transcriber()` signature** — Currently accepts `fallback_api_key: str = ""`. Remove this parameter; the function reads only `config.whisper_api_key`. The `_validate_config()` check in `main.py` ensures it is set when needed.
 - **`_validate_config()` in `main.py`** — Add explicit validation: if `AI_CLI=api` and `AI_PROVIDER=openai`, require `OPENAI_API_KEY`; if `AI_PROVIDER=anthropic`, require `ANTHROPIC_API_KEY`. If `WHISPER_PROVIDER=openai`, require `WHISPER_API_KEY`.
+- **Deprecation vs removal: implementation must match design** — Axis 1 Option B says v1.0.0 "still honours" `AI_API_KEY`/`CODEX_API_KEY` (deprecation warning only), with hard removal in v1.1.0. However, the implementation steps (Step 1) remove the config fields and Step 2 removes the fallback logic, making v1.0.0 a _hard break_ not a graceful deprecation. **Reconciliation:** either (a) keep the config fields readable in v1.0.0 with fallback logic intact and emit the deprecation warning, deferring the field removal to v1.1.0; or (b) change the design to say v1.0.0 _removes_ them outright (effectively Option C). Recommended: Option (a) — the deprecation warning gives operators time to update `.env` files without downtime. This means `ai_api_key` and `codex_api_key` _stay_ in config for v1.0.0; only the deprecation check is added. Two separate implementation PRs (v1.0.0 = warn + still work; v1.1.0 = remove fields + break).
 - **`REPO_DIR` and `DB_PATH`** — unchanged; import from `src/config.py` as always.
 - **Platform symmetry** — Changes are config/factory only. No platform-specific handler changes needed.
 - **`asyncio_mode = auto`** — all `async def test_*` run without `@pytest.mark.asyncio`.
@@ -258,9 +265,9 @@ openai_api_key: str = ""   # OPENAI_API_KEY — passed to Codex subprocess
 def secret_values(self) -> list[str]:
     return [v for v in [self.openai_api_key] if v]
 
-# In AIConfig — remove ai_api_key entirely; update secret_values():
+# In AIConfig — remove ai_api_key; delegate to nested sub-configs (see Architecture Notes):
 def secret_values(self) -> list[str]:
-    return []   # per-backend sub-configs declare their own secrets
+    return self.direct.secret_values() + self.codex.secret_values()
 
 # In VoiceConfig — remove fallback reference (field itself stays):
 whisper_api_key: str = ""  # WHISPER_API_KEY — required when WHISPER_PROVIDER=openai; no fallback
@@ -315,17 +322,19 @@ Update the two call-sites — `src/bot.py` (Telegram) and `src/platform/slack.py
 
 ```python
 # Remove: "AI_API_KEY", "CODEX_API_KEY"
-# Add: "ANTHROPIC_API_KEY"   (OPENAI_API_KEY and GEMINI_API_KEY already present)
+# Add: "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "COPILOT_GITHUB_TOKEN"
+# Keep existing names unchanged — TG_BOT_TOKEN and GITHUB_REPO_TOKEN are the correct
+# env var names used in src/config.py (not TELEGRAM_BOT_TOKEN / GITHUB_TOKEN).
 _SECRET_ENV_KEYS: frozenset[str] = frozenset({
+    "TG_BOT_TOKEN",
+    "SLACK_BOT_TOKEN",
+    "SLACK_APP_TOKEN",
+    "GITHUB_REPO_TOKEN",
     "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY",
     "GEMINI_API_KEY",
     "GOOGLE_API_KEY",
     "WHISPER_API_KEY",
-    "SLACK_BOT_TOKEN",
-    "SLACK_APP_TOKEN",
-    "TELEGRAM_BOT_TOKEN",
-    "GITHUB_TOKEN",
     "COPILOT_GITHUB_TOKEN",
 })
 ```
@@ -412,7 +421,9 @@ def _validate_config(settings: Settings) -> None:
 | `test_validate_ollama_no_key_needed` | `AI_CLI=api` + `AI_PROVIDER=ollama` with no keys passes validation |
 | `test_validate_whisper_requires_key` | `WHISPER_PROVIDER=openai` with no `WHISPER_API_KEY` raises `ValueError` |
 | `test_secret_values_no_ai_api_key` | `AIConfig.secret_values()` no longer returns `AI_API_KEY` |
+| `test_ai_config_delegates_to_nested_secrets` | `AIConfig.secret_values()` includes values from `DirectAIConfig.secret_values()` and `CodexAIConfig.secret_values()` — ensures `SecretRedactor._collect_secrets()` discovers per-backend keys |
 | `test_direct_config_secret_values` | `DirectAIConfig.secret_values()` returns `openai_api_key` and `anthropic_api_key` |
+| `test_secret_env_keys_correct_names` | `_SECRET_ENV_KEYS` contains `TG_BOT_TOKEN` and `GITHUB_REPO_TOKEN` (not renamed variants) and contains `ANTHROPIC_API_KEY` |
 
 ### `tests/unit/test_bot.py` additions
 
@@ -523,7 +534,11 @@ No other env vars change. Copilot and Gemini backends are unaffected.
 
 4. **Codex subprocess env** — `codex.py` currently injects the key as `OPENAI_API_KEY` into the subprocess. With the refactor the value comes from a field also named `openai_api_key`. The injection line stays identical — verify the env var name in the subprocess is still `OPENAI_API_KEY`, not the Python field name.
 
-5. **`SecretRedactor` at runtime** — After removing `AI_API_KEY`, verify that `SecretRedactor._collect_secrets()` still gets all live key values. The collector iterates `secret_values()` on each sub-config — as long as `DirectAIConfig.secret_values()` returns both `openai_api_key` and `anthropic_api_key`, redaction is correct.
+5. **`SecretRedactor` at runtime** — ~~After removing `AI_API_KEY`, verify that `SecretRedactor._collect_secrets()` still gets all live key values. The collector iterates `secret_values()` on each sub-config — as long as `DirectAIConfig.secret_values()` returns both `openai_api_key` and `anthropic_api_key`, redaction is correct.~~ **Resolved (GateSec round 1):** `_collect_secrets()` only iterates _top-level_ `Settings` fields. `DirectAIConfig` and `CodexAIConfig` are nested under `AIConfig`, so their `secret_values()` will never be called directly. `AIConfig.secret_values()` must delegate to its nested sub-configs (see Architecture Notes). A unit test must confirm that `SecretRedactor._collect_secrets()` returns the new per-backend key values after the refactor.
+
+6. **`_SECRET_ENV_KEYS` env var names** (GateSec round 1) — The current codebase uses `TG_BOT_TOKEN` and `GITHUB_REPO_TOKEN` (not `TELEGRAM_BOT_TOKEN` / `GITHUB_TOKEN`). Any change to `_SECRET_ENV_KEYS` must preserve the existing names exactly. Using the wrong names causes `scrubbed_env()` to stop filtering those tokens, leaking them into every subprocess. The implementer should diff the final set against the current one to confirm only the intended additions/removals occurred.
+
+7. **Deprecation timeline vs implementation scope** (GateSec round 1) — The Axis 1 design recommends Option B (deprecate in v1.0.0, remove in v1.1.0) but the implementation steps remove config fields and fallback logic immediately, which is effectively Option C (hard removal). The implementation must be split into two PRs matching the two-release plan, or the design must be revised to say v1.0.0 removes them outright. See Architecture Notes for details.
 
 ---
 
@@ -534,8 +549,10 @@ No other env vars change. Copilot and Gemini backends are unaffected.
 - [ ] Setting `AI_CLI=api` + `AI_PROVIDER=anthropic` with no `ANTHROPIC_API_KEY` raises `ValueError`.
 - [ ] Setting `WHISPER_PROVIDER=openai` with no `WHISPER_API_KEY` raises `ValueError` (no fallback).
 - [ ] `AIConfig.secret_values()` no longer returns the value of `AI_API_KEY`.
+- [ ] `AIConfig.secret_values()` delegates to `self.direct.secret_values() + self.codex.secret_values()` so that `SecretRedactor._collect_secrets()` (which only iterates top-level `Settings` fields) still discovers all API key values.
 - [ ] `DirectAIConfig.secret_values()` returns `openai_api_key` and `anthropic_api_key`.
 - [ ] `_SECRET_ENV_KEYS` in `executor.py` contains `ANTHROPIC_API_KEY` and does not contain `AI_API_KEY` or `CODEX_API_KEY`.
+- [ ] `_SECRET_ENV_KEYS` preserves `TG_BOT_TOKEN` and `GITHUB_REPO_TOKEN` (the actual env var names — not `TELEGRAM_BOT_TOKEN` / `GITHUB_TOKEN`).
 - [ ] `create_transcriber()` no longer accepts `fallback_api_key`.
 - [ ] All existing tests pass with no failures (`pytest tests/ -v --tb=short`).
 - [ ] `ruff check src/` reports no new issues.
