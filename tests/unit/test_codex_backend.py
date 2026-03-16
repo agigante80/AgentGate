@@ -1,14 +1,25 @@
 """
 Tests for CodexBackend (src/ai/codex.py).
 All subprocess I/O is fully mocked — no real codex process is spawned.
+`subprocess.run` is patched globally (autouse) so `_login()` never calls the real CLI.
 """
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
 from src.ai.codex import CodexBackend
+
+
+# ── Fixtures ──────────────────────────────────────────────────────────────────
+
+@pytest.fixture(autouse=True)
+def mock_subprocess_run():
+    """Prevent real `codex login` subprocess calls in every test."""
+    with patch("src.ai.codex.subprocess.run") as mock:
+        mock.return_value = MagicMock(returncode=0, stdout="Successfully logged in", stderr="")
+        yield mock
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -57,6 +68,33 @@ class TestConstruction:
 
     def test_not_stateful(self):
         assert CodexBackend(api_key="k").is_stateful is False
+
+    def test_login_called_on_init(self, mock_subprocess_run):
+        CodexBackend(api_key="sk-mykey")
+        mock_subprocess_run.assert_called_once_with(
+            ["codex", "login", "--with-api-key"],
+            input="sk-mykey",
+            text=True,
+            capture_output=True,
+        )
+
+
+# ── _login ────────────────────────────────────────────────────────────────────
+
+class TestLogin:
+    def test_login_success_logs_info(self, mock_subprocess_run, caplog):
+        import logging
+        mock_subprocess_run.return_value = MagicMock(returncode=0, stderr="")
+        with caplog.at_level(logging.INFO, logger="src.ai.codex"):
+            CodexBackend(api_key="sk-x")
+        assert any("authenticated" in r.message for r in caplog.records)
+
+    def test_login_failure_logs_warning(self, mock_subprocess_run, caplog):
+        import logging
+        mock_subprocess_run.return_value = MagicMock(returncode=1, stderr="some error")
+        with caplog.at_level(logging.WARNING, logger="src.ai.codex"):
+            CodexBackend(api_key="sk-x")
+        assert any("failed" in r.message for r in caplog.records)
 
 
 # ── _make_cmd ─────────────────────────────────────────────────────────────────

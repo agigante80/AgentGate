@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import shlex
+import subprocess
 from collections.abc import AsyncGenerator
 
 from src.ai.adapter import AICLIBackend, SubprocessMixin
@@ -28,6 +29,27 @@ class CodexBackend(SubprocessMixin, AICLIBackend):
         self._api_key = api_key
         self._model = model
         self._opts = opts
+        self._login()
+
+    def _login(self) -> None:
+        """Authenticate Codex CLI by piping the API key to `codex login --with-api-key`.
+
+        Codex CLI (Rust) reads credentials from $CODEX_HOME/auth.json only;
+        OPENAI_API_KEY env var is not read by `codex exec`. This mirrors the
+        documented usage: `printenv OPENAI_API_KEY | codex login --with-api-key`.
+        Runs synchronously at startup; credentials persist across restarts in the
+        Docker volume at /data/.codex/auth.json.
+        """
+        result = subprocess.run(
+            ["codex", "login", "--with-api-key"],
+            input=self._api_key,
+            text=True,
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            logger.warning("codex login failed: %s", result.stderr.strip())
+        else:
+            logger.info("CodexBackend: authenticated via API key")
 
     def _make_cmd(self, prompt: str) -> tuple[list[str], dict]:
         env = {**scrubbed_env(), "OPENAI_API_KEY": self._api_key}
