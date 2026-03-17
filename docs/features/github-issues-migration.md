@@ -17,6 +17,7 @@ This feature outlines the phased plan to convert existing feature documents in `
 | GateSec  | 1 | 8/10 | 2026-03-17 | Phase 1 surface clean; added threat model, fixed align-sync scoping, tightened Phase 2 security reqs. |
 | GateDocs | 1 | 9/10 | 2026-03-17 | The document is well-structured and comprehensive, providing a clear plan for the migration and new review process. |
 | GateCode | 2 | 9/10 | 2026-03-17 | Tightened phase boundaries, corrected version/scope inconsistencies, and made migration outputs/acceptance criteria fully testable. |
+| GateSec  | 2 | 9/10 | 2026-03-17 | Round 2 clean; added export-dir gitignore req, adversarial-input test case, parity-report trust guidance, and external-contributor security answer. |
 
 **Status**: ⏳ Pending review
 **Approved**: No — requires all scores ≥ 9/10 in the same round
@@ -200,6 +201,7 @@ Create a Python script (e.g., `scripts/migrate_features.py`) that:
 -   Generates Markdown content formatted according to the new `feature.md` GitHub issue template.
 -   Outputs generated Markdown files to `tmp/feature-issue-export/` for user review and manual GitHub issue creation.
 -   Writes a deterministic parity manifest (`tmp/feature-issue-export/parity-report.json`) mapping each source doc to exported issue metadata (title, slug, labels).
+-   The `tmp/` directory must be `.gitignored` to prevent accidental commit of export artifacts (feature docs may contain example credentials or security notes not intended for issue tracker publication).
 
 ### Step 3 — Update Feature Review Process Guide
 
@@ -235,6 +237,7 @@ Once all features are successfully migrated and verified on GitHub:
 | File | Action | Summary of change |
 |------|--------|-------------------|
 | `.github/ISSUE_TEMPLATE/feature.md` | **Create** | New template for feature requests. |
+| `.gitignore` | **Edit** | Add `tmp/` to prevent accidental commit of export artifacts. |
 | `scripts/migrate_features.py` | **Create** | Python script for migrating feature docs to GitHub issue Markdown. |
 | `docs/guides/feature-review-process.md` | **Edit** | Add mixed-mode migration guidance while preserving current `dev -> sec -> docs` delegation in phase 1. |
 | `README.md` | **Edit** | Document migration workflow and mixed-mode transition guidance. |
@@ -263,12 +266,14 @@ Once all features are successfully migrated and verified on GitHub:
 | `test_parse_feature_doc_sections` | Correctly parses various sections from feature documents. |
 | `test_generate_github_issue_md_format` | Generated Markdown adheres to the GitHub issue template format. |
 | `test_parse_feature_doc_edge_cases` | Handles missing sections or malformed markdown gracefully. |
+| `test_parse_adversarial_content` | Feature docs containing shell metacharacters (`$(…)`, `` `…` ``), HTML/script tags, or embedded instructions in code blocks are passed through as literal text — no interpretation or execution. |
 
 ### Manual Verification of Migration
 
 -   Run `scripts/migrate_features.py` and manually inspect the generated Markdown files for accuracy and completeness.
 -   Manually create GitHub issues from the generated Markdown and verify their appearance on GitHub (labels, title, content).
 -   Confirm `tmp/feature-issue-export/parity-report.json` has 1:1 mapping for every `docs/features/*.md` source (excluding `_template.md`).
+-   Verify parity report content (not just existence): spot-check that titles, labels, and section headings match the source docs. The parity report is the trust anchor for the cleanup phase — a buggy report could lead to premature doc deletion.
 
 ### End-to-End Review Process Simulation
 
@@ -321,6 +326,7 @@ Delete `docs/roadmap.md` only in cleanup phase after parity is validated.
     > *Proposed*: For Phase 2, require a fine-grained PAT with `issues:write` and `metadata:read` only. Full `repo` scope must NOT be used for issue automation. Document required scopes in `.env.example`. Token rotation: recommend 90-day expiry; `_validate_config()` can warn if the token lacks expected scopes (via `gh auth status`).
 4.  **Consistency Across AI CLIs**: How will the different AI CLIs (Codex, Gemini, Autopilot) ensure consistent interaction with GitHub issues, especially regarding automated actions and review processes?
 5.  **External User Interaction**: How will external users (e.g., community contributors) be guided through the new GitHub issue creation and review process?
+    > *Proposed*: External contributors use the `feature.md` issue template like any other GitHub project — no special onboarding beyond the template's built-in guidance. Externally-submitted issue content is untrusted and must never be fed to `run_shell()`, interpolated into `gh` commands, or processed by the migration script without manual review. Phase 2 automation must treat all issue body content as untrusted input, applying the same `shlex.quote()` / `--body-file` sanitization defined in Architecture Notes.
 6.  **Migration Verification**: What are the definitive criteria for verifying that all features have been successfully migrated to GitHub issues before deleting the old documentation?
 
 ---
