@@ -767,7 +767,11 @@ class SlackBot:
                 await self._reply(client, channel, f"❓ Unknown command: `{sub}`", thread_ts)
             await self.cmd_help([], say, client, channel, thread_ts=thread_ts, user_id=user_id)
             return
-        await handler(args, say, client, channel, thread_ts=thread_ts, user_id=user_id)
+        try:
+            await handler(args, say, client, channel, thread_ts=thread_ts, user_id=user_id)
+        except Exception as exc:
+            logger.exception("Command %r failed", sub)
+            await self._reply(client, channel, f"❌ Command failed: {exc}", thread_ts)
 
     # ── Utility commands ──────────────────────────────────────────────────
 

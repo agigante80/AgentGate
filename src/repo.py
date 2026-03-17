@@ -42,9 +42,32 @@ async def configure_git_auth(token: str) -> None:
 async def pull() -> str:
     if not (REPO_DIR / ".git").exists():
         return "⚠️ No repository cloned yet — nothing to pull."
-    repo = await asyncio.to_thread(git.Repo, REPO_DIR)
-    result = await asyncio.to_thread(repo.remotes.origin.pull)
-    return "\n".join(str(r) for r in result)
+    # Use fetch + reset --hard instead of gitpython pull() to avoid failures
+    # when the container has local changes (repo is ephemeral; remote is authoritative).
+    fetch_proc = await asyncio.create_subprocess_exec(
+        "git", "-C", str(REPO_DIR), "fetch", "--prune", "origin",
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    _, fetch_err = await fetch_proc.communicate()
+    if fetch_proc.returncode != 0:
+        return f"⚠️ git fetch failed:\n{fetch_err.decode().strip()}"
+
+    # Determine the remote tracking branch (e.g. origin/develop)
+    branch_proc = await asyncio.create_subprocess_exec(
+        "git", "-C", str(REPO_DIR), "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}",
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    branch_out, _ = await branch_proc.communicate()
+    upstream = branch_out.decode().strip() if branch_proc.returncode == 0 else "origin/HEAD"
+
+    reset_proc = await asyncio.create_subprocess_exec(
+        "git", "-C", str(REPO_DIR), "reset", "--hard", upstream,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+    )
+    reset_out, reset_err = await reset_proc.communicate()
+    if reset_proc.returncode != 0:
+        return f"⚠️ git reset failed:\n{reset_err.decode().strip()}"
+    return reset_out.decode().strip()
 
 
 async def status() -> str:

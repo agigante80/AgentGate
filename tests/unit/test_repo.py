@@ -54,21 +54,40 @@ class TestPull:
         import src.repo as repo_module
         monkeypatch.setattr(repo_module, "REPO_DIR", tmp_path)
         (tmp_path / ".git").mkdir()
-        mock_repo = MagicMock()
-        mock_repo.remotes.origin.pull.return_value = ["fetch result"]
 
-        call_count = 0
+        call_num = 0
 
-        async def fake_to_thread(fn, *args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                return mock_repo  # git.Repo(REPO_DIR)
-            return fn(*args, **kwargs)  # repo.remotes.origin.pull()
+        async def fake_exec(*args, **kwargs):
+            nonlocal call_num
+            call_num += 1
+            proc = AsyncMock()
+            proc.returncode = 0
+            if call_num == 1:  # fetch
+                proc.communicate = AsyncMock(return_value=(b"", b""))
+            elif call_num == 2:  # rev-parse upstream
+                proc.communicate = AsyncMock(return_value=(b"origin/develop\n", b""))
+            else:  # reset --hard
+                proc.communicate = AsyncMock(return_value=(b"HEAD is now at abc1234 Latest commit", b""))
+            return proc
 
-        with patch("asyncio.to_thread", side_effect=fake_to_thread):
+        with patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
             result = await repo_module.pull()
-        assert "fetch result" in result
+        assert "HEAD is now at" in result
+
+    async def test_pull_fetch_failure(self, tmp_path, monkeypatch):
+        import src.repo as repo_module
+        monkeypatch.setattr(repo_module, "REPO_DIR", tmp_path)
+        (tmp_path / ".git").mkdir()
+
+        async def fake_exec(*args, **kwargs):
+            proc = AsyncMock()
+            proc.returncode = 1
+            proc.communicate = AsyncMock(return_value=(b"", b"fatal: unable to connect"))
+            return proc
+
+        with patch("asyncio.create_subprocess_exec", side_effect=fake_exec):
+            result = await repo_module.pull()
+        assert "fetch failed" in result
 
 
 class TestStatus:

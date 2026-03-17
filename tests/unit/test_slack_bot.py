@@ -1031,3 +1031,18 @@ class TestDispatchUserIdAttribution:
         client = _make_client()
         await bot._dispatch("sync", [], say, client, "C1", user_id="U99")
         assert called_with.get("user_id") == "U99"
+
+    async def test_dispatch_command_error_sends_reply(self):
+        """Command failures must surface an ❌ reply instead of silently dropping."""
+        bot = _make_bot()
+        say = _make_say()
+        client = _make_client()
+
+        async def failing_handler(args, say, client, channel, *, thread_ts=None, user_id=None):
+            raise RuntimeError("git failed")
+
+        bot.cmd_sync = failing_handler
+        await bot._dispatch("sync", [], say, client, "C1")
+        # At least one postMessage with ❌ should have been sent
+        messages = [str(call) for call in client.chat_postMessage.call_args_list]
+        assert any("❌" in m for m in messages), f"Expected ❌ error reply, got: {messages}"
