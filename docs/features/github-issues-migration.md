@@ -13,7 +13,7 @@ This feature outlines the plan to convert all existing feature documents in `doc
 
 | Reviewer | Round | Score | Date | Notes |
 |----------|-------|-------|------|-------|
-| GateCode | 1 | -/10 | - | Pending |
+| GateCode | 1 | 8/10 | 2026-03-17 | Good direction; narrowed to phased migration and repo-accurate config/tooling details. |
 | GateSec  | 1 | -/10 | - | Pending |
 | GateDocs | 1 | -/10 | - | Pending |
 
@@ -24,14 +24,14 @@ This feature outlines the plan to convert all existing feature documents in `doc
 
 ## ⚠️ Prerequisite Questions
 
-1.  **Scope** — This applies across all platforms as it is an internal process change.
-2.  **Backend** — This is independent of AI backends.
+1.  **Scope** — Internal process change affecting docs workflow and agent operating instructions; platform-agnostic.
+2.  **Backend** — No new AI backend. Existing CLIs may optionally invoke `gh` in a later phase.
 3.  **Stateful vs stateless** — N/A.
-4.  **Breaking change?** — Yes, it removes existing documentation files and changes the feature tracking process, requiring a MAJOR version bump.
-5.  **New dependency?** — Potentially for GitHub API interaction libraries in the automation phase.
-6.  **Persistence** — N/A.
-7.  **Auth** — Yes, for automated GitHub issue creation and management, agents will need GitHub API tokens. These would be stored in `config.py`.
-8.  **Automated GitHub Interaction** — Is it feasible for agents (Gemini, Codex, Autopilot) to directly create, update, and manage GitHub issues? This is a critical dependency for full automation.
+4.  **Breaking change?** — For migration phase, treat as non-breaking (`MINOR`) because docs remain available during transition. Re-assess if/when destructive cleanup lands.
+5.  **New dependency?** — No dependency needed for phase 1 (manual issue creation). Future automation may use either `gh` CLI or a Python GitHub SDK.
+6.  **Persistence** — No runtime persistence changes.
+7.  **Auth** — Reuse existing `GitHubConfig.github_repo_token` (`GITHUB_REPO_TOKEN`) for future automation; do not introduce duplicate token env vars.
+8.  **Automated GitHub Interaction** — Feasible in a follow-up phase once a least-privilege token model and auditable command path are defined.
 
 ---
 
@@ -131,30 +131,32 @@ Reviews are conducted directly on GitHub issues. Reviewer scores, notes, and del
 
 ## Recommended Solution
 
--   **Automated Migration Script**: Develop a Python script to parse `docs/features/*.md` files, extract relevant information, and generate GitHub-compatible Markdown content for feature issues. This script will be user-executable for the initial migration phase.
--   **GitHub Issue Templates**: Create `bug.md`, `feature.md`, and `improvement.md` templates in `.github/ISSUE_TEMPLATE/` to standardize issue creation for external users and internal teams.
--   **Automated Issue Creation (Future Phase)**: Investigate and implement capabilities for agents to securely and persistently interact with the GitHub API to fully automate issue creation, updates, and management. This will be a follow-up feature.
--   **Updated Review Process**: Revise `docs/guides/feature-review-process.md` to define a new GitHub-issue-centric review process. This process will use GitHub issue descriptions for content, labels for status and priority, and comments for reviewer feedback, scores, and delegation among GateCode, GateSec, and GateDocs.
--   **Deprecation of Old System**: Deprecate and eventually remove `docs/roadmap.md` and the `docs/features/` directory (excluding `_template.md` which will also be removed once new templates are in use) after successful migration and verification. The `docs roadmap-sync` and `docs align-sync` commands will also be deprecated and removed from agent instructions.
+Deliver this in two explicit phases to avoid a risky all-at-once cutover.
+
+-   **Phase 1 (this feature)**: Introduce issue templates and a deterministic export script that converts `docs/features/*.md` into GitHub-issue-ready Markdown for manual posting.
+-   **Phase 1 process updates**: Keep the current review chain, but make the issue body the canonical source for new work while docs remain as migration source material.
+-   **Phase 2 (follow-up feature)**: Add agent-driven GitHub issue CRUD using least-privilege auth and auditable command execution.
+-   **Deferred cleanup**: Only remove `docs/roadmap.md` and legacy feature docs after a verified migration report confirms parity.
 
 ---
 
 ## Architecture Notes
 
--   **Agent GitHub Interaction**: A critical architectural consideration is the secure and persistent authentication and authorization of agents (Gemini, Codex, Autopilot) to interact with the GitHub API. This requires either a dedicated GitHub API tool or a robust method for injecting `GH_TOKEN` securely into agent execution environments.
--   **Template Consistency**: The migration script and new templates must ensure consistency in information capture from the old feature documents to the new GitHub issues.
--   **Backward Compatibility**: Ensure a graceful transition for any ongoing features during the migration period.
--   **Scalability**: The new process should be scalable to accommodate a growing number of features and agents.
+-   **Agent GitHub Interaction**: For automation, prefer a single audited execution path (`gh` CLI with explicit allowlisted subcommands) over ad-hoc API wrappers spread across backends.
+-   **Credential Reuse**: Use existing `Settings.github.github_repo_token`; avoid introducing `GITHUB_API_TOKEN` alongside it.
+-   **Template Consistency**: Migration output must preserve acceptance criteria, open questions, and security notes from source docs.
+-   **Backward Compatibility**: During phase 1, legacy docs remain readable to avoid disrupting active planning.
+-   **Scalability**: Label taxonomy (`type:*`, `priority:*`, `review:*`) should support automation and board filtering.
 
 ---
 
 ## Config Variables
 
-Initially, no new configuration variables are required for the migration phase (Option A). However, for the automated issue creation (Option B, future state), the following might be needed:
+Initially, no new configuration variables are required for phase 1. For phase 2 automation, reuse the existing token variable already modeled in `GitHubConfig`.
 
 | Env var | Type | Default | Description |
 |---------|------|---------|-------------|
-| `GITHUB_API_TOKEN` | `str` | `""` | GitHub Personal Access Token for automated issue management. |
+| `GITHUB_REPO_TOKEN` | `str` | `""` | Existing repository token used by git/gh operations and future issue automation. |
 
 ---
 
@@ -179,27 +181,27 @@ Create a Python script (e.g., `scripts/migrate_features.py`) that:
 
 Revise `docs/guides/feature-review-process.md` to:
 -   Describe the new GitHub-issue-centric review workflow.
--   Detail how agents will use GitHub labels (`review: pending`, `review: approved`), assignees, and comments for managing the review lifecycle.
+-   Detail how agents will use GitHub labels (`review:pending`, `review:approved`), assignees, and comments for managing the review lifecycle.
 -   Provide clear instructions for each agent (GateCode, GateSec, GateDocs) on their role in the new process.
 
-### Step 4 — Document Deprecation of Old Commands
+### Step 4 — Document Transition of Old Commands
 
-Update `README.md` and `docs-agent.md` (or `GEMINI.md`) to:
--   Announce the deprecation of the `docs roadmap-sync` and `docs align-sync` commands.
--   Provide a brief explanation of why these commands are being deprecated (moving to GitHub-centric management).
+Update `README.md` and docs-agent instruction files (`.gemini/docs-agent.md`, `skills/docs-agent.md`) to:
+-   Clarify which parts of `docs roadmap-sync` and `docs align-sync` stay during migration and which parts are superseded by issue tracking.
+-   Provide operator guidance for mixed-mode operation during transition.
 
 ### Step 5 — Plan for Automated GitHub Interaction (Future Feature)
 
 Outline a separate feature document or a section in this document detailing:
 -   The requirements for agents to directly interact with the GitHub API.
--   Security considerations for `GITHUB_API_TOKEN`.
+-   Security considerations for `GITHUB_REPO_TOKEN`.
 -   Proposed tools/libraries for GitHub API integration.
 
-### Step 6 — Delete Old Documentation System (Post-Migration)
+### Step 6 — Cleanup Old Documentation System (Post-Migration, separate PR)
 
 Once all features are successfully migrated and verified on GitHub:
 -   Delete `docs/roadmap.md`.
--   Delete the entire `docs/features/` directory (including `_template.md`).
+-   Remove only migrated legacy files in `docs/features/`, preserving any still-active specs until their issue parity is confirmed.
 
 ---
 
@@ -212,11 +214,11 @@ Once all features are successfully migrated and verified on GitHub:
 | `.github/ISSUE_TEMPLATE/improvement.md` | **Create** | New template for improvement requests. |
 | `scripts/migrate_features.py` | **Create** | Python script for migrating feature docs to GitHub issue Markdown. |
 | `docs/guides/feature-review-process.md` | **Edit** | Update review process to be GitHub-issue-centric. |
-| `README.md` | **Edit** | Document deprecation of old `docs` commands. |
-| `docs-agent.md` (or `GEMINI.md`) | **Edit** | Document deprecation of old `docs` commands. |
+| `README.md` | **Edit** | Document migration workflow and mixed-mode transition guidance. |
+| `.gemini/docs-agent.md` and/or `skills/docs-agent.md` | **Edit** | Update docs-agent instructions for issue-centric workflow and transition period. |
 | `docs/features/github-issues-migration.md` | **Create** | This feature document. |
-| `docs/roadmap.md` | **Delete** | After successful migration. |
-| `docs/features/` | **Delete** | Entire directory, after successful migration. |
+| `docs/roadmap.md` | **Delete** | Only after verified parity report (separate cleanup PR). |
+| `docs/features/*` | **Delete** | Remove migrated legacy specs incrementally after parity confirmation. |
 
 ---
 
@@ -257,7 +259,7 @@ Once all features are successfully migrated and verified on GitHub:
 
 ### `.env.example` and `docker-compose.yml.example`
 
--   If `GITHUB_API_TOKEN` is introduced in a future phase, add commented entries with descriptions.
+-   If automation requires explicit operator setup, add commented `GITHUB_REPO_TOKEN` guidance (scope + rotation notes).
 
 ### `docs/roadmap.md`
 
@@ -274,13 +276,15 @@ Once all features are successfully migrated and verified on GitHub:
 
 Consult `docs/versioning.md` for the full decision guide.
 
-**Expected bump for this feature**: `MAJOR` → `1.0.0` (due to removal of existing documentation system and significant workflow changes).
+**Expected bump for this feature**: `MINOR` (new capability and process additions without immediate breaking runtime behavior).  
+If/when destructive cleanup removes user-facing workflows, re-evaluate at that time per `docs/versioning.md`.
 
 ---
 
 ## Roadmap Update
 
-When this feature is complete, `docs/roadmap.md` will be deleted. The GitHub issue board will serve as the new roadmap.
+When phase 1 is complete, GitHub issues become the preferred tracking surface while `docs/roadmap.md` remains temporarily for cross-checking.  
+Delete `docs/roadmap.md` only in cleanup phase after parity is validated.
 
 ---
 
@@ -288,7 +292,7 @@ When this feature is complete, `docs/roadmap.md` will be deleted. The GitHub iss
 
 1.  **Partial Migration Handling**: What is the strategy if only a subset of feature documents are migrated? How do we ensure consistency during a transitional period?
 2.  **Rollback Strategy**: What is the process for rolling back if the new GitHub-centric system proves problematic?
-3.  **Agent GitHub Authentication**: How will `GITHUB_API_TOKEN` be managed securely and persist across agent sessions for automated GitHub interactions? This is crucial for full automation.
+3.  **Agent GitHub Authentication**: What least-privilege scope is required for `GITHUB_REPO_TOKEN`, and how is rotation/audit handled for automated interactions?
 4.  **Consistency Across AI CLIs**: How will the different AI CLIs (Codex, Gemini, Autopilot) ensure consistent interaction with GitHub issues, especially regarding automated actions and review processes?
 5.  **External User Interaction**: How will external users (e.g., community contributors) be guided through the new GitHub issue creation and review process?
 6.  **Migration Verification**: What are the definitive criteria for verifying that all features have been successfully migrated to GitHub issues before deleting the old documentation?
@@ -303,12 +307,12 @@ When this feature is complete, `docs/roadmap.md` will be deleted. The GitHub iss
 -   [ ] `scripts/migrate_features.py` is created and successfully generates valid Markdown for all existing feature documents.
 -   [ ] The new GitHub issue templates (`bug.md`, `feature.md`, `improvement.md`) are created and correctly formatted.
 -   [ ] `docs/guides/feature-review-process.md` is updated to reflect the GitHub-issue-centric review process.
--   [ ] `README.md` and `docs-agent.md` (or `GEMINI.md`) are updated with deprecation notices for old commands.
+-   [ ] `README.md` and docs-agent instructions (`.gemini/docs-agent.md` and/or `skills/docs-agent.md`) are updated with migration/transition guidance.
 -   [ ] Manual verification of migrated issues on GitHub confirms accuracy and completeness.
 -   [ ] The team has approved the new review process.
--   [ ] `docs/roadmap.md` is deleted.
--   [ ] The `docs/features/` directory is deleted.
--   [ ] The `VERSION` file is bumped to `MAJOR` (e.g., `1.0.0`).
+-   [ ] A parity report confirms every migrated feature doc has a corresponding GitHub issue with mapped status/priority labels.
+-   [ ] Cleanup work (`docs/roadmap.md` and migrated legacy docs removal) is tracked in a follow-up PR/feature.
+-   [ ] The `VERSION` file bump follows `docs/versioning.md` for the exact delivered scope.
 -   [ ] All agents are briefed and capable of following the new GitHub-issue-centric review process.
 -   [ ] `pytest tests/ -v --tb=short` passes with no failures or errors (after script implementation).
 -   [ ] `ruff check src/` reports no new linting issues (after script implementation).
