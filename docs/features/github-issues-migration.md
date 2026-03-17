@@ -2,7 +2,7 @@
 
 > Status: **Planned** | Priority: High | Last reviewed: 2026-03-17
 
-This feature outlines the plan to convert all existing feature documents in `docs/features/` into GitHub issues for streamlined prioritization and tracking. It also details the removal of the old documentation system (`docs/roadmap.md` and `docs/features/` directory) and the automation of the issue creation and review process.
+This feature outlines the phased plan to convert existing feature documents in `docs/features/` into GitHub issues for streamlined prioritization and tracking. It also defines mixed-mode operation during migration, with legacy docs cleanup and full automation deferred to follow-up work.
 
 ---
 
@@ -16,6 +16,7 @@ This feature outlines the plan to convert all existing feature documents in `doc
 | GateCode | 1 | 8/10 | 2026-03-17 | Good direction; narrowed to phased migration and repo-accurate config/tooling details. |
 | GateSec  | 1 | 8/10 | 2026-03-17 | Phase 1 surface clean; added threat model, fixed align-sync scoping, tightened Phase 2 security reqs. |
 | GateDocs | 1 | 9/10 | 2026-03-17 | The document is well-structured and comprehensive, providing a clear plan for the migration and new review process. |
+| GateCode | 2 | 9/10 | 2026-03-17 | Tightened phase boundaries, corrected version/scope inconsistencies, and made migration outputs/acceptance criteria fully testable. |
 
 **Status**: ⏳ Pending review
 **Approved**: No — requires all scores ≥ 9/10 in the same round
@@ -28,7 +29,7 @@ This feature outlines the plan to convert all existing feature documents in `doc
 2.  **Backend** — No new AI backend. Existing CLIs may optionally invoke `gh` in a later phase.
 3.  **Stateful vs stateless** — N/A.
 4.  **Breaking change?** — For migration phase, treat as non-breaking (`MINOR`) because docs remain available during transition. Re-assess if/when destructive cleanup lands.
-5.  **New dependency?** — No dependency needed for phase 1 (manual issue creation). Future automation may use either `gh` CLI or a Python GitHub SDK.
+5.  **New dependency?** — No dependency needed for phase 1 (manual issue creation). Future automation should prefer the existing `gh` CLI audited path before introducing new SDK dependencies.
 6.  **Persistence** — No runtime persistence changes.
 7.  **Auth** — Reuse existing `GitHubConfig.github_repo_token` (`GITHUB_REPO_TOKEN`) for future automation; do not introduce duplicate token env vars.
 8.  **Automated GitHub Interaction** — Feasible in a follow-up phase once a least-privilege token model and auditable command path are defined.
@@ -45,7 +46,7 @@ This feature outlines the plan to convert all existing feature documents in `doc
 
 ---
 
-## Current Behaviour (as of v0.7.x)
+## Current Behaviour (as of v1.2.0)
 
 | Layer | Location | Current behaviour |
 |-------|----------|-------------------|
@@ -138,6 +139,12 @@ Deliver this in two explicit phases to avoid a risky all-at-once cutover.
 -   **Phase 2 (follow-up feature)**: Add agent-driven GitHub issue CRUD using least-privilege auth and auditable command execution.
 -   **Deferred cleanup**: Only remove `docs/roadmap.md` and legacy feature docs after a verified migration report confirms parity.
 
+### Non-Goals (Phase 1)
+
+-   No direct GitHub API/CLI mutation by agents (manual issue posting remains required).
+-   No changes to runtime bot command routing/execution paths.
+-   No deletion of legacy docs or roadmap file during the migration PR.
+
 ---
 
 ## Architecture Notes
@@ -180,10 +187,10 @@ Initially, no new configuration variables are required for phase 1. For phase 2 
 
 ### Step 1 — Create GitHub Issue Templates
 
-Create the following files in `.github/ISSUE_TEMPLATE/`:
--   `bug.md` (for bug reports)
--   `feature.md` (for feature requests, mirroring the migrated feature docs)
--   `improvement.md` (for general improvements)
+Create `.github/ISSUE_TEMPLATE/feature.md` for migrated feature specs.
+
+-   Keep scope to the feature template required for this migration.
+-   Optional bug/improvement templates can be tracked in a separate docs feature to avoid scope creep.
 
 ### Step 2 — Develop Feature Document Migration Script
 
@@ -191,14 +198,15 @@ Create a Python script (e.g., `scripts/migrate_features.py`) that:
 -   Parses existing `docs/features/*.md` files.
 -   Extracts key information (title, overview, problem statement, design, env vars, files to change, etc.).
 -   Generates Markdown content formatted according to the new `feature.md` GitHub issue template.
--   Outputs these generated Markdown files to a temporary directory for user review and manual GitHub issue creation.
+-   Outputs generated Markdown files to `tmp/feature-issue-export/` for user review and manual GitHub issue creation.
+-   Writes a deterministic parity manifest (`tmp/feature-issue-export/parity-report.json`) mapping each source doc to exported issue metadata (title, slug, labels).
 
 ### Step 3 — Update Feature Review Process Guide
 
 Revise `docs/guides/feature-review-process.md` to:
--   Describe the new GitHub-issue-centric review workflow.
--   Detail how agents will use GitHub labels (`review:pending`, `review:approved`), assignees, and comments for managing the review lifecycle.
--   Provide clear instructions for each agent (GateCode, GateSec, GateDocs) on their role in the new process.
+-   Define mixed-mode operation during migration: feature docs remain the review source-of-truth, with GitHub issues as tracking mirrors.
+-   Reserve full issue-native review workflow changes for phase 2 automation once command/auth controls are implemented.
+-   Preserve the current `dev -> sec -> docs` sequential delegation protocol until phase 2 lands.
 
 ### Step 4 — Document Transition of Old Commands
 
@@ -226,14 +234,12 @@ Once all features are successfully migrated and verified on GitHub:
 
 | File | Action | Summary of change |
 |------|--------|-------------------|
-| `.github/ISSUE_TEMPLATE/bug.md` | **Create** | New template for bug reports. |
 | `.github/ISSUE_TEMPLATE/feature.md` | **Create** | New template for feature requests. |
-| `.github/ISSUE_TEMPLATE/improvement.md` | **Create** | New template for improvement requests. |
 | `scripts/migrate_features.py` | **Create** | Python script for migrating feature docs to GitHub issue Markdown. |
-| `docs/guides/feature-review-process.md` | **Edit** | Update review process to be GitHub-issue-centric. |
+| `docs/guides/feature-review-process.md` | **Edit** | Add mixed-mode migration guidance while preserving current `dev -> sec -> docs` delegation in phase 1. |
 | `README.md` | **Edit** | Document migration workflow and mixed-mode transition guidance. |
 | `.gemini/docs-agent.md` and/or `skills/docs-agent.md` | **Edit** | Update docs-agent instructions for issue-centric workflow and transition period. |
-| `docs/features/github-issues-migration.md` | **Create** | This feature document. |
+| `docs/features/github-issues-migration.md` | **Edit** | Track design decisions, phased scope, and review outcomes for this migration feature. |
 | `docs/roadmap.md` | **Delete** | Only after verified parity report (separate cleanup PR). |
 | `docs/features/*` | **Delete** | Remove migrated legacy specs incrementally after parity confirmation. |
 
@@ -243,7 +249,8 @@ Once all features are successfully migrated and verified on GitHub:
 
 | Package | Status | Notes |
 |---------|--------|-------|
-| `PyGithub` (or similar) | ❌ Needs adding (future) | For automated GitHub API interaction in Option B. |
+| _None (phase 1)_ | ✅ No new dependency | Export script uses Python stdlib only. |
+| `gh` CLI | ✅ Already used in project ops | Preferred audited path for future automation (phase 2). |
 
 ---
 
@@ -261,10 +268,11 @@ Once all features are successfully migrated and verified on GitHub:
 
 -   Run `scripts/migrate_features.py` and manually inspect the generated Markdown files for accuracy and completeness.
 -   Manually create GitHub issues from the generated Markdown and verify their appearance on GitHub (labels, title, content).
+-   Confirm `tmp/feature-issue-export/parity-report.json` has 1:1 mapping for every `docs/features/*.md` source (excluding `_template.md`).
 
 ### End-to-End Review Process Simulation
 
--   Simulate the new GitHub-issue-centric review process with agents using a test GitHub issue, verifying correct label application, comment format, and delegation.
+-   Simulate mixed-mode review with agents (`dev -> sec -> docs`) and verify issue links are attached without replacing the existing delegation protocol in phase 1.
 
 ---
 
@@ -323,16 +331,16 @@ Delete `docs/roadmap.md` only in cleanup phase after parity is validated.
 
 -   [ ] All implementation steps for the migration phase (Step 1-4) are complete.
 -   [ ] `scripts/migrate_features.py` is created and successfully generates valid Markdown for all existing feature documents.
--   [ ] The new GitHub issue templates (`bug.md`, `feature.md`, `improvement.md`) are created and correctly formatted.
--   [ ] `docs/guides/feature-review-process.md` is updated to reflect the GitHub-issue-centric review process.
+-   [ ] The new GitHub `feature.md` issue template is created and correctly formatted for migrated specs.
+-   [ ] `docs/guides/feature-review-process.md` is updated for mixed-mode migration (current review chain preserved during phase 1).
 -   [ ] `README.md` and docs-agent instructions (`.gemini/docs-agent.md` and/or `skills/docs-agent.md`) are updated with migration/transition guidance.
 -   [ ] Manual verification of migrated issues on GitHub confirms accuracy and completeness.
 -   [ ] The team has approved the new review process.
--   [ ] A parity report confirms every migrated feature doc has a corresponding GitHub issue with mapped status/priority labels.
+-   [ ] A parity report (`tmp/feature-issue-export/parity-report.json`) confirms every migrated feature doc has a corresponding GitHub issue with mapped status/priority labels.
 -   [ ] Cleanup work (`docs/roadmap.md` and migrated legacy docs removal) is tracked in a follow-up PR/feature.
 -   [ ] Phase 2 (automated GitHub interaction) has its own feature doc with a security review before implementation. `docs align-sync` is confirmed retained and not deprecated by this migration.
 -   [ ] The `VERSION` file bump follows `docs/versioning.md` for the exact delivered scope.
--   [ ] All agents are briefed and capable of following the new GitHub-issue-centric review process.
+-   [ ] All agents are briefed and capable of following the mixed-mode migration process for phase 1.
 -   [ ] `pytest tests/ -v --tb=short` passes with no failures or errors (after script implementation).
 -   [ ] `ruff check src/` reports no new linting issues (after script implementation).
 -   [ ] PR is merged to `develop` first; CI is green; then merged to `main`.
