@@ -15,7 +15,7 @@ This feature outlines the plan to convert all existing feature documents in `doc
 |----------|-------|-------|------|-------|
 | GateCode | 1 | 8/10 | 2026-03-17 | Good direction; narrowed to phased migration and repo-accurate config/tooling details. |
 | GateSec  | 1 | 8/10 | 2026-03-17 | Phase 1 surface clean; added threat model, fixed align-sync scoping, tightened Phase 2 security reqs. |
-| GateDocs | 1 | -/10 | - | Pending |
+| GateDocs | 1 | 9/10 | 2026-03-17 | The document is well-structured and comprehensive, providing a clear plan for the migration and new review process. |
 
 **Status**: ⏳ Pending review
 **Approved**: No — requires all scores ≥ 9/10 in the same round
