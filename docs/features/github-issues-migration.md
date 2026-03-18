@@ -280,6 +280,7 @@ Once all features are successfully migrated and verified on GitHub:
 | `test_verify_parity_report_rejects_source_path_escape` | `verify_parity_report()` rejects parity items whose `source` points outside `docs/features/`. |
 | `test_verify_parity_report_rejects_output_path_escape` | `verify_parity_report()` rejects parity items whose `output` points outside the configured export directory. |
 | `test_verify_parity_report_rejects_duplicate_entries` | `verify_parity_report()` rejects parity reports that duplicate the same source/output paths across multiple items. |
+| `test_verify_parity_report_rejects_untracked_export_markdown` | `verify_parity_report()` rejects orphan `*.md` files in the export directory that are not referenced by parity items. |
 | `test_verify_parity_report_rejects_malformed_hash_fields` | `verify_parity_report()` rejects parity items whose `source_sha256`/`output_sha256` values are not canonical 64-char lowercase hex digests. |
 | `test_verify_parity_report_rejects_malformed_json` | `verify_parity_report()` returns a validation error (not a traceback) when `parity-report.json` is malformed JSON. |
 | `test_verify_parity_report_rejects_non_object_top_level` | `verify_parity_report()` rejects reports whose top-level JSON is not an object. |
@@ -300,6 +301,7 @@ Once all features are successfully migrated and verified on GitHub:
 -   `--verify` now enforces parity content consistency (title/slug/status/priority/labels) and deterministic render matching, reducing reliance on manual report spot-checking alone.
 -   `--verify` rejects path-boundary escapes in parity entries (`source` must stay under `docs/features/`; `output` must stay under `tmp/feature-issue-export/`).
 -   `--verify` rejects duplicate parity items and malformed hash fields so each source/output pair is unique and hash encodings are canonical.
+-   `--verify` rejects orphan exported markdown files that are present in `tmp/feature-issue-export/` but not tracked in `parity-report.json`.
 -   `--verify` fails gracefully with explicit errors when `parity-report.json` is malformed or has an invalid top-level shape.
 -   `--verify` enforces strict key allowlists: top-level reports and per-item entries must use the canonical schema keys only (no missing or unexpected keys).
 -   `--verify` enforces strict schema typing: top-level `schema_version`/`source_count`/`export_count` must be integers, and item metadata fields must use canonical string/list-of-string types.

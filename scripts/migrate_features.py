@@ -454,6 +454,18 @@ def verify_parity_report(features_dir: Path, output_dir: Path) -> list[str]:
     for missing_source in sorted(missing_from_report):
         errors.append(f"missing parity item for source: {missing_source.as_posix()}")
 
+    exported_markdown = {
+        path.resolve()
+        for path in output_dir.glob("*.md")
+        if path.is_file()
+    }
+    unexpected_outputs = exported_markdown - reported_outputs
+    for unexpected_output in sorted(unexpected_outputs):
+        errors.append(
+            "unexpected exported markdown not tracked in parity report: "
+            f"{unexpected_output.as_posix()}"
+        )
+
     return errors
 
 

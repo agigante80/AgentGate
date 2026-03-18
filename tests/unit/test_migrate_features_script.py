@@ -469,6 +469,35 @@ def test_verify_parity_report_rejects_duplicate_entries(tmp_path):
     assert any("duplicate output entry" in error for error in errors)
 
 
+def test_verify_parity_report_rejects_untracked_export_markdown(tmp_path):
+    module = _load_module()
+    features_dir = tmp_path / "docs" / "features"
+    output_dir = tmp_path / "tmp" / "feature-issue-export"
+    features_dir.mkdir(parents=True)
+
+    source = features_dir / "tracked.md"
+    source.write_text(
+        "\n".join(
+            [
+                "# Tracked",
+                "",
+                "> Status: **Planned** | Priority: Medium | Last reviewed: 2026-03-18",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    module.export_features(features_dir, output_dir)
+    (output_dir / "orphan.md").write_text("# Orphan\n", encoding="utf-8")
+
+    errors = module.verify_parity_report(features_dir, output_dir)
+
+    assert any(
+        "unexpected exported markdown not tracked in parity report" in error
+        for error in errors
+    )
+
+
 def test_verify_parity_report_rejects_malformed_hash_fields(tmp_path):
     module = _load_module()
     features_dir = tmp_path / "docs" / "features"
