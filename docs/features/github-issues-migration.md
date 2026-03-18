@@ -275,6 +275,8 @@ Once all features are successfully migrated and verified on GitHub:
 | `test_label_values_are_sanitized` | Punctuation-heavy `status`/`priority` values are normalized to safe label slugs (`[a-z0-9-]`) before export. |
 | `test_verify_parity_report_passes_roundtrip` | `verify_parity_report()` accepts a clean export/parity set with no errors. |
 | `test_verify_parity_report_detects_tampered_export` | `verify_parity_report()` flags hash drift if exported markdown is modified after parity generation. |
+| `test_verify_parity_report_detects_metadata_drift` | `verify_parity_report()` detects parity report field drift (`title`, `labels`, etc.) versus live source parsing. |
+| `test_verify_parity_report_detects_tampered_export_with_updated_hash` | `verify_parity_report()` rejects manipulated exports even when `output_sha256` is maliciously updated in the report. |
 
 ### Manual Verification of Migration
 
@@ -283,7 +285,7 @@ Once all features are successfully migrated and verified on GitHub:
 -   Confirm `tmp/feature-issue-export/parity-report.json` has 1:1 mapping for every `docs/features/*.md` source (excluding `_template.md`).
 -   Confirm each parity item includes `source_sha256` and `output_sha256`; use these hashes to ensure reviewed export artifacts are exactly the ones posted to GitHub.
 -   Run `python scripts/migrate_features.py --verify` before posting to GitHub; verification must pass with zero mismatches.
--   Verify parity report content (not just existence): spot-check that titles, labels, and section headings match the source docs. The parity report is the trust anchor for the cleanup phase — a buggy report could lead to premature doc deletion.
+-   `--verify` now enforces parity content consistency (title/slug/status/priority/labels) and deterministic render matching, reducing reliance on manual report spot-checking alone.
 
 ### End-to-End Review Process Simulation
 

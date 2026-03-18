@@ -263,6 +263,75 @@ def test_verify_parity_report_detects_tampered_export(tmp_path):
     assert any("output hash mismatch" in error for error in errors)
 
 
+def test_verify_parity_report_detects_metadata_drift(tmp_path):
+    module = _load_module()
+    features_dir = tmp_path / "docs" / "features"
+    output_dir = tmp_path / "tmp" / "feature-issue-export"
+    features_dir.mkdir(parents=True)
+
+    source = features_dir / "meta.md"
+    source.write_text(
+        "\n".join(
+            [
+                "# Verify Metadata",
+                "",
+                "> Status: **Planned** | Priority: Medium | Last reviewed: 2026-03-18",
+                "",
+                "Summary.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    module.export_features(features_dir, output_dir)
+    report_path = output_dir / "parity-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["items"][0]["labels"] = ["type:feature", "status:wrong", "priority:medium", "review:pending"]
+    report["items"][0]["title"] = "Wrong Title"
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    errors = module.verify_parity_report(features_dir, output_dir)
+
+    assert any("title mismatch" in error for error in errors)
+    assert any("labels mismatch" in error for error in errors)
+
+
+def test_verify_parity_report_detects_tampered_export_with_updated_hash(tmp_path):
+    module = _load_module()
+    features_dir = tmp_path / "docs" / "features"
+    output_dir = tmp_path / "tmp" / "feature-issue-export"
+    features_dir.mkdir(parents=True)
+
+    source = features_dir / "render.md"
+    source.write_text(
+        "\n".join(
+            [
+                "# Verify Render",
+                "",
+                "> Status: **Planned** | Priority: Medium | Last reviewed: 2026-03-18",
+                "",
+                "Summary.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    module.export_features(features_dir, output_dir)
+    output_path = output_dir / "render.md"
+    output_path.write_text("# Totally different\n", encoding="utf-8")
+
+    report_path = output_dir / "parity-report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    report["items"][0]["output_sha256"] = hashlib.sha256(
+        output_path.read_text(encoding="utf-8").encode("utf-8")
+    ).hexdigest()
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+    errors = module.verify_parity_report(features_dir, output_dir)
+
+    assert any("output render mismatch" in error for error in errors)
+
+
 def test_label_values_are_sanitized():
     module = _load_module()
     doc = module.FeatureDoc(
