@@ -84,7 +84,7 @@ Never mix types in the same document.
 2. Read and edit the doc inline
 3. Update your row in the Team Review table
 4. Commit and push to `develop`
-5. If all scores ≥ 9: post approval; if any < 9: delegate to dev for round N+1
+5. If all scores ≥ 9: post approval, then DELEGATE to `dev` with branch/SHA so implementation can continue without human relay; if any < 9: delegate to dev for round N+1
 
 **Delegation format (when re-review needed):**
 ```

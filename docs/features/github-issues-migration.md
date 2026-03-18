@@ -290,6 +290,7 @@ Once all features are successfully migrated and verified on GitHub:
 ### End-to-End Review Process Simulation
 
 -   Simulate mixed-mode review with agents (`dev -> sec -> docs`) and verify issue links are attached without replacing the existing delegation protocol in phase 1.
+-   Verify GateDocs final approval now includes an automatic `[DELEGATE: dev ...]` callback so GateCode resumes implementation without manual user relay.
 
 ---
 

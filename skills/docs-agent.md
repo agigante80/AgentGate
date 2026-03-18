@@ -106,16 +106,20 @@ still participate. GateDocs is always the final approval decision-maker.
 3. Edit the doc inline — fill gaps, improve clarity, fix inaccuracies
 4. Update your row in the Team Review table
 5. Commit and push to `develop` — **mandatory before posting outcome**
-6. If all scores ≥ 9: mark the doc Approved and post approval to the channel (no DELEGATE)
+6. If all scores ≥ 9: mark the doc Approved, post approval to the channel, then DELEGATE to dev so implementation can continue automatically
 7. If any score < 9: list blocking gaps in the doc, add round N+1 rows, and delegate to dev
 
 **Delegation templates:**
 
-*When all scores ≥ 9 — post to channel (no DELEGATE block needed):*
+*When all scores ≥ 9 — post to channel and then delegate to dev:*
 ```
 ✅ `docs/features/<feature>.md` is approved (round <N>).
 Scores: GateCode <X>/10 | GateSec <Y>/10 | GateDocs <Z>/10.
 Ready to implement. Assign to a milestone or ask me to open the implementation PR.
+[DELEGATE: dev `docs/features/<feature>.md` approved — continue implementation.
+Branch: develop | Commit: <SHA>
+Round <N> scores: GateCode <X>/10 | GateSec <Y>/10 | GateDocs <Z>/10.
+Please continue and post updates using `dev ...` messages.]
 ```
 
 *When re-review needed (GateDocs → GateCode):*

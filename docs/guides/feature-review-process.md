@@ -226,7 +226,8 @@ to docs when done. See `docs/guides/feature-review-process.md` for the full prot
 Branch: develop | Commit: <SHA>
 GateCode: <X>/10 | GateSec: <Y>/10. Please sync to that commit, review the doc, make inline
 improvements, update your row in the Team Review table with your score, and commit to develop.
-If ALL scores in round <N> are ≥ 9, mark the doc Approved and notify the channel.
+If ALL scores in round <N> are ≥ 9, mark the doc Approved, notify the channel, and DELEGATE
+to dev with the approval summary so implementation can continue without human relay.
 Otherwise DELEGATE back to dev for round <N+1> — reference the doc for gap details,
 do not list specific security gaps in the delegation message.
 See `docs/guides/feature-review-process.md` for the full protocol.]
@@ -260,12 +261,18 @@ When GateDocs completes the final review and all scores in that round are ≥ 9:
    > Status: **Approved** | Priority: … | Last reviewed: YYYY-MM-DD
    ```
 3. Commit to `develop`.
-4. Post approval to the channel by including this text in your **response** (no DELEGATE — you
-   are already in the channel):
+4. Post approval to the channel by including this text in your **response**:
    ```
    ✅ `<doc-path>` is approved (round <N>).
    Scores: GateCode <X>/10 | GateSec <Y>/10 | GateDocs <Z>/10.
    Ready to implement. Assign to a milestone or ask me to open the implementation PR.
+   ```
+5. Append a final delegation back to GateCode so implementation can continue automatically:
+   ```
+   [DELEGATE: dev `<doc-path>` approved — continue implementation.
+   Branch: develop | Commit: <SHA>
+   Round <N> scores: GateCode <X>/10 | GateSec <Y>/10 | GateDocs <Z>/10.
+   Please continue and post progress updates using `dev ...` messages.]
    ```
 
 ---
