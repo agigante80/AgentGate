@@ -224,7 +224,7 @@ class Settings(BaseSettings):
             _msg = (
                 "AI_API_KEY is deprecated and will be removed in v1.1.0. "
                 "Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or the backend-specific key instead. "
-                "See docs/features/api-key-scheme.md for the migration guide."
+                "Set OPENAI_API_KEY or ANTHROPIC_API_KEY as the backend-specific key."
             )
             _log.warning(_msg)
             _warnings.warn(_msg, DeprecationWarning, stacklevel=2)

@@ -102,42 +102,6 @@ def test_run_sync_rejects_missing_token(tmp_path, monkeypatch):
         module.run_sync(args)
 
 
-def test_run_sync_blocks_write_on_failed_parity_preflight(tmp_path, monkeypatch):
-    module = _load_module()
-    features_dir = tmp_path / "docs" / "features"
-    output_dir = tmp_path / "tmp" / "feature-issue-export"
-    features_dir.mkdir(parents=True)
-    source = features_dir / "sample.md"
-    output = output_dir / "sample.md"
-    source.write_text("# Sample\n", encoding="utf-8")
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text("# Body\n", encoding="utf-8")
-    _write_parity(output_dir, source, output, "Sample", ["type:feature", "status:planned"])
-
-    monkeypatch.setenv("GITHUB_REPO_TOKEN", "github_pat_example_token_1234567890")
-    monkeypatch.setattr(module, "verify_parity_report", lambda *_a, **_k: ["boom"])
-
-    called = {"count": 0}
-
-    def _boom(*_a, **_k):
-        called["count"] += 1
-        raise AssertionError("gh should not be called when preflight fails")
-
-    monkeypatch.setattr(module, "_run_gh", _boom)
-
-    args = Namespace(
-        features_dir=features_dir,
-        output_dir=output_dir,
-        dry_run=False,
-        create_missing=True,
-        update_existing=False,
-    )
-
-    with pytest.raises(module.SyncError, match="parity preflight failed"):
-        module.run_sync(args)
-    assert called["count"] == 0
-
-
 def test_issue_map_rejects_source_path_escape(tmp_path):
     module = _load_module()
     features_dir = tmp_path / "docs" / "features"
@@ -158,8 +122,8 @@ def test_issue_map_rejects_source_path_escape(tmp_path):
     }
     map_path.write_text(json.dumps(map_payload) + "\n", encoding="utf-8")
 
-    with pytest.raises(module.SyncError, match="source path escapes features dir"):
-        module._load_issue_map(map_path, features_dir=features_dir)
+    with pytest.raises(module.SyncError, match="source path escapes repo root"):
+        module._load_issue_map(map_path)
 
 
 def test_body_tempfile_deleted_on_gh_failure(monkeypatch):
@@ -255,7 +219,7 @@ def test_run_sync_create_and_idempotent_update_flow(tmp_path, monkeypatch):
     )
 
     monkeypatch.setenv("GITHUB_REPO_TOKEN", "github_pat_example_token_1234567890")
-    monkeypatch.setattr(module, "verify_parity_report", lambda *_a, **_k: [])
+    monkeypatch.setattr(module, "_SCRIPT_DIR", tmp_path / "scripts")
 
     calls: list[list[str]] = []
 

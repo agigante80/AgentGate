@@ -17,23 +17,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Extract and validate feature doc path from PR body
-        id: extract
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const pr = context.payload.pull_request;
-            const body = pr.body || '';
-            const m = body.match(/implements:\s*(docs\/features\/[a-zA-Z0-9_\-]+\.md)/i);
-            if (!m) throw new Error('No valid implements: docs/features/<file>.md found in PR body');
-            core.setOutput('feature', m[1]);
-
-      - name: Run finalizer
-        env:
-          FEATURE_DOC: ${{ steps.extract.outputs.feature }}
-        run: |
-          python scripts/finalize_feature.py "$FEATURE_DOC"
-
       - name: Create Release
         if: success()
         uses: softprops/action-gh-release@v1

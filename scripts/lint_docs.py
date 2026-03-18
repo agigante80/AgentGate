@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Docs lint script — keeps roadmap, feature specs, and config documentation in sync.
+"""Docs lint script — keeps config documentation in sync.
 
 Checks:
-  1. Every feature spec (except _template.md) has a '> Status:' line.
-  2. Every env var defined in src/config.py is documented in README.md.
-  3. Optional legacy roadmap consistency checks (only when docs/roadmap.md exists).
+  1. Every env var defined in src/config.py is documented in README.md.
+  2. .env.example has no stale entries vs src/config.py.
+  3. docker-compose.yml.example has no stale var references.
 
 Exit codes: 0 = all good, 1 = one or more violations found.
 """
@@ -15,7 +15,6 @@ import re
 import sys
 from pathlib import Path
 
-FEATURES_DIR = Path("docs/features")
 ROADMAP_FILE = Path("docs/roadmap.md")
 CONFIG_FILE = Path("src/config.py")
 README_FILE = Path("README.md")
@@ -24,31 +23,12 @@ COMPOSE_EXAMPLE_FILE = Path("docker-compose.yml.example")
 
 _PASSTHROUGH_MARKER = "# passthrough:"
 _COMPOSE_VAR_RE = re.compile(r'\b([A-Z][A-Z0-9_]{2,})=')
-TEMPLATE_NAME = "_template.md"
 
 # Nested BaseSettings fields on Settings / AIConfig — not direct env vars.
 _NESTED_CONFIG_FIELDS = {
     "telegram", "github", "log", "bot", "ai", "voice", "slack", "audit",
     "copilot", "codex", "direct", "model_config",
 }
-
-# Statuses that mean the feature is fully shipped — must NOT appear in roadmap.
-IMPLEMENTED_STATUSES = {"implemented"}
-
-# Statuses that mean the feature is planned/in-progress — MUST appear in roadmap.
-ROADMAP_REQUIRED_STATUSES = {"planned", "proposed", "approved"}
-
-STATUS_RE = re.compile(r"^>\s*Status:\s*\*{0,2}(.+?)\*{0,2}\s*[|$]", re.IGNORECASE | re.MULTILINE)
-ROADMAP_LINK_RE = re.compile(r"\(features/([^)]+\.md)\)")
-
-
-def extract_status(text: str) -> str | None:
-    """Return the raw status string from a spec, or None if not found."""
-    m = STATUS_RE.search(text)
-    if not m:
-        return None
-    # Strip any remaining bold markers and extra whitespace
-    return m.group(1).replace("*", "").replace("✅", "").strip().lower()
 
 
 def extract_config_env_vars() -> set[str]:
@@ -178,69 +158,19 @@ def main() -> int:
     errors: list[str] = []
     warnings: list[str] = []
 
-    if not FEATURES_DIR.is_dir():
-        print(f"ERROR: {FEATURES_DIR} not found — run from the repo root.", file=sys.stderr)
-        return 1
-    roadmap_enabled = ROADMAP_FILE.is_file()
-    roadmap_text = ROADMAP_FILE.read_text() if roadmap_enabled else ""
-    roadmap_linked_files = set(ROADMAP_LINK_RE.findall(roadmap_text))
-
     readme_text = README_FILE.read_text() if README_FILE.is_file() else ""
 
-    spec_files = sorted(
-        f for f in FEATURES_DIR.glob("*.md") if f.name != TEMPLATE_NAME
-    )
-
-    # ── Check 1: every spec has a '> Status:' line ──────────────────────────
-    spec_statuses: dict[str, str] = {}
-    for spec in spec_files:
-        text = spec.read_text()
-        status = extract_status(text)
-        if status is None:
-            errors.append(
-                f"[MISSING STATUS] {spec}: no '> Status:' line found. "
-                "Add '> Status: **Planned** | Priority: ... | Last reviewed: ...' near the top."
-            )
-        else:
-            spec_statuses[spec.name] = status
-
-    # ── Check 2: legacy roadmap consistency (optional post-migration) ───────
-    if roadmap_enabled:
-        for spec_name, status in spec_statuses.items():
-            is_implemented = any(s in status for s in IMPLEMENTED_STATUSES)
-            if is_implemented and spec_name in roadmap_linked_files:
-                errors.append(
-                    f"[STALE ROADMAP] features/{spec_name} is Implemented but still "
-                    "listed in docs/roadmap.md — remove the roadmap row."
-                )
-
-        for linked_name in sorted(roadmap_linked_files):
-            linked_path = FEATURES_DIR / linked_name
-            if not linked_path.is_file():
-                errors.append(
-                    f"[BROKEN LINK] docs/roadmap.md links to features/{linked_name} "
-                    "but the file does not exist."
-                )
-
-        for spec_name, status in spec_statuses.items():
-            needs_roadmap = any(s in status for s in ROADMAP_REQUIRED_STATUSES)
-            if needs_roadmap and spec_name not in roadmap_linked_files:
-                warnings.append(
-                    f"[MISSING ROADMAP ENTRY] features/{spec_name} has status '{status}' "
-                    "but is not listed in docs/roadmap.md — add a roadmap row."
-                )
-
-    # ── Check 3: every config.py env var is documented in README.md ─────────
+    # ── Check 1: every config.py env var is documented in README.md ─────────
     config_vars = extract_config_env_vars()
     cfg_errors, cfg_warnings = check_config_coverage(readme_text)
     errors.extend(cfg_errors)
     warnings.extend(cfg_warnings)
 
-    # ── Check 4: .env.example has no stale entries ───────────────────────────
+    # ── Check 2: .env.example has no stale entries ───────────────────────────
     env_errors, _ = check_env_example_coverage(config_vars)
     errors.extend(env_errors)
 
-    # ── Check 5: docker-compose.yml.example has no stale var references ──────
+    # ── Check 3: docker-compose.yml.example has no stale var references ──────
     compose_errors, _ = check_compose_coverage(config_vars)
     errors.extend(compose_errors)
 
@@ -251,22 +181,10 @@ def main() -> int:
         print(f"✗  {e}")
 
     if not errors and not warnings:
-        if roadmap_enabled:
-            print(
-                f"✓  docs lint passed — {len(spec_files)} specs checked, "
-                "roadmap consistent, README config coverage complete."
-            )
-        else:
-            print(
-                f"✓  docs lint passed — {len(spec_files)} specs checked, "
-                "issue-centric mode active (no docs/roadmap.md), README config coverage complete."
-            )
+        print("✓  docs lint passed — README config coverage complete.")
         return 0
 
-    print(
-        f"\nResult: {len(errors)} error(s), {len(warnings)} warning(s) "
-        f"across {len(spec_files)} specs."
-    )
+    print(f"\nResult: {len(errors)} error(s), {len(warnings)} warning(s).")
     return 1 if errors else 0
 
 

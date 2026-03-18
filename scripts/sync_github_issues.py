@@ -10,34 +10,16 @@ Phase 2 migration utility:
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import os
 import re
 import subprocess
-import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
 
-
-def _load_verify_parity_report():
-    script_path = _SCRIPT_DIR / "migrate_features.py"
-    spec = importlib.util.spec_from_file_location("migrate_features", script_path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError("unable to load migrate_features.py")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    verify_fn = getattr(module, "verify_parity_report", None)
-    if not callable(verify_fn):
-        raise RuntimeError("migrate_features.py does not expose verify_parity_report")
-    return verify_fn
-
-
-verify_parity_report = _load_verify_parity_report()
 
 GH_SUBCOMMANDS = {"create", "edit", "view", "list"}
 MAP_SCHEMA_VERSION = 1
@@ -126,18 +108,18 @@ def _load_parity_items(export_dir: Path) -> list[ParityItem]:
     return parity_items
 
 
-def _validate_source_boundary(path: Path, features_dir: Path, role: str) -> None:
+def _validate_source_boundary(path: Path, role: str) -> None:
+    repo_root = _SCRIPT_DIR.parent.resolve()
     resolved = path.resolve()
-    root = features_dir.resolve()
     try:
-        resolved.relative_to(root)
+        resolved.relative_to(repo_root)
     except ValueError as exc:
         raise SyncError(
-            f"invalid {role} source path escapes features dir: {path.as_posix()}"
+            f"invalid {role} source path escapes repo root: {path.as_posix()}"
         ) from exc
 
 
-def _load_issue_map(map_path: Path, *, features_dir: Path) -> dict[Path, MapEntry]:
+def _load_issue_map(map_path: Path) -> dict[Path, MapEntry]:
     if not map_path.exists():
         return {}
     try:
@@ -166,7 +148,7 @@ def _load_issue_map(map_path: Path, *, features_dir: Path) -> dict[Path, MapEntr
         if not isinstance(source_raw, str) or not isinstance(issue_number, int) or isinstance(issue_number, bool):
             raise SyncError(f"invalid issue map item at index {index}: malformed fields")
         source = Path(source_raw)
-        _validate_source_boundary(source, features_dir, "issue-map")
+        _validate_source_boundary(source, "issue-map")
         resolved = source.resolve()
         if resolved in entries:
             raise SyncError(f"invalid issue map: duplicate source entry {source.as_posix()}")
@@ -347,7 +329,6 @@ def _run_gh_with_body(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--features-dir", type=Path, default=Path("docs/features"))
     parser.add_argument("--output-dir", type=Path, default=Path("tmp/feature-issue-export"))
     parser.add_argument("--dry-run", action="store_true", help="preview operations without mutating GitHub")
     parser.add_argument("--create-missing", action="store_true", help="create issues for parity items missing from issue-map.json")
@@ -371,16 +352,10 @@ def run_sync(args: argparse.Namespace) -> int:
 
     parity_items = _load_parity_items(args.output_dir)
     map_path = args.output_dir / "issue-map.json"
-    loaded_map = _load_issue_map(map_path, features_dir=args.features_dir)
+    loaded_map = _load_issue_map(map_path)
     issue_map: dict[Path, int] = {
         source: entry.issue_number for source, entry in loaded_map.items()
     }
-
-    if not args.dry_run:
-        parity_errors = verify_parity_report(args.features_dir, args.output_dir)
-        if parity_errors:
-            formatted = "\n".join(f"- {error}" for error in parity_errors)
-            raise SyncError(f"parity preflight failed:\n{formatted}")
 
     redactor = _TokenRedactor(token)
     audit = _NoopAudit()
