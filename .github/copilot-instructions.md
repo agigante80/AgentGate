@@ -14,11 +14,8 @@ When using GitHub MCP tools, always use `owner: "agigante80"` and `repo: "AgentG
 # Lint
 ruff check src/
 
-# Lint docs (checks roadmap/feature-spec sync)
+# Lint docs (checks README config coverage, .env.example, docker-compose.yml.example)
 python scripts/lint_docs.py
-
-# Validate a single feature doc
-python scripts/validate_feature_doc.py docs/features/<feature>.md
 
 # Run all tests
 pytest tests/ -v --tb=short
@@ -83,7 +80,7 @@ AgentGate is an async Python bot (Telegram **or** Slack) that acts as a gateway 
 
 **Skills / agent personas** (`skills/`): markdown files that define specialized agent roles (`dev-agent.md`, `docs-agent.md`, `sec-agent.md`). Loaded via `SYSTEM_PROMPT_FILE` or `COPILOT_SKILLS_DIRS`. `SYSTEM_PROMPT_FILE` must **not** point inside `REPO_DIR` (enforced at startup in `factory.py`) — mount it via a separate Docker volume. `TRUSTED_AGENT_BOT_IDS` lists Slack bot IDs (or `Name:prefix` pairs) that bypass the normal user filter for agent-to-agent messaging.
 
-**Docs** (`docs/`): `docs/features/` — feature specs using the standard template at `docs/features/_template.md`. Required sections (enforced by `scripts/validate_feature_doc.py`): `## Problem Statement`, `## Implementation Steps`, `## Test Plan`, `## Acceptance Criteria`. Each spec also has a Team Review table (reviewers: GateCode, GateSec, GateDocs); approval requires all scores ≥ 9/10. `docs/guides/` — practical how-to guides. `docs/roadmap.md` — prioritized backlog linking to feature specs. `lint_docs.py` enforces: every spec has a `> Status:` line; `Implemented` specs are removed from roadmap; all roadmap links resolve; every env var in `src/config.py` is documented in `README.md`.
+**Docs** (`docs/`): `docs/guides/` — practical how-to guides. Feature planning and prioritization lives in GitHub Issues (`type:feature` + `status:*` + `priority:*` labels). `lint_docs.py` enforces: every env var in `src/config.py` is documented in `README.md`; `.env.example` and `docker-compose.yml.example` have no stale entries.
 
 ## Key Conventions
 

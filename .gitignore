@@ -26,16 +26,28 @@ htmlcov/
 .idea/
 *.swp
 *.swo
+*.code-workspace
+.cursor/
+
+# Backup / merge artefacts
+*.bak
+*.orig
+*.backup
 
 # OS
 .DS_Store
+._*
 Thumbs.db
+ehthumbs.db
+Desktop.ini
 
-# Docker
+# Logs
 *.log
+logs/
 
-# Local migration artifacts
+# Temp directories
 tmp/
+temp/
 
 # Gemini CLI workspace context file (auto-generated, local only)
 GEMINI.md

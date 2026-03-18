@@ -115,16 +115,6 @@ AgentGate utility commands use a configurable prefix (`BOT_CMD_PREFIX`, default 
 
 Destructive shell commands (`push`, `merge`, `rm`, `force`) require inline confirmation.
 
-### Feature Tracking Workflow
-
-- Feature planning and prioritization now lives in GitHub issues (`type:feature` + `status:*` + `priority:*` labels).
-- `docs/roadmap.md` and migrated legacy feature specs were removed after verified parity.
-- `docs align-sync` is unchanged and remains responsible for README/config/env synchronization.
-- Migration utilities remain available for auditability:
-  - `python scripts/migrate_features.py --verify`
-  - `python scripts/sync_github_issues.py --dry-run --create-missing --update-existing`
-  - `python scripts/cleanup_feature_tracking_docs.py` (manifest generation/validation)
-
 ---
 
 ## Startup Sequence
