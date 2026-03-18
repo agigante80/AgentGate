@@ -186,6 +186,35 @@ class TestSend:
             result = await backend.send("hi")
         assert "some output" in result
 
+    async def test_timeout_kills_process(self, tmp_path, monkeypatch):
+        import asyncio as _asyncio
+        monkeypatch.setattr("src.ai.codex.REPO_DIR", tmp_path)
+        proc = AsyncMock()
+        proc.returncode = None
+        proc.kill = MagicMock()
+
+        async def _hang():
+            raise _asyncio.TimeoutError()
+
+        proc.communicate = AsyncMock(side_effect=_asyncio.TimeoutError())
+        # Second communicate() call (after kill) returns empty output
+        proc.communicate = AsyncMock(side_effect=[_asyncio.TimeoutError(), (b"", b"")])
+        with patch("asyncio.create_subprocess_exec", return_value=proc):
+            backend = CodexBackend(api_key="sk-x")
+            result = await backend.send("hi")
+        assert "timed out" in result.lower()
+        proc.kill.assert_called_once()
+
+    async def test_error_output_truncated(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("src.ai.codex.REPO_DIR", tmp_path)
+        big_err = b"x" * 10_000
+        proc = _make_proc(stdout=b"", stderr=big_err, returncode=1)
+        with patch("asyncio.create_subprocess_exec", return_value=proc):
+            backend = CodexBackend(api_key="sk-x")
+            result = await backend.send("hi")
+        from src.ai.codex import _MAX_ERR_CHARS
+        assert len(result) <= len("⚠️ Codex error:\n") + _MAX_ERR_CHARS + 50  # small tolerance
+
 
 # ── stream ────────────────────────────────────────────────────────────────────
 

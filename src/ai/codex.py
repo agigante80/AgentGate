@@ -12,6 +12,9 @@ from src.registry import backend_registry
 
 logger = logging.getLogger(__name__)
 
+TIMEOUT = 300  # seconds — hard cap; Codex agentic tasks can run long but 5 min is a safe ceiling
+_MAX_ERR_CHARS = 2_000  # truncate runaway error output sent back to the user
+
 
 @backend_registry.register("codex", force=True)
 class CodexBackend(SubprocessMixin, AICLIBackend):
@@ -81,9 +84,16 @@ class CodexBackend(SubprocessMixin, AICLIBackend):
 
     async def send(self, prompt: str) -> str:
         proc = await self._create_subprocess(prompt)
-        stdout, stderr = await proc.communicate()
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=TIMEOUT)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.communicate()
+            logger.error("codex timed out after %ss", TIMEOUT)
+            return f"⚠️ Codex timed out after {TIMEOUT}s."
         if proc.returncode != 0:
             err = stderr.decode().strip() or stdout.decode().strip()
+            err = err[-_MAX_ERR_CHARS:] if len(err) > _MAX_ERR_CHARS else err
             logger.error("codex CLI error: %s", err)
             return f"⚠️ Codex error:\n{err}"
         return stdout.decode().strip()
