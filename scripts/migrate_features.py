@@ -224,6 +224,8 @@ def verify_parity_report(features_dir: Path, output_dir: Path) -> list[str]:
     if not isinstance(items, list):
         return ["invalid parity report: `items` must be a list"]
 
+    features_root = features_dir.resolve()
+    output_root = output_dir.resolve()
     expected_sources = {path.resolve() for path in _feature_sources(features_dir)}
     reported_sources: set[Path] = set()
     errors: list[str] = []
@@ -258,9 +260,25 @@ def verify_parity_report(features_dir: Path, output_dir: Path) -> list[str]:
         source = Path(source_raw)
         output = Path(output_raw)
         source_resolved = source.resolve()
+        output_resolved = output.resolve()
         reported_sources.add(source_resolved)
         expected_output: Path | None = None
         parsed_doc: FeatureDoc | None = None
+
+        try:
+            source_resolved.relative_to(features_root)
+        except ValueError:
+            errors.append(
+                f"item {index}: source path escapes features dir: {source.as_posix()}"
+            )
+            continue
+        try:
+            output_resolved.relative_to(output_root)
+        except ValueError:
+            errors.append(
+                f"item {index}: output path escapes output dir: {output.as_posix()}"
+            )
+            continue
 
         if not source.exists():
             errors.append(f"item {index}: missing source file {source.as_posix()}")
@@ -301,7 +319,7 @@ def verify_parity_report(features_dir: Path, output_dir: Path) -> list[str]:
         if not output.exists():
             errors.append(f"item {index}: missing output file {output.as_posix()}")
         else:
-            if expected_output and output.resolve() != expected_output.resolve():
+            if expected_output and output_resolved != expected_output.resolve():
                 errors.append(
                     "item "
                     f"{index}: output path mismatch for {source.as_posix()} "

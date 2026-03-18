@@ -332,6 +332,112 @@ def test_verify_parity_report_detects_tampered_export_with_updated_hash(tmp_path
     assert any("output render mismatch" in error for error in errors)
 
 
+def test_verify_parity_report_rejects_source_path_escape(tmp_path):
+    module = _load_module()
+    features_dir = tmp_path / "docs" / "features"
+    output_dir = tmp_path / "tmp" / "feature-issue-export"
+    features_dir.mkdir(parents=True)
+    output_dir.mkdir(parents=True)
+
+    source = features_dir / "safe.md"
+    source.write_text(
+        "\n".join(
+            [
+                "# Safe",
+                "",
+                "> Status: **Planned** | Priority: Medium | Last reviewed: 2026-03-18",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    output = output_dir / "safe.md"
+    output.write_text(module.render_issue_markdown(module.parse_feature_doc(source)), encoding="utf-8")
+
+    outside_source = tmp_path / "outside.md"
+    outside_source.write_text("# Outside\n", encoding="utf-8")
+    report = {
+        "schema_version": 2,
+        "source_count": 1,
+        "export_count": 1,
+        "items": [
+            {
+                "source": outside_source.as_posix(),
+                "output": output.as_posix(),
+                "title": "Outside",
+                "slug": "outside",
+                "status": "planned",
+                "priority": "medium",
+                "labels": ["type:feature", "status:planned", "priority:medium", "review:pending"],
+                "source_sha256": hashlib.sha256(
+                    outside_source.read_text(encoding="utf-8").encode("utf-8")
+                ).hexdigest(),
+                "output_sha256": hashlib.sha256(
+                    output.read_text(encoding="utf-8").encode("utf-8")
+                ).hexdigest(),
+            }
+        ],
+    }
+    (output_dir / "parity-report.json").write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    errors = module.verify_parity_report(features_dir, output_dir)
+    assert any("source path escapes features dir" in error for error in errors)
+
+
+def test_verify_parity_report_rejects_output_path_escape(tmp_path):
+    module = _load_module()
+    features_dir = tmp_path / "docs" / "features"
+    output_dir = tmp_path / "tmp" / "feature-issue-export"
+    features_dir.mkdir(parents=True)
+    output_dir.mkdir(parents=True)
+
+    source = features_dir / "safe.md"
+    source.write_text(
+        "\n".join(
+            [
+                "# Safe",
+                "",
+                "> Status: **Planned** | Priority: Medium | Last reviewed: 2026-03-18",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    outside_output = tmp_path / "outside-output.md"
+    outside_output.write_text("tamper", encoding="utf-8")
+
+    report = {
+        "schema_version": 2,
+        "source_count": 1,
+        "export_count": 1,
+        "items": [
+            {
+                "source": source.as_posix(),
+                "output": outside_output.as_posix(),
+                "title": "Safe",
+                "slug": "safe",
+                "status": "planned",
+                "priority": "medium",
+                "labels": ["type:feature", "status:planned", "priority:medium", "review:pending"],
+                "source_sha256": hashlib.sha256(
+                    source.read_text(encoding="utf-8").encode("utf-8")
+                ).hexdigest(),
+                "output_sha256": hashlib.sha256(
+                    outside_output.read_text(encoding="utf-8").encode("utf-8")
+                ).hexdigest(),
+            }
+        ],
+    }
+    (output_dir / "parity-report.json").write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    errors = module.verify_parity_report(features_dir, output_dir)
+    assert any("output path escapes output dir" in error for error in errors)
+
+
 def test_label_values_are_sanitized():
     module = _load_module()
     doc = module.FeatureDoc(
