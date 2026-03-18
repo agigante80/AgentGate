@@ -1,0 +1,34 @@
+# Git history — never needed in the image
+.git/
+.gitignore
+.github/
+
+# Dev & test tooling
+tests/
+pytest.ini
+requirements-dev.txt
+
+# Docs, assets, and deployment helpers
+docs/
+docker/
+scripts/
+skills/
+README.md
+LICENSE
+GEMINI.md
+*.md
+
+# Compose examples
+docker-compose.yml.example
+
+# Temp, IDE, and generated files
+tmp/
+temp/
+logs/
+.env*
+*.pyc
+__pycache__/
+.venv/
+*.code-workspace
+.cursor/
+.vscode/
