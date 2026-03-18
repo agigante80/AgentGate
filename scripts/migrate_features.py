@@ -215,6 +215,17 @@ def export_features(features_dir: Path, output_dir: Path) -> dict[str, object]:
     return report
 
 
+def _read_utf8_file(path: Path, index: int, role: str, errors: list[str]) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        errors.append(
+            f"item {index}: unable to read {role} file as UTF-8 "
+            f"{path.as_posix()} ({exc})"
+        )
+        return None
+
+
 def verify_parity_report(features_dir: Path, output_dir: Path) -> list[str]:
     report_path = output_dir / "parity-report.json"
     if not report_path.exists():
@@ -334,37 +345,46 @@ def verify_parity_report(features_dir: Path, output_dir: Path) -> list[str]:
         if not source.exists():
             errors.append(f"item {index}: missing source file {source.as_posix()}")
         else:
-            parsed_doc = parse_feature_doc(source)
-            expected_output = output_dir / f"{parsed_doc.slug}.md"
-            if source_resolved != parsed_doc.source_path.resolve():
+            try:
+                parsed_doc = parse_feature_doc(source)
+            except (OSError, UnicodeDecodeError, ValueError) as exc:
                 errors.append(
-                    f"item {index}: source path mismatch for {source.as_posix()}"
+                    f"item {index}: unable to parse source doc "
+                    f"{source.as_posix()} ({exc})"
                 )
-            if title != parsed_doc.title:
-                errors.append(
-                    f"item {index}: title mismatch for {source.as_posix()}"
-                )
-            if slug != parsed_doc.slug:
-                errors.append(
-                    f"item {index}: slug mismatch for {source.as_posix()}"
-                )
-            if status != parsed_doc.status:
-                errors.append(
-                    f"item {index}: status mismatch for {source.as_posix()}"
-                )
-            if priority != parsed_doc.priority:
-                errors.append(
-                    f"item {index}: priority mismatch for {source.as_posix()}"
-                )
-            if labels != parsed_doc.labels:
-                errors.append(
-                    f"item {index}: labels mismatch for {source.as_posix()}"
-                )
-            actual_source_hash = _sha256_text(source.read_text(encoding="utf-8"))
-            if source_hash_valid and actual_source_hash != source_hash:
-                errors.append(
-                    f"item {index}: source hash mismatch for {source.as_posix()}"
-                )
+            else:
+                expected_output = output_dir / f"{parsed_doc.slug}.md"
+                if source_resolved != parsed_doc.source_path.resolve():
+                    errors.append(
+                        f"item {index}: source path mismatch for {source.as_posix()}"
+                    )
+                if title != parsed_doc.title:
+                    errors.append(
+                        f"item {index}: title mismatch for {source.as_posix()}"
+                    )
+                if slug != parsed_doc.slug:
+                    errors.append(
+                        f"item {index}: slug mismatch for {source.as_posix()}"
+                    )
+                if status != parsed_doc.status:
+                    errors.append(
+                        f"item {index}: status mismatch for {source.as_posix()}"
+                    )
+                if priority != parsed_doc.priority:
+                    errors.append(
+                        f"item {index}: priority mismatch for {source.as_posix()}"
+                    )
+                if labels != parsed_doc.labels:
+                    errors.append(
+                        f"item {index}: labels mismatch for {source.as_posix()}"
+                    )
+            source_text = _read_utf8_file(source, index, "source", errors)
+            if source_hash_valid and source_text is not None:
+                actual_source_hash = _sha256_text(source_text)
+                if actual_source_hash != source_hash:
+                    errors.append(
+                        f"item {index}: source hash mismatch for {source.as_posix()}"
+                    )
 
         if not output.exists():
             errors.append(f"item {index}: missing output file {output.as_posix()}")
@@ -375,17 +395,19 @@ def verify_parity_report(features_dir: Path, output_dir: Path) -> list[str]:
                     f"{index}: output path mismatch for {source.as_posix()} "
                     f"(expected {expected_output.as_posix()}, got {output.as_posix()})"
                 )
-            actual_output_hash = _sha256_text(output.read_text(encoding="utf-8"))
-            if output_hash_valid and actual_output_hash != output_hash:
-                errors.append(
-                    f"item {index}: output hash mismatch for {output.as_posix()}"
-                )
-            if parsed_doc:
-                expected_render_hash = _sha256_text(render_issue_markdown(parsed_doc))
-                if actual_output_hash != expected_render_hash:
+            output_text = _read_utf8_file(output, index, "output", errors)
+            if output_text is not None:
+                actual_output_hash = _sha256_text(output_text)
+                if output_hash_valid and actual_output_hash != output_hash:
                     errors.append(
-                        f"item {index}: output render mismatch for {output.as_posix()}"
+                        f"item {index}: output hash mismatch for {output.as_posix()}"
                     )
+                if parsed_doc:
+                    expected_render_hash = _sha256_text(render_issue_markdown(parsed_doc))
+                    if actual_output_hash != expected_render_hash:
+                        errors.append(
+                            f"item {index}: output render mismatch for {output.as_posix()}"
+                        )
 
         if source_resolved not in expected_sources:
             errors.append(

@@ -597,6 +597,110 @@ def test_verify_parity_report_rejects_malformed_metadata_fields(tmp_path):
     assert any("malformed metadata fields" in error for error in errors)
 
 
+def test_verify_parity_report_rejects_unparseable_source_doc(tmp_path):
+    module = _load_module()
+    features_dir = tmp_path / "docs" / "features"
+    output_dir = tmp_path / "tmp" / "feature-issue-export"
+    features_dir.mkdir(parents=True)
+    output_dir.mkdir(parents=True)
+
+    source = features_dir / "bad.md"
+    source.write_text(
+        "\n".join(
+            [
+                "not-a-heading",
+                "",
+                "> Status: **Planned** | Priority: Medium | Last reviewed: 2026-03-18",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    output = output_dir / "bad.md"
+    output.write_text("# Placeholder\n", encoding="utf-8")
+
+    report = {
+        "schema_version": 2,
+        "source_count": 1,
+        "export_count": 1,
+        "items": [
+            {
+                "source": source.as_posix(),
+                "output": output.as_posix(),
+                "title": "Bad",
+                "slug": "bad",
+                "status": "planned",
+                "priority": "medium",
+                "labels": ["type:feature", "status:planned", "priority:medium", "review:pending"],
+                "source_sha256": hashlib.sha256(
+                    source.read_text(encoding="utf-8").encode("utf-8")
+                ).hexdigest(),
+                "output_sha256": hashlib.sha256(
+                    output.read_text(encoding="utf-8").encode("utf-8")
+                ).hexdigest(),
+            }
+        ],
+    }
+    (output_dir / "parity-report.json").write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    errors = module.verify_parity_report(features_dir, output_dir)
+
+    assert any("unable to parse source doc" in error for error in errors)
+
+
+def test_verify_parity_report_rejects_non_utf8_output_file(tmp_path):
+    module = _load_module()
+    features_dir = tmp_path / "docs" / "features"
+    output_dir = tmp_path / "tmp" / "feature-issue-export"
+    features_dir.mkdir(parents=True)
+    output_dir.mkdir(parents=True)
+
+    source = features_dir / "non-utf8.md"
+    source.write_text(
+        "\n".join(
+            [
+                "# Non UTF8",
+                "",
+                "> Status: **Planned** | Priority: Medium | Last reviewed: 2026-03-18",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    output = output_dir / "non-utf8.md"
+    output.write_bytes(b"\xff\xfe\x00\x00")
+
+    report = {
+        "schema_version": 2,
+        "source_count": 1,
+        "export_count": 1,
+        "items": [
+            {
+                "source": source.as_posix(),
+                "output": output.as_posix(),
+                "title": "Non UTF8",
+                "slug": "non-utf8",
+                "status": "planned",
+                "priority": "medium",
+                "labels": ["type:feature", "status:planned", "priority:medium", "review:pending"],
+                "source_sha256": hashlib.sha256(
+                    source.read_text(encoding="utf-8").encode("utf-8")
+                ).hexdigest(),
+                "output_sha256": "0" * 64,
+            }
+        ],
+    }
+    (output_dir / "parity-report.json").write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    errors = module.verify_parity_report(features_dir, output_dir)
+
+    assert any("unable to read output file as UTF-8" in error for error in errors)
+
+
 def test_label_values_are_sanitized():
     module = _load_module()
     doc = module.FeatureDoc(
