@@ -4,7 +4,11 @@
 
 Chat with your AI coding assistant (GitHub Copilot, Codex, OpenAI, Anthropic) via Telegram or Slack — one Docker container per project, zero context switching.
 
-> ✅ Works with **Telegram** | ✅ Works with **Slack** | ✅ Tested on **Synology NAS** | ✅ Tested with **GitHub Copilot**
+> ✅ Works with **Telegram** | ✅ Works with **Slack** | ✅ Tested on **Synology NAS**
+>
+> **Tested AI backends:** ✅ GitHub Copilot CLI · ✅ OpenAI Codex CLI · ✅ Google Gemini CLI
+>
+> **Not yet fully field-tested:** ⚠️ Direct API (OpenAI · Anthropic · Ollama) — implemented and unit-tested, but not validated end-to-end in production. Feedback and bug reports are very welcome!
 
 ---
 
@@ -260,6 +264,8 @@ environment:
 ## Slack Setup
 
 > Full step-by-step guide: **[docs/guides/slack-setup.md](docs/guides/slack-setup.md)**
+>
+> Running multiple AI agents in one Slack workspace? See **[docs/guides/multi-agent-slack.md](docs/guides/multi-agent-slack.md)**
 
 Quick summary:
 
@@ -297,6 +303,22 @@ Run them side by side — fully isolated, separate Telegram bots.
 
 ---
 
+## Multi-agent Slack
+
+You can run several AgentGate containers in the same Slack workspace, each with a different AI backend and a unique prefix — for example:
+
+| Agent | Prefix | Backend | Role |
+|-------|--------|---------|------|
+| GateCode | `dev` | Codex CLI | Code + commits |
+| GateSec | `sec` | Copilot CLI | Security review |
+| GateDocs | `docs` | Gemini CLI | Documentation |
+
+Users address each agent with its prefix (`dev <message>`, `sec <message>`, `docs <message>`). Agents can also delegate to each other via `TRUSTED_AGENT_BOT_IDS`.
+
+> 📖 Full setup guide, `.env` examples, backend-specific file requirements, and advice on switching backends safely: **[docs/guides/multi-agent-slack.md](docs/guides/multi-agent-slack.md)**
+
+---
+
 ## Persistent Repo (no re-cloning on restart)
 
 Set `REPO_HOST_PATH` in `.env` to a directory on your machine:
@@ -311,7 +333,7 @@ Docker bind-mounts it to `/repo`. The bot clones once, reuses forever.
 
 ## AI Backends
 
-### GitHub Copilot CLI (default)
+### GitHub Copilot CLI (default) ✅ Tested
 
 Requires a **fine-grained PAT** with the *Copilot Requests* permission. Classic `ghp_` tokens are **not** supported.
 
@@ -320,7 +342,7 @@ AI_CLI=copilot
 COPILOT_GITHUB_TOKEN=github_pat_...
 ```
 
-### OpenAI Codex CLI
+### OpenAI Codex CLI ✅ Tested
 
 ```env
 AI_CLI=codex
@@ -328,7 +350,9 @@ OPENAI_API_KEY=sk-...
 AI_MODEL=o3
 ```
 
-### Direct API — OpenAI / Anthropic / Ollama
+### Direct API — OpenAI / Anthropic / Ollama ⚠️ Not fully field-tested
+
+> This backend is implemented and unit-tested but has not been validated end-to-end in a live production deployment. If you try it, please [open an issue](https://github.com/agigante80/AgentGate/issues) with your findings — improvements and fixes are very welcome!
 
 ```env
 AI_CLI=api
@@ -351,7 +375,7 @@ AI_MODEL=llama3.2
 AI_BASE_URL=http://host.docker.internal:11434
 ```
 
-### Google Gemini CLI
+### Google Gemini CLI ✅ Tested
 
 Requires an API key from [Google AI Studio](https://aistudio.google.com/app/apikey).
 
