@@ -39,6 +39,7 @@ env:
   PYTHON_VERSION: '3.12'
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository_owner }}/agentgate
+  DOCKERHUB_IMAGE_NAME: agigante80/agentgate
   DOCKER_PLATFORMS: 'linux/amd64,linux/arm64'
 
 # ============================================================================
@@ -190,6 +191,29 @@ jobs:
           echo "- **Version**: \`${{ needs.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
 
   # --------------------------------------------------------------------------
+  # Job 2c: Validate Docker Hub short description
+  # --------------------------------------------------------------------------
+  validate-short-description:
+    name: Validate Docker Description
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: version
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🔍 Validate short description length
+        run: |
+          chmod +x ./docker/validate-docker-desc.sh
+          ./docker/validate-docker-desc.sh
+
+      - name: 📋 Validation summary
+        if: always()
+        run: |
+          echo "### 📝 Docker Description Validation" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+
+  # --------------------------------------------------------------------------
   # Job 3: Tests
   # --------------------------------------------------------------------------
   test:
@@ -237,7 +261,7 @@ jobs:
     name: Build & Publish Docker Image
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [version, lint, docs-lint, test]
+    needs: [version, lint, docs-lint, test, validate-short-description]
     if: |
       always() &&
       needs.version.result == 'success' &&
@@ -264,21 +288,29 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: 🔐 Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USER }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: 🏷️ Generate Docker tags
         id: tags
         run: |
           DOCKER_VERSION="${{ needs.version.outputs.docker_version }}"
           IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}"
+          DH_IMAGE="${{ env.DOCKERHUB_IMAGE_NAME }}"
 
-          # Always include the versioned tag
-          TAGS="${IMAGE}:${DOCKER_VERSION}"
+          # Always include the versioned tag (GHCR + Docker Hub)
+          TAGS="${IMAGE}:${DOCKER_VERSION},${DH_IMAGE}:${DOCKER_VERSION}"
 
           if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
-            TAGS="${TAGS},${IMAGE}:latest,${IMAGE}:main"
+            TAGS="${TAGS},${IMAGE}:latest,${IMAGE}:main,${DH_IMAGE}:latest,${DH_IMAGE}:main"
           elif [[ "${{ github.ref }}" == "refs/heads/develop" || "${{ github.ref }}" == "refs/heads/development" ]]; then
-            TAGS="${TAGS},${IMAGE}:develop,${IMAGE}:development"
+            TAGS="${TAGS},${IMAGE}:develop,${IMAGE}:development,${DH_IMAGE}:develop,${DH_IMAGE}:development"
           elif [[ "${{ github.ref }}" == refs/tags/v* ]]; then
-            TAGS="${TAGS},${IMAGE}:latest"
+            TAGS="${TAGS},${IMAGE}:latest,${DH_IMAGE}:latest"
           fi
 
           echo "tags=${TAGS}" >> $GITHUB_OUTPUT
@@ -423,11 +455,17 @@ jobs:
             ### 🐳 Docker Image
 
             ```bash
+            # GHCR
             docker pull ghcr.io/${{ github.repository_owner }}/agentgate:develop
             # or
             docker pull ghcr.io/${{ github.repository_owner }}/agentgate:development
             # or (pinned)
             docker pull ghcr.io/${{ github.repository_owner }}/agentgate:${{ needs.version.outputs.docker_version }}
+
+            # Docker Hub
+            docker pull agigante80/agentgate:develop
+            # or (pinned)
+            docker pull agigante80/agentgate:${{ needs.version.outputs.docker_version }}
             ```
 
             ### 📝 Recent Changes
@@ -492,9 +530,15 @@ jobs:
             ### 🐳 Docker Image
 
             ```bash
+            # GHCR
             docker pull ghcr.io/${{ github.repository_owner }}/agentgate:${{ needs.version.outputs.docker_version }}
             # or
             docker pull ghcr.io/${{ github.repository_owner }}/agentgate:latest
+
+            # Docker Hub
+            docker pull agigante80/agentgate:${{ needs.version.outputs.docker_version }}
+            # or
+            docker pull agigante80/agentgate:latest
             ```
 
             ### 📝 Changelog
@@ -513,13 +557,49 @@ jobs:
           echo "- **Tag**: \`v${{ needs.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
 
   # --------------------------------------------------------------------------
+  # Job 7: Update Docker Hub description (main only)
+  # --------------------------------------------------------------------------
+  docker-hub-description:
+    name: Update Docker Hub Description
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [docker-publish]
+    if: |
+      needs.docker-publish.result == 'success' &&
+      github.ref == 'refs/heads/main'
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 📝 Read short description
+        id: get-desc
+        run: |
+          SHORT=$(cat docker/description/short.md | tr -d '\n')
+          echo "short=${SHORT}" >> $GITHUB_OUTPUT
+
+      - name: 🐳 Update Docker Hub description
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USER }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: ${{ env.DOCKERHUB_IMAGE_NAME }}
+          short-description: ${{ steps.get-desc.outputs.short }}
+          readme-filepath: ./docker/description/long.md
+
+      - name: 📋 Description update summary
+        run: |
+          echo "### 🐳 Docker Hub Description Updated" >> $GITHUB_STEP_SUMMARY
+          echo "- **Repository**: \`${{ env.DOCKERHUB_IMAGE_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Short**: \`${{ steps.get-desc.outputs.short }}\`" >> $GITHUB_STEP_SUMMARY
+
+  # --------------------------------------------------------------------------
   # Final: Pipeline Summary
   # --------------------------------------------------------------------------
   summary:
     name: Pipeline Summary
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [version, lint, docs-lint, test, docker-publish, security-scan, pre-release, release]
+    needs: [version, lint, docs-lint, test, validate-short-description, docker-publish, security-scan, pre-release, release, docker-hub-description]
     if: always()
     steps:
       - name: 📊 Generate pipeline summary
@@ -531,7 +611,9 @@ jobs:
           echo "| Version Generation | ${{ needs.version.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Lint | ${{ needs.lint.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Tests | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Docker Description Validation | ${{ needs.validate-short-description.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Docker Publish | ${{ needs.docker-publish.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Docker Hub Description | ${{ needs.docker-hub-description.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Security Scan | ${{ needs.security-scan.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Pre-Release | ${{ needs.pre-release.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Release | ${{ needs.release.result }} |" >> $GITHUB_STEP_SUMMARY
@@ -542,5 +624,6 @@ jobs:
 # ============================================================================
 # Required Secrets:
 # - GITHUB_TOKEN: automatically provided by GitHub Actions (packages + security-events)
-# No additional secrets needed — images are pushed to GHCR only.
+# - DOCKERHUB_USER: Docker Hub username (agigante80)
+# - DOCKERHUB_TOKEN: Docker Hub access token (hub.docker.com → Account Settings → Security → New Access Token)
 # ============================================================================

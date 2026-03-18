@@ -1,0 +1,1 @@
+Chat with GitHub Copilot, Codex, Gemini via Telegram or Slack — one container per project.

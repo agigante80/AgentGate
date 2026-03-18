@@ -76,14 +76,19 @@ docker compose up -d
 
 ### Pre-built image tags
 
-| Branch/event | Image tag |
-|---|---|
-| Push to `develop` | `ghcr.io/agigante80/agentgate:develop` + `:development` |
-| Push to `main` | `ghcr.io/agigante80/agentgate:latest` + `:main` |
-| Version release | `ghcr.io/agigante80/agentgate:X.Y.Z` |
+| Branch/event | GHCR | Docker Hub |
+|---|---|---|
+| Push to `develop` | `ghcr.io/agigante80/agentgate:develop` | `agigante80/agentgate:develop` |
+| Push to `main` | `ghcr.io/agigante80/agentgate:latest` | `agigante80/agentgate:latest` |
+| Version release | `ghcr.io/agigante80/agentgate:X.Y.Z` | `agigante80/agentgate:X.Y.Z` |
 
 ```bash
-docker pull ghcr.io/agigante80/agentgate:latest   # stable
+# Docker Hub (stable)
+docker pull agigante80/agentgate:latest
+docker pull agigante80/agentgate:develop   # latest dev build
+
+# GHCR mirror
+docker pull ghcr.io/agigante80/agentgate:latest
 docker pull ghcr.io/agigante80/agentgate:develop   # latest dev build
 ```
 
