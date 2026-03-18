@@ -270,8 +270,9 @@ Once all features are successfully migrated and verified on GitHub:
 |------|----------------|
 | `test_parse_feature_doc_sections` | Correctly parses various sections from feature documents. |
 | `test_generate_github_issue_md_format` | Generated Markdown adheres to the GitHub issue template format. |
-| `test_parse_feature_doc_edge_cases` | Handles missing sections or malformed markdown gracefully. |
-| `test_parse_adversarial_content` | Feature docs containing shell metacharacters (`$(…)`, `` `…` ``), HTML/script tags, or embedded instructions in code blocks are passed through as literal text — no interpretation or execution. |
+| `test_parse_feature_doc_edge_cases` | Handles missing status metadata and sparse section layouts, including docs with leading blank lines before `# Title`. |
+| `test_parse_adversarial_content_literal_passthrough` | Feature docs containing shell metacharacters (`$(...)`, `` `...` ``), HTML/script tags, or embedded instructions in code blocks are passed through as literal text — no interpretation or execution. |
+| `test_label_values_are_sanitized` | Punctuation-heavy `status`/`priority` values are normalized to safe label slugs (`[a-z0-9-]`) before export. |
 
 ### Manual Verification of Migration
 

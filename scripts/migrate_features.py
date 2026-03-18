@@ -51,10 +51,6 @@ def _clean_title(line: str) -> str:
     return re.sub(r"\s+", " ", title)
 
 
-def _normalize(value: str) -> str:
-    return value.strip().lower().replace(" ", "-")
-
-
 def _normalize_label(value: str) -> str:
     normalized = NON_LABEL_CHARS_RE.sub("-", value.strip().lower()).strip("-")
     return normalized or "unknown"
@@ -94,8 +90,8 @@ def parse_feature_doc(path: Path) -> FeatureDoc:
 
     title = _clean_title(title_line)
     status_match = STATUS_RE.search(text)
-    status = _normalize(status_match.group(1)) if status_match else "unknown"
-    priority = _normalize(status_match.group(2)) if status_match else "unknown"
+    status = _normalize_label(status_match.group(1)) if status_match else "unknown"
+    priority = _normalize_label(status_match.group(2)) if status_match else "unknown"
 
     return FeatureDoc(
         source_path=path,

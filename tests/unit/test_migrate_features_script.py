@@ -111,6 +111,26 @@ def test_parse_feature_doc_edge_cases(tmp_path):
     assert "Not specified in source doc." in rendered
 
 
+def test_parse_feature_doc_status_priority_are_strictly_normalized(tmp_path):
+    module = _load_module()
+    doc_path = tmp_path / "labels.md"
+    doc_path.write_text(
+        "\n".join(
+            [
+                "# Labels Feature",
+                "",
+                "> Status: **In Progress (Phase 1 on `develop`)** | Priority: High ! | Last reviewed: 2026-03-18",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    parsed = module.parse_feature_doc(doc_path)
+
+    assert parsed.status == "in-progress-phase-1-on-develop"
+    assert parsed.priority == "high"
+
+
 def test_parse_adversarial_content_literal_passthrough(tmp_path):
     module = _load_module()
     features_dir = tmp_path / "docs" / "features"
