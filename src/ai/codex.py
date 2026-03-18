@@ -35,14 +35,17 @@ class CodexBackend(SubprocessMixin, AICLIBackend):
         self._opts = opts
         self._login()
 
-    def _login(self) -> None:
-        """Authenticate Codex CLI by piping the API key to `codex login --with-api-key`.
+    def _ensure_auth(self) -> None:
+        """Re-authenticate Codex CLI before every invocation.
 
         Codex CLI (Rust) reads credentials from $CODEX_HOME/auth.json only;
-        OPENAI_API_KEY env var is not read by `codex exec`. This mirrors the
-        documented usage: `printenv OPENAI_API_KEY | codex login --with-api-key`.
-        Runs synchronously at startup; credentials persist across restarts in the
-        Docker volume at /data/.codex/auth.json.
+        OPENAI_API_KEY env var is not read by `codex exec`. Because Codex is an
+        agentic tool that can run arbitrary shell commands, a task (e.g. /init)
+        may itself invoke `codex login` with test credentials, silently corrupting
+        auth.json. Re-running login before every send()/stream() call guarantees
+        the correct key is always in place.
+
+        Also verifies the written key matches self._api_key and warns if not.
         No-ops gracefully when the `codex` binary is not installed (e.g. in CI).
         """
         try:
@@ -57,8 +60,27 @@ class CodexBackend(SubprocessMixin, AICLIBackend):
             return
         if result.returncode != 0:
             logger.warning("codex login failed: %s", result.stderr.strip())
-        else:
-            logger.info("CodexBackend: authenticated via API key")
+            return
+        logger.debug("CodexBackend: auth refreshed")
+        # Verify the written key matches to catch silent corruption early.
+        try:
+            import json as _json
+            import os as _os
+            codex_home = _os.environ.get("CODEX_HOME") or _os.path.expanduser("~/.codex")
+            auth_path = _os.path.join(codex_home, "auth.json")
+            stored = _json.loads(open(auth_path).read()).get("OPENAI_API_KEY", "")
+            if stored != self._api_key:
+                logger.warning(
+                    "codex auth.json key mismatch after login (stored %d chars, expected %d) — "
+                    "possible interference from a Codex shell command",
+                    len(stored), len(self._api_key),
+                )
+        except Exception:
+            pass  # verification is best-effort; never block the request
+
+    def _login(self) -> None:
+        """Initial login at construction time — delegates to _ensure_auth()."""
+        self._ensure_auth()
 
     def _make_cmd(self, prompt: str) -> tuple[list[str], dict]:
         env = {**scrubbed_env(), "OPENAI_API_KEY": self._api_key}
@@ -79,6 +101,7 @@ class CodexBackend(SubprocessMixin, AICLIBackend):
         return cmd, env
 
     async def _create_subprocess(self, prompt: str) -> asyncio.subprocess.Process:
+        self._ensure_auth()
         cmd, env = self._make_cmd(prompt)
         return await self._spawn(cmd, env)
 

@@ -79,15 +79,15 @@ class TestConstruction:
         )
 
 
-# ── _login ────────────────────────────────────────────────────────────────────
+# ── _ensure_auth / _login ─────────────────────────────────────────────────────
 
 class TestLogin:
-    def test_login_success_logs_info(self, mock_subprocess_run, caplog):
+    def test_login_success_logs_debug(self, mock_subprocess_run, caplog):
         import logging
         mock_subprocess_run.return_value = MagicMock(returncode=0, stderr="")
-        with caplog.at_level(logging.INFO, logger="src.ai.codex"):
+        with caplog.at_level(logging.DEBUG, logger="src.ai.codex"):
             CodexBackend(api_key="sk-x")
-        assert any("authenticated" in r.message for r in caplog.records)
+        assert any("auth refreshed" in r.message for r in caplog.records)
 
     def test_login_failure_logs_warning(self, mock_subprocess_run, caplog):
         import logging
@@ -97,7 +97,7 @@ class TestLogin:
         assert any("failed" in r.message for r in caplog.records)
 
     def test_login_no_op_when_codex_not_installed(self, mock_subprocess_run, caplog):
-        """_login() must not raise when the codex binary is absent (e.g. CI)."""
+        """_ensure_auth() must not raise when the codex binary is absent (e.g. CI)."""
         import logging
         mock_subprocess_run.side_effect = FileNotFoundError("codex not found")
         with caplog.at_level(logging.DEBUG, logger="src.ai.codex"):
@@ -168,6 +168,22 @@ class TestSend:
             backend = CodexBackend(api_key="sk-x")
             result = await backend.send("hi")
         assert result == "Hello from codex"
+
+    async def test_ensure_auth_called_on_send(self, tmp_path, monkeypatch, mock_subprocess_run):
+        """_ensure_auth() must be called before every send() invocation."""
+        monkeypatch.setattr("src.ai.codex.REPO_DIR", tmp_path)
+        proc = _make_proc(stdout=b"pong\n")
+        with patch("asyncio.create_subprocess_exec", return_value=proc):
+            backend = CodexBackend(api_key="sk-x")
+            mock_subprocess_run.reset_mock()  # reset the init call
+            await backend.send("ping")
+        # One more login call was made for the send()
+        mock_subprocess_run.assert_called_once_with(
+            ["codex", "login", "--with-api-key"],
+            input="sk-x",
+            text=True,
+            capture_output=True,
+        )
 
     async def test_returns_error_on_non_zero_exit(self, tmp_path, monkeypatch):
         monkeypatch.setattr("src.ai.codex.REPO_DIR", tmp_path)
