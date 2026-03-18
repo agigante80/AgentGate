@@ -384,6 +384,7 @@ jobs:
           output: trivy-results.sarif
           severity: CRITICAL,HIGH
           exit-code: '0'  # don't fail the build, just report
+          cache: 'false'  # disable internal actions/cache (node20) dependency
 
       - name: 📤 Upload Trivy results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v4
@@ -441,42 +442,45 @@ jobs:
           git tag -f develop-latest ${{ github.sha }}
           git push origin refs/tags/develop-latest
 
-      - name: 🚀 Create GitHub Pre-Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: develop-latest
-          name: "develop-latest — v${{ needs.version.outputs.version }}"
-          prerelease: true
-          body: |
-            ## 🔨 Development Build — v${{ needs.version.outputs.version }}
-
-            > ⚠️ This is a rolling pre-release. It is overwritten on every push to `develop`.
-
-            ### 🐳 Docker Image
-
-            ```bash
-            # GHCR
-            docker pull ghcr.io/${{ github.repository_owner }}/agentgate:develop
-            # or
-            docker pull ghcr.io/${{ github.repository_owner }}/agentgate:development
-            # or (pinned)
-            docker pull ghcr.io/${{ github.repository_owner }}/agentgate:${{ needs.version.outputs.docker_version }}
-
-            # Docker Hub
-            docker pull agigante80/agentgate:develop
-            # or (pinned)
-            docker pull agigante80/agentgate:${{ needs.version.outputs.docker_version }}
-            ```
-
-            ### 📝 Recent Changes
-
-            ${{ steps.changelog.outputs.changelog }}
-
-            ---
-            **Commit**: `${{ github.sha }}`  |  **Branch**: `${{ github.ref_name }}`
-          generate_release_notes: false
+      - name: 🚀 Create or update GitHub Pre-Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BODY=$(cat << 'RELEASE_BODY'
+          ## 🔨 Development Build — v${{ needs.version.outputs.version }}
+
+          > ⚠️ This is a rolling pre-release. It is overwritten on every push to `develop`.
+
+          ### 🐳 Docker Image
+
+          ```bash
+          # GHCR
+          docker pull ghcr.io/${{ github.repository_owner }}/agentgate:develop
+          # or
+          docker pull ghcr.io/${{ github.repository_owner }}/agentgate:development
+          # or (pinned)
+          docker pull ghcr.io/${{ github.repository_owner }}/agentgate:${{ needs.version.outputs.docker_version }}
+
+          # Docker Hub
+          docker pull agigante80/agentgate:develop
+          # or (pinned)
+          docker pull agigante80/agentgate:${{ needs.version.outputs.docker_version }}
+          ```
+
+          ### 📝 Recent Changes
+
+          ${{ steps.changelog.outputs.changelog }}
+
+          ---
+          **Commit**: `${{ github.sha }}`  |  **Branch**: `${{ github.ref_name }}`
+          RELEASE_BODY
+          )
+          TITLE="develop-latest — v${{ needs.version.outputs.version }}"
+          if gh release view develop-latest &>/dev/null; then
+            gh release edit develop-latest --title "$TITLE" --notes "$BODY" --prerelease
+          else
+            gh release create develop-latest --title "$TITLE" --notes "$BODY" --prerelease
+          fi
 
       - name: 📋 Pre-release summary
         run: |
@@ -520,35 +524,35 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: 🎉 Create GitHub Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: v${{ needs.version.outputs.version }}
-          name: Release v${{ needs.version.outputs.version }}
-          body: |
-            ## 🎉 Release v${{ needs.version.outputs.version }}
-
-            ### 🐳 Docker Image
-
-            ```bash
-            # GHCR
-            docker pull ghcr.io/${{ github.repository_owner }}/agentgate:${{ needs.version.outputs.docker_version }}
-            # or
-            docker pull ghcr.io/${{ github.repository_owner }}/agentgate:latest
-
-            # Docker Hub
-            docker pull agigante80/agentgate:${{ needs.version.outputs.docker_version }}
-            # or
-            docker pull agigante80/agentgate:latest
-            ```
-
-            ### 📝 Changelog
-
-            ${{ steps.changelog.outputs.changelog }}
-          draft: false
-          prerelease: false
-          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BODY=$(cat << 'RELEASE_BODY'
+          ## 🎉 Release v${{ needs.version.outputs.version }}
+
+          ### 🐳 Docker Image
+
+          ```bash
+          # GHCR
+          docker pull ghcr.io/${{ github.repository_owner }}/agentgate:${{ needs.version.outputs.docker_version }}
+          # or
+          docker pull ghcr.io/${{ github.repository_owner }}/agentgate:latest
+
+          # Docker Hub
+          docker pull agigante80/agentgate:${{ needs.version.outputs.docker_version }}
+          # or
+          docker pull agigante80/agentgate:latest
+          ```
+
+          ### 📝 Changelog
+
+          ${{ steps.changelog.outputs.changelog }}
+          RELEASE_BODY
+          )
+          gh release create "v${{ needs.version.outputs.version }}" \
+            --title "Release v${{ needs.version.outputs.version }}" \
+            --notes "$BODY" \
+            --generate-notes
 
       - name: 📋 Release summary
         run: |
