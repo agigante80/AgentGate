@@ -78,7 +78,37 @@ def test_generate_github_issue_md_format():
     assert "## Summary" in output
     assert "## Problem Statement" in output
     assert "## Source Spec" in output
-    assert "Suggested labels: `type:feature, status:planned, priority:high`" in output
+    assert "Suggested labels: `type:feature, status:planned, priority:high, review:pending`" in output
+
+
+def test_parse_feature_doc_edge_cases(tmp_path):
+    module = _load_module()
+    doc_path = tmp_path / "edge.md"
+    doc_path.write_text(
+        "\n".join(
+            [
+                "",
+                "",
+                "# Edge Case Feature",
+                "",
+                "No status metadata line here.",
+                "",
+                "## Problem Statement",
+                "",
+                "Only one section exists.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    parsed = module.parse_feature_doc(doc_path)
+    rendered = module.render_issue_markdown(parsed)
+
+    assert parsed.title == "Edge Case Feature"
+    assert parsed.status == "unknown"
+    assert parsed.priority == "unknown"
+    assert parsed.sections["Problem Statement"] == "Only one section exists."
+    assert "Not specified in source doc." in rendered
 
 
 def test_parse_adversarial_content_literal_passthrough(tmp_path):
@@ -117,4 +147,28 @@ def test_parse_adversarial_content_literal_passthrough(tmp_path):
     assert "<script>alert(1)</script>" in issue_text
     assert "`echo pwned`" in issue_text
     assert report["export_count"] == 1
-    assert parity["items"][0]["labels"] == ["type:feature", "status:planned", "priority:medium"]
+    assert parity["items"][0]["labels"] == [
+        "type:feature",
+        "status:planned",
+        "priority:medium",
+        "review:pending",
+    ]
+
+
+def test_label_values_are_sanitized():
+    module = _load_module()
+    doc = module.FeatureDoc(
+        source_path=Path("docs/features/sample.md"),
+        title="Sample Feature",
+        status="in-progress-(phase-1-implemented-on-`develop`)",
+        priority="High !",
+        intro="Short intro.",
+        sections={},
+    )
+
+    assert doc.labels == [
+        "type:feature",
+        "status:in-progress-phase-1-implemented-on-develop",
+        "priority:high",
+        "review:pending",
+    ]

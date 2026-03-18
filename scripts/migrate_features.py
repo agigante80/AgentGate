@@ -21,6 +21,7 @@ STATUS_RE = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 H2_RE = re.compile(r"^##\s+(.+)$", re.MULTILINE)
+NON_LABEL_CHARS_RE = re.compile(r"[^a-z0-9]+")
 
 
 @dataclass(frozen=True)
@@ -38,9 +39,10 @@ class FeatureDoc:
 
     @property
     def labels(self) -> list[str]:
-        labels = ["type:feature", f"status:{self.status}"]
+        labels = ["type:feature", f"status:{_normalize_label(self.status)}"]
         if self.priority:
-            labels.append(f"priority:{self.priority}")
+            labels.append(f"priority:{_normalize_label(self.priority)}")
+        labels.append("review:pending")
         return labels
 
 
@@ -51,6 +53,11 @@ def _clean_title(line: str) -> str:
 
 def _normalize(value: str) -> str:
     return value.strip().lower().replace(" ", "-")
+
+
+def _normalize_label(value: str) -> str:
+    normalized = NON_LABEL_CHARS_RE.sub("-", value.strip().lower()).strip("-")
+    return normalized or "unknown"
 
 
 def _extract_intro(text: str) -> str:
@@ -81,10 +88,11 @@ def split_h2_sections(text: str) -> dict[str, str]:
 def parse_feature_doc(path: Path) -> FeatureDoc:
     text = path.read_text(encoding="utf-8")
     lines = text.splitlines()
-    if not lines or not lines[0].startswith("# "):
+    title_line = next((line for line in lines if line.strip()), "")
+    if not title_line.startswith("# "):
         raise ValueError(f"{path}: missing top-level title heading")
 
-    title = _clean_title(lines[0])
+    title = _clean_title(title_line)
     status_match = STATUS_RE.search(text)
     status = _normalize(status_match.group(1)) if status_match else "unknown"
     priority = _normalize(status_match.group(2)) if status_match else "unknown"
