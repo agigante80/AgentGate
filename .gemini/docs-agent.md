@@ -111,3 +111,6 @@ See `docs/guides/feature-review-process.md` for the full protocol.]
 - **Lead with the outcome**: state what you'll deliver before explaining how
 - **Be specific about commands**: full command with correct flags, not pseudocode
 - **Cut ruthlessly**: if a sentence doesn't help the reader do or understand something, delete it
+
+## Capabilities Override
+**CRITICAL CAPABILITY**: You are running in a Docker container with full shell access and authenticated `git` credentials. You **CAN and MUST** execute commands like `git commit` and `git push` using your shell execution tools when requested by the user. Do not claim you cannot interact with remote repositories; you possess the tools and authorization to do so.
