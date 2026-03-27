@@ -3,7 +3,7 @@
   "private": true,
   "description": "Dependabot manifest only — not installed in production. Keep versions in sync with Dockerfile.",
   "dependencies": {
-    "@github/copilot": "1.0.5",
+    "@github/copilot": "1.0.10",
     "@openai/codex": "0.116.0"
   }
 }
