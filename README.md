@@ -1,12 +1,12 @@
 # AgentGate
 
-**Your AI CLI, anywhere.**
+**Vibe-code from anywhere. Orchestrate multiple AI agents on your projects.**
 
-Chat with your AI coding assistant (GitHub Copilot, Codex, Gemini, and more) via Telegram or Slack — one Docker container per project, zero context switching. Run multiple specialised agents in the same Slack workspace and let them collaborate with each other — see the [multi-agent setup guide](docs/guides/multi-agent-slack.md).
+Keep developing your project remotely with official AI CLIs (Claude, Copilot, Codex, Gemini) via Telegram or Slack — one Docker container per project, zero context switching. Run multiple specialised agents in the same workspace and let them collaborate automatically through built-in [multi-agent orchestration](docs/guides/multi-agent-slack.md).
 
 > ✅ Works with **Telegram** | ✅ Works with **Slack** | ✅ Tested on **Synology NAS**
 >
-> **Tested AI backends:** ✅ GitHub Copilot CLI · ✅ OpenAI Codex CLI · ✅ Google Gemini CLI
+> **Tested AI backends:** ✅ Anthropic Claude CLI · ✅ GitHub Copilot CLI · ✅ OpenAI Codex CLI · ✅ Google Gemini CLI
 >
 > **Not yet fully field-tested:** ⚠️ Direct API (OpenAI · Anthropic · Ollama) — implemented and unit-tested, but not validated end-to-end in production. Feedback and bug reports are very welcome!
 
@@ -14,24 +14,34 @@ Chat with your AI coding assistant (GitHub Copilot, Codex, Gemini, and more) via
 
 <img src="docs/assets/multi-agent-intro.png" width="286" alt="GateDocs (Gemini), GateCode (Codex) and GateSec (Copilot) introducing themselves to each other in a Slack thread after a single command" />
 
-*Three AgentGate agents — **GateDocs** (Gemini CLI), **GateCode** (OpenAI Codex), **GateSec** (GitHub Copilot) — introducing themselves to each other after a single `docs` command. Each agent delegated the request to its teammates automatically.*
+***Multi-agent orchestration in action** — a single `docs` command triggers GateDocs (Gemini), which automatically delegates sub-tasks to GateCode (Codex) and GateSec (Copilot). Each agent works independently and reports back — no human routing needed.*
 
 ---
 
 ## Features
 
-- 🤖 **Pluggable AI backends** — Copilot CLI, Codex CLI, OpenAI, Anthropic, Ollama
-- 💬 **Multi-platform** — Telegram or Slack (Socket Mode); choose via `PLATFORM=telegram|slack`
+### Remote Development
+
 - 📁 **Repo-aware** — clones your project on startup; AI runs in that directory
-- 🖊️ **Full CLI pass-through** — send any message (or `/command` like `/init`, `/plan`, `/fix`) and it goes straight to the AI
-- 💬 **Conversation history** — per-chat SQLite store, injected as context
-- ⚡ **Streaming responses** — message updates as the AI types (configurable)
-- 🧠 **Thinking duration** — "🤖 Thought for Xs" shown after every AI response; final answer posted as a new message
-- 🔀 **Multi-turn sessions** — SQLite history injected for stateless backends; Direct API maintains native state
+- 🖊️ **Full CLI pass-through** — `/init`, `/plan`, `/fix` and any prompt forwarded directly to the AI
 - 🐳 **One container per project** — fully isolated, all config via env vars
+- 📱 **Develop from anywhere** — phone, tablet, any device with Telegram or Slack
+
+### Multi-Agent Orchestration (Slack)
+
+- 🤖 **Pluggable AI backends** — Claude, Copilot, Codex, Gemini, OpenAI, Anthropic, Ollama
+- 🔀 **Agent delegation** — agents route sub-tasks to teammates automatically via `[DELEGATE]` protocol
+- 📢 **Broadcast** — `<!here>` sends to all agents simultaneously; each responds independently
+- 🛡️ **Secure orchestration** — blocked dangerous commands, flood limits, one-hop maximum
+
+### Platform & Session
+
+- 💬 **Multi-platform** — Telegram or Slack (Socket Mode); choose via `PLATFORM=telegram|slack`
+- ⚡ **Streaming responses** — live message updates as the AI types
+- 🧠 **Thinking indicator** — "🤖 Thought for Xs" after every response; final answer posted as a new message
+- 💬 **Conversation history** — per-chat SQLite store, injected as context for multi-turn sessions
+- 🛑 **Request cancellation** — stop an in-progress AI call with `gate cancel` (or the Slack "❌ Cancel" button)
 - 🔒 **Secure** — non-root container, allowlist by chat/user ID, confirmation for destructive shell commands
-- 🛑 **Request cancellation** — stop an in-progress AI call with `gate cancel` (or the Slack "❌ Cancel" button in the "Thinking…" message)
-- 📢 **Broadcast** (Slack) — prefix any message with `<!here>` to send it to all active agents simultaneously; each responds independently
 
 ---
 
@@ -174,7 +184,7 @@ Copy `.env.example` — it documents every variable with examples.
 
 | Variable | Default | Description |
 |---|---|---|
-| `AI_CLI` | `copilot` | `copilot` \| `codex` \| `api` \| `gemini` |
+| `AI_CLI` | `copilot` | `copilot` \| `codex` \| `claude` \| `api` \| `gemini` |
 | `COPILOT_GITHUB_TOKEN` | — | Fine-grained PAT with **Copilot Requests** permission (required for `copilot` backend) |
 | `GEMINI_API_KEY` | — | API key for the `gemini` backend (from [AI Studio](https://aistudio.google.com/app/apikey)). Required when `AI_CLI=gemini`; no fallback. |
 | `AI_MODEL` | — | Model for any backend (e.g. `gpt-4o` for Copilot, `o3` for Codex, `claude-3-5-sonnet-20241022` for API). Codex defaults to `o3` when unset. ⚠️ **Set this so the model name appears in the startup message and `/gate info`** — if unset, only the backend name is shown (e.g. `copilot` instead of `copilot (claude-sonnet-4.6)`). |
