@@ -429,17 +429,13 @@ Use this when you have a **Claude Pro or Max subscription** and want to skip the
    docker exec -it <container_name> claude
    ```
 
-3. When the CLI prompts you to log in and a browser cannot open, press **`c`** to copy the login URL to your clipboard.
+3. When the CLI prompts you to log in and a browser cannot open, select the login URL displayed in the terminal and copy it (`Ctrl+C` or `Cmd+C` depending on your OS).
 
 4. Paste the URL into a browser on any device where you are logged into your [claude.ai](https://claude.ai) account.
 
-5. Click **Authorize**. The console session detects the login automatically.
+5. Click **Authorize**. The browser displays an **authentication code**. Copy it and paste it back into the Claude Code terminal session.
 
-6. Exit the Claude CLI (`Ctrl+C` or `/exit`), then restart the container so AgentGate picks up the credentials:
-
-   ```bash
-   docker compose restart
-   ```
+6. Exit the Claude CLI (`Ctrl+C` or `/exit`). No container restart needed — use the `/gate restart` bot command from Telegram, then `/gate init` to reinitialize.
 
 > **Note:** OAuth credentials are stored in `/root/.claude/` inside the container. They persist as long as the container's filesystem is intact. A `docker compose down` followed by `up` will lose them — use **Option B** for persistence across container recreations.
 
