@@ -1,10 +1,11 @@
 """Unit tests for src/main.py private functions."""
+import json
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.main import _read_version, _log_startup_banner, _validate_config, main
+from src.main import _read_version, _log_startup_banner, _validate_config, _ensure_claude_settings, main
 from src.config import Settings, TelegramConfig, SlackConfig, BotConfig, AIConfig, GitHubConfig, AuditConfig
 
 
@@ -138,6 +139,42 @@ def test_main_success_path_handles_keyboard_interrupt():
 
 
 # ── startup() platform branch ─────────────────────────────────────────────────
+
+# ── _ensure_claude_settings ───────────────────────────────────────────────────
+
+class TestEnsureClaudeSettings:
+    async def test_skips_non_claude_backend(self, tmp_path):
+        with patch("src.main.REPO_DIR", tmp_path):
+            await _ensure_claude_settings("copilot")
+        assert not (tmp_path / ".claude" / "settings.json").exists()
+
+    async def test_creates_settings_when_missing(self, tmp_path):
+        with patch("src.main.REPO_DIR", tmp_path):
+            await _ensure_claude_settings("claude")
+        settings_file = tmp_path / ".claude" / "settings.json"
+        assert settings_file.exists()
+        content = json.loads(settings_file.read_text())
+        assert "permissions" in content
+        assert content["permissions"]["deny"] == []
+        assert len(content["permissions"]["allow"]) > 0
+
+    async def test_does_not_overwrite_existing(self, tmp_path):
+        settings_dir = tmp_path / ".claude"
+        settings_dir.mkdir()
+        settings_file = settings_dir / "settings.json"
+        settings_file.write_text('{"custom": true}')
+        with patch("src.main.REPO_DIR", tmp_path):
+            await _ensure_claude_settings("claude")
+        assert json.loads(settings_file.read_text()) == {"custom": True}
+
+    async def test_handles_permission_error(self, tmp_path):
+        read_only = tmp_path / "readonly"
+        read_only.mkdir()
+        read_only.chmod(0o444)
+        with patch("src.main.REPO_DIR", read_only):
+            await _ensure_claude_settings("claude")  # must not raise
+        read_only.chmod(0o755)  # cleanup
+
 
 async def test_startup_calls_slack_branch():
     """startup() routes to slack adapter when platform=slack."""

@@ -159,6 +159,51 @@ async def _install_commit_msg_hook() -> None:
         logger.warning("Could not install commit-msg hook at %s", hook_file, exc_info=True)
 
 
+async def _ensure_claude_settings(ai_cli: str) -> None:
+    """Create /repo/.claude/settings.json with full permissions for Claude CLI.
+
+    When spawned with ``-p`` (non-interactive), Claude CLI may still output a
+    permission-bootstrap prompt if no project-level settings file exists.
+    Pre-creating the file with allow-all permissions silences that prompt.
+    Only runs when ``AI_CLI=claude``.
+    """
+    if ai_cli != "claude":
+        return
+    settings_dir = REPO_DIR / ".claude"
+    settings_file = settings_dir / "settings.json"
+    try:
+        if settings_file.exists():
+            logger.debug("Claude project settings already exist at %s", settings_file)
+            return
+        settings_dir.mkdir(parents=True, exist_ok=True)
+        import json
+        content = {
+            "permissions": {
+                "allow": [
+                    "Bash(*)",
+                    "Read(*)",
+                    "Edit(*)",
+                    "Write(*)",
+                    "Glob(*)",
+                    "Grep(*)",
+                    "WebFetch(*)",
+                    "WebSearch(*)",
+                    "NotebookEdit(*)",
+                    "Agent(*)",
+                ],
+                "deny": [],
+            }
+        }
+        settings_file.write_text(json.dumps(content, indent=2) + "\n")
+        logger.info("Created Claude project settings at %s", settings_file)
+    except Exception:
+        logger.warning(
+            "Could not create Claude project settings at %s",
+            settings_file,
+            exc_info=True,
+        )
+
+
 async def startup(settings: Settings) -> None:
     start_time = time.time()
 
@@ -172,6 +217,7 @@ async def startup(settings: Settings) -> None:
     )
     await repo.configure_git_auth(token)
     await _install_commit_msg_hook()
+    await _ensure_claude_settings(settings.ai.ai_cli)
 
     logger.info("Installing dependencies…")
     dep_result = await runtime.install_deps()
