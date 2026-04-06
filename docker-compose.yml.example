@@ -37,6 +37,9 @@ services:
     #   SLACK_CHANNEL_ID=C0123456789      # optional: restrict to one channel
     #   SLACK_ALLOWED_USERS=["U111","U222"] # optional: restrict by user ID
 
+    # ── Timezone ───────────────────────────────────────────────────────────────
+    #   TZ=UTC                     # container timezone (default: UTC); e.g. Europe/London, America/New_York
+
     # ── Storage backends ────────────────────────────────────────────────────────
     #   STORAGE_BACKEND=sqlite     # sqlite (default) or memory (non-persistent)
     #   AUDIT_BACKEND=sqlite       # sqlite (default) or null (no audit log)
