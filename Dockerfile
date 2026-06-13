@@ -38,6 +38,24 @@ RUN npm install -g @google/gemini-cli@0.46.0
 # Anthropic Claude CLI — pinned version (update via Dependabot)
 RUN npm install -g @anthropic-ai/claude-code@2.1.177
 
+# ── Telemetry default-deny (privacy / data-minimisation) — see issue #83 ──────
+# scrubbed_env() strips AgentGate credentials but does not disable a CLI's own
+# usage telemetry, so set a default-deny posture at the image level. Operators
+# can opt back in at runtime (see the README privacy section).
+ENV DO_NOT_TRACK=1
+# claude-code: telemetry is opt-in (off by default); this umbrella also disables
+# error reporting + in-CLI auto-update checks (the CLI version is pinned above).
+ENV CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+# gemini-cli: privacy.usageStatisticsEnabled defaults to TRUE (anonymised usage
+# metrics, not prompt content). The system-settings tier has highest precedence,
+# so this disables it regardless of the runtime HOME/UID (HOME=/data is a VOLUME).
+# Written as root here, before `USER botuser` below.
+ENV GEMINI_CLI_SYSTEM_SETTINGS_PATH=/etc/gemini-cli/settings.json
+RUN mkdir -p /etc/gemini-cli && \
+    printf '%s' '{"privacy":{"usageStatisticsEnabled":false}}' > /etc/gemini-cli/settings.json
+# codex/copilot: OTEL/OTLP telemetry exports only to a configured collector — we
+# intentionally set NO OTEL_EXPORTER_OTLP_ENDPOINT, so nothing is exported.
+
 # Python dependencies — installed as root so packages are system-wide and
 # accessible regardless of which UID the container runs as at runtime.
 WORKDIR /app

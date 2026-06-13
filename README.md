@@ -485,6 +485,29 @@ Use this when you have a **Claude Pro or Max subscription** and want to skip the
 - Non-root user inside container
 - Fine-grained GitHub token scoped to one repo
 
+### Telemetry (default-deny)
+
+The image ships with a **default-deny telemetry posture** for the bundled agent CLIs (privacy / data-minimisation). The only CLI that collects usage data on by default is the Gemini CLI (`privacy.usageStatisticsEnabled`, **anonymised usage metrics — not prompt content**); it is disabled image-wide. The baked-in controls are:
+
+| Control (Dockerfile `ENV` / file) | Effect |
+|---|---|
+| `DO_NOT_TRACK=1` | Cross-vendor opt-out signal |
+| `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` | Claude CLI: disables telemetry, error reporting, and in-CLI auto-update checks (the CLI version is pinned in the image) |
+| `GEMINI_CLI_SYSTEM_SETTINGS_PATH=/etc/gemini-cli/settings.json` (+ that file with `{"privacy":{"usageStatisticsEnabled":false}}`) | Gemini CLI: disables usage statistics via the **system** settings tier (highest precedence, can't be silently re-enabled by a user file) |
+
+No OTLP exporter endpoint is configured, so the Codex/Copilot OpenTelemetry instrumentation does not export anywhere.
+
+**To opt back in** (consenting operators), override at `docker run`:
+
+```bash
+# Re-enable Gemini usage stats: point at your own settings file (or bind-mount over the baked one)
+-e GEMINI_CLI_SYSTEM_SETTINGS_PATH=/path/to/your-settings.json
+# Re-enable Claude telemetry
+-e CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC= -e CLAUDE_CODE_ENABLE_TELEMETRY=1
+# Clear the cross-vendor signal
+-e DO_NOT_TRACK=
+```
+
 ---
 
 ## Upgrading from v0.x to v1.0
