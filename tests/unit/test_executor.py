@@ -190,7 +190,7 @@ class TestScrubbedEnv:
 
         import asyncio
         with patch("asyncio.create_subprocess_shell", side_effect=_fake_shell):
-            asyncio.get_event_loop().run_until_complete(run_shell("echo ok", 3000))
+            asyncio.run(run_shell("echo ok", 3000))
 
         assert "env" in captured_kwargs, "run_shell must pass env= to create_subprocess_shell"
         for key in _SECRET_ENV_KEYS:
