@@ -114,7 +114,7 @@ The codebase inherits several Unix-only dependencies:
 
 1. **Shell commands in `gate snap` / `gate whoami`** — `uptime`, `df -h`, `free -h`, `ip a`, `uname -r` are Linux/macOS commands. Windows has no direct equivalents without PowerShell rewrites.
 2. **`asyncio.create_subprocess_shell`** — works on all platforms, but spawns `/bin/sh` on Unix and `cmd.exe` on Windows. Commands like `&&`, pipes `|`, and Unix utilities break under `cmd.exe`.
-3. **`pexpect`** (in `requirements.txt`) — does not support Windows natively. The Copilot and Codex backends use subprocess spawning that relies on Unix process management.
+3. **Subprocess process management** — the Copilot/Codex/Claude/Gemini backends spawn child processes via `asyncio` subprocess APIs that rely on Unix process semantics. (`pexpect` was previously a dependency here but has been removed; no PTY library remains.)
 4. **File permissions** — `os.chmod(path, 0o600)` for `.env` and audit log is a no-op on Windows (ACL-based permissions require `win32security`).
 5. **systemd integration** — first-run wizard generates a `.service` unit; no equivalent for Windows Services without a separate code path.
 
@@ -134,7 +134,7 @@ These are **small, well-defined gaps** fixable in v1 with `platform.system()` br
 ### Recommendation
 
 - **v1:** Linux + macOS native install via `pip install remoteaigate`
-- **v2:** Windows native (requires PowerShell backend for shell commands + pexpect replacement + `win32security` for file permissions)
+- **v2:** Windows native (requires PowerShell backend for shell commands + `win32security` for file permissions)
 
 ### Architecture (hardware)
 

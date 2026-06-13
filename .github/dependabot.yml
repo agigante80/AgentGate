@@ -18,7 +18,6 @@ updates:
         patterns:
           - "python-telegram-bot*"
           - "pydantic*"
-          - "pexpect"
           - "gitpython"
           - "openai"
           - "anthropic"
