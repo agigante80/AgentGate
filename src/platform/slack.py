@@ -308,7 +308,7 @@ class SlackBot:
                 await ticker
 
         elapsed = int(time.monotonic() - t_start)
-        final = accumulated
+        final = common.strip_ansi(accumulated)
         final, delegations = _extract_delegations(final)
         if self._settings.slack.slack_delete_thinking:
             try:
@@ -495,7 +495,9 @@ class SlackBot:
     async def _run_ai_pipeline(
         self, say, client, text: str, channel: str, *, thread_ts: str | None = None, user_id: str | None = None
     ) -> None:
-        # In-flight guard — reject new prompt if a task is already running for this channel
+        # In-flight guard — reject new prompt if a task is already running for this channel.
+        # Sentinel prevents races: with concurrent handlers a second message could pass
+        # the guard while the first is awaiting prompt construction.
         if channel in self._active_tasks and not self._active_tasks[channel].done():
             await self._reply(
                 client, channel,
@@ -503,6 +505,9 @@ class SlackBot:
                 thread_ts,
             )
             return
+
+        sentinel = asyncio.get_running_loop().create_future()
+        self._active_tasks[channel] = sentinel
 
         key = text[:60]
         self._active_ai[key] = time.time()
@@ -527,6 +532,8 @@ class SlackBot:
                     self._stream_to_slack(say, client, channel, prompt, thread_ts=thread_ts)
                 )
                 self._active_tasks[channel] = stream_task
+                if not sentinel.done():
+                    sentinel.set_result(None)
                 try:
                     timeout = cfg.ai_timeout_secs if cfg.ai_timeout_secs > 0 else None
                     response = await asyncio.wait_for(asyncio.shield(stream_task), timeout=timeout)
@@ -565,6 +572,8 @@ class SlackBot:
                 )
                 ai_task = asyncio.create_task(self._backend.send(prompt))
                 self._active_tasks[channel] = ai_task
+                if not sentinel.done():
+                    sentinel.set_result(None)
                 try:
                     timeout = cfg.ai_timeout_secs if cfg.ai_timeout_secs > 0 else None
                     response = await asyncio.wait_for(asyncio.shield(ai_task), timeout=timeout)
@@ -600,6 +609,7 @@ class SlackBot:
                 response = await self._services.shell.summarize_if_long(
                     response, self._backend
                 )
+                response = common.strip_ansi(response)
                 response, delegations = _extract_delegations(response)
                 if self._settings.slack.slack_delete_thinking:
                     try:
@@ -639,6 +649,11 @@ class SlackBot:
             )
         finally:
             self._active_ai.pop(key, None)
+            # Safety net: ensure sentinel is resolved and stale entries are cleaned up
+            if not sentinel.done():
+                sentinel.set_result(None)
+            if self._active_tasks.get(channel) is sentinel:
+                self._active_tasks.pop(channel, None)
 
     # ── Message event router ──────────────────────────────────────────────
 

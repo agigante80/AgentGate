@@ -9,6 +9,7 @@ from src.platform.common import (
     is_allowed_slack,
     save_to_history,
     split_text,
+    strip_ansi,
 )
 from src.config import BotConfig, SlackConfig, Settings
 from src.history import ConversationStorage
@@ -225,3 +226,23 @@ class TestSplitText:
 
     def test_empty_string(self):
         assert split_text("", 100) == [""]
+
+
+# ── strip_ansi ───────────────────────────────────────────────────────────────
+
+class TestStripAnsi:
+    def test_removes_sgr_sequences(self):
+        assert strip_ansi("\x1b[31mred\x1b[0m") == "red"
+
+    def test_removes_bold_and_color(self):
+        assert strip_ansi("\x1b[1;32mgreen bold\x1b[0m") == "green bold"
+
+    def test_passthrough_plain_text(self):
+        assert strip_ansi("hello world") == "hello world"
+
+    def test_empty_string(self):
+        assert strip_ansi("") == ""
+
+    def test_mixed_ansi_and_text(self):
+        text = "Start \x1b[4munderline\x1b[0m middle \x1b[31mred\x1b[0m end"
+        assert strip_ansi(text) == "Start underline middle red end"

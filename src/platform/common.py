@@ -1,6 +1,7 @@
 """Platform-agnostic helpers shared between Telegram and Slack bots."""
 import asyncio
 import logging
+import re
 import time
 from collections.abc import Awaitable, Callable
 
@@ -53,7 +54,10 @@ async def thinking_ticker(
                 text = f"⏳ Still thinking… ({_format_elapsed(elapsed)})"
         else:
             text = f"⏳ Still thinking… ({_format_elapsed(elapsed)})"
-        await edit_fn(text)
+        try:
+            await edit_fn(text)
+        except Exception:
+            logger.debug("Ticker edit failed, will retry next interval")
         await asyncio.sleep(update_interval)
 
 
@@ -98,6 +102,16 @@ async def save_to_history(
     """
     if settings.bot.history_enabled:
         await storage.add_exchange(chat_id, user_msg, response)
+
+
+# CSI: ESC [ params(0x30-0x3f incl. ? < = >) intermediates(0x20-0x2f) final(0x40-0x7e).
+# OSC: ESC ] ... terminated by BEL or ST (ESC \). Plus charset-select ESC ( x.
+_ANSI_RE = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\].*?(?:\x07|\x1b\\)|\x1b\([AB012]")
+
+
+def strip_ansi(text: str) -> str:
+    """Remove ANSI escape sequences from text."""
+    return _ANSI_RE.sub("", text)
 
 
 _PARAGRAPH_SEP = "\n\n"

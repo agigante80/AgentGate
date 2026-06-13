@@ -163,6 +163,27 @@ class TestStreamToTelegramTicker:
         assert result == ""
         assert any("cancelled" in t.lower() or "cancelled" in t.lower() for t in edit_texts)
 
+    async def test_streaming_cursor_stripped_from_final(self):
+        """The streaming cursor ' ▌' is stripped from the final accumulated response."""
+        from src.bot import _STREAMING_CURSOR
+
+        # Simulate a backend whose output happens to end with the cursor chars
+        backend = self._make_backend(["All done." + _STREAMING_CURSOR])
+        update = MagicMock()
+        msg = AsyncMock()
+        update.effective_message.reply_text = AsyncMock(return_value=msg)
+        msg.edit_text = AsyncMock()
+
+        with patch("src.platform.common.asyncio.sleep", AsyncMock(side_effect=asyncio.CancelledError)):
+            result = await _stream_to_telegram(
+                update, backend, "prompt", max_chars=3000,
+                throttle_secs=0.0, timeout_secs=0,
+                slow_threshold=15, update_interval=30, warn_before_secs=60,
+            )
+
+        assert result == "All done."
+        assert _STREAMING_CURSOR not in result
+
 
 # ── sanitize_git_ref via cmd_diff ────────────────────────────────────────────
 
@@ -344,8 +365,8 @@ class TestDeliverTelegram:
         update, msg, _ = await self._run("")
         msg.edit_text.assert_awaited_once_with("_(empty response)_")
 
-    async def test_edit_failure_does_not_raise(self):
-        """edit_text() failure on chunk 1 is swallowed gracefully."""
+    async def test_edit_failure_falls_back_to_reply(self):
+        """edit_text() failure on chunk 1 falls back to reply_text."""
         from src.bot import _deliver_telegram
         from unittest.mock import AsyncMock, MagicMock
         msg = MagicMock()
@@ -353,5 +374,20 @@ class TestDeliverTelegram:
         update = MagicMock()
         update.effective_message.reply_text = AsyncMock()
         update.effective_message.reply_document = AsyncMock()
-        # Should not raise
         await _deliver_telegram(update, msg, "short text")
+        # Should fall back to reply_text when edit_text fails
+        update.effective_message.reply_text.assert_awaited_once_with("short text")
+
+    async def test_edit_and_reply_failure_sends_file(self):
+        """Both edit_text() and reply_text() fail → sends response as file."""
+        from src.bot import _deliver_telegram
+        from unittest.mock import AsyncMock, MagicMock
+        msg = MagicMock()
+        msg.edit_text = AsyncMock(side_effect=Exception("edit 400"))
+        update = MagicMock()
+        update.effective_message.reply_text = AsyncMock(side_effect=Exception("send 400"))
+        update.effective_message.reply_document = AsyncMock()
+        await _deliver_telegram(update, msg, "problematic text")
+        update.effective_message.reply_document.assert_awaited_once()
+        # streaming_msg should be edited with a fallback note
+        assert msg.edit_text.await_count == 2  # first attempt + fallback note

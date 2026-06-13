@@ -175,3 +175,36 @@ class TestTickerFormatsElapsed:
         text = edit_fn.call_args_list[-1][0][0]
         assert "will cancel in" in text
         assert "40s" in text
+
+
+class TestTickerResilience:
+    async def test_ticker_survives_edit_failure(self):
+        """edit_fn raising an exception does not kill the ticker."""
+        call_count = [0]
+
+        async def flaky_edit(text):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise Exception("Telegram API error")
+            # subsequent calls succeed
+
+        await _run_ticker(flaky_edit, slow_threshold=0, update_interval=30,
+                          timeout_secs=0, warn_before_secs=60,
+                          cancel_after_sleeps=2,
+                          monotonic_values=[0.0, 30.0, 60.0])
+        # Ticker should have continued past the failure and called edit a second time
+        assert call_count[0] == 2
+
+    async def test_ticker_survives_all_edits_failing(self):
+        """Ticker keeps looping even if every edit_fn call fails."""
+        call_count = [0]
+
+        async def always_fail(text):
+            call_count[0] += 1
+            raise Exception("persistent failure")
+
+        await _run_ticker(always_fail, slow_threshold=0, update_interval=30,
+                          timeout_secs=0, warn_before_secs=60,
+                          cancel_after_sleeps=3,
+                          monotonic_values=[0.0, 30.0, 60.0, 90.0])
+        assert call_count[0] == 3

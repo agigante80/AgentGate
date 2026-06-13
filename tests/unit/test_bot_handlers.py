@@ -800,7 +800,7 @@ class TestBuildApp:
 
         with patch("src.bot.Application") as MockApp:
             mock_app_instance = MagicMock()
-            MockApp.builder.return_value.token.return_value.build.return_value = mock_app_instance
+            MockApp.builder.return_value.token.return_value.concurrent_updates.return_value.build.return_value = mock_app_instance
             build_app(settings, backend, _make_storage(), 0.0, NullAuditLog())
 
         # 13 CommandHandlers + 1 CallbackQueryHandler + 2 MessageHandlers = 17

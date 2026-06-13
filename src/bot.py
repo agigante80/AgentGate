@@ -23,7 +23,7 @@ from src.history import ConversationStorage, build_context as _build_context
 from src.redact import SecretRedactor
 from src.ai import factory as ai_factory
 from src import transcriber as transcriber_mod
-from src.platform.common import thinking_ticker, finalize_thinking, split_text
+from src.platform.common import thinking_ticker, finalize_thinking, split_text, strip_ansi
 from src.ready_msg import ai_label as _ai_label
 from src.commands.registry import register_command, COMMANDS  # noqa: F401
 from src.registry import platform_registry
@@ -34,6 +34,8 @@ logger = logging.getLogger(__name__)
 _TG_MAX_CHARS = 4096
 # Send at most this many sequential messages before falling back to a file
 _TG_MAX_CHUNKS = 4
+# Visual cursor appended during streaming; stripped on finalization
+_STREAMING_CURSOR = " ▌"
 
 
 # ── Pure helper functions (imported by tests) ───────────────────────────────
@@ -104,12 +106,12 @@ async def _stream_to_telegram(
                     display = redactor.redact(display)
                 if final_msg is None:
                     try:
-                        final_msg = await update.effective_message.reply_text(display + " ▌")
+                        final_msg = await update.effective_message.reply_text(display + _STREAMING_CURSOR)
                     except Exception:
                         logger.warning("Telegram: failed to create streaming reply; will retry at end")
                 else:
                     try:
-                        await final_msg.edit_text(display + " ▌")
+                        await final_msg.edit_text(display + _STREAMING_CURSOR)
                     except Exception:
                         logger.debug("Telegram edit skipped (rate-limited or unchanged)")
                 last_edit = now
@@ -131,6 +133,9 @@ async def _stream_to_telegram(
             await ticker
 
     final = accumulated
+    if final.endswith(_STREAMING_CURSOR):
+        final = final[: -len(_STREAMING_CURSOR)]
+    final = strip_ansi(final)
     if redactor:
         final = redactor.redact(final)
     elapsed = int(time.monotonic() - t_start)
@@ -194,13 +199,39 @@ async def _deliver_telegram(update: Update, streaming_msg, text: str) -> None:
         if i == 0 and streaming_msg is not None:
             try:
                 await streaming_msg.edit_text(chunk)
-            except Exception:
-                logger.debug("Telegram final message update skipped")
+            except Exception as exc:
+                logger.warning("Telegram final edit failed (%s), trying reply_text", exc)
+                try:
+                    await update.effective_message.reply_text(chunk)
+                except Exception as exc2:
+                    logger.warning("Telegram reply_text also failed (%s), sending as file", exc2)
+                    buf = io.BytesIO(text.encode())
+                    buf.name = "response.txt"
+                    with suppress(Exception):
+                        await streaming_msg.edit_text(
+                            f"⚠️ Message delivery failed ({len(text):,} chars). Sent as file."
+                        )
+                    try:
+                        await update.effective_message.reply_document(buf, caption="Full AI response")
+                    except Exception:
+                        logger.error("Telegram file fallback also failed for chunk 0")
+                    return
         else:
             try:
                 await update.effective_message.reply_text(chunk)
-            except Exception:
-                logger.warning("Failed to send Telegram chunk %d", i + 1)
+            except Exception as exc:
+                logger.warning("Failed to send Telegram chunk %d (%s), sending remainder as file", i + 1, exc)
+                # chunks from split_text concatenate losslessly back to the source text
+                remaining = "".join(chunks[i:])
+                buf = io.BytesIO(remaining.encode())
+                buf.name = "response.txt"
+                try:
+                    await update.effective_message.reply_document(
+                        buf, caption=f"Remaining response (chunks {i + 1}-{len(chunks)})"
+                    )
+                except Exception:
+                    logger.error("Telegram file fallback failed for chunk %d", i + 1)
+                return
 
 
 # ── Auth decorator ───────────────────────────────────────────────────────────
@@ -289,12 +320,18 @@ class _BotHandlers:
 
     async def _run_ai_pipeline(self, update: Update, text: str, chat_id: str) -> None:
         """Shared AI pipeline: build prompt → stream/send → save history."""
-        # In-flight guard — reject new prompt if a task is already running for this chat
+        # In-flight guard — reject new prompt if a task is already running for this chat.
+        # With concurrent_updates=True, multiple handlers can interleave at await points,
+        # so we register a sentinel Future immediately to prevent races.
         if chat_id in self._active_tasks and not self._active_tasks[chat_id].done():
             await update.effective_message.reply_text(
                 "⏳ A request is already in progress. Use `gate cancel` to stop it."
             )
             return
+
+        # Sentinel prevents a second message from passing the guard above while we await
+        sentinel = asyncio.get_running_loop().create_future()
+        self._active_tasks[chat_id] = sentinel
 
         key = text[:60]
         self._active_ai[key] = time.time()
@@ -310,11 +347,6 @@ class _BotHandlers:
             cfg = self._settings.bot
             if self._settings.bot.stream_responses:
                 # Streaming path — wrap in a task so gate cancel can interrupt it
-                if chat_id in self._active_tasks and not self._active_tasks[chat_id].done():
-                    await update.effective_message.reply_text(
-                        "⏳ A request is already in progress. Use `gate cancel` to stop it."
-                    )
-                    return
                 stream_task = asyncio.create_task(
                     _stream_to_telegram(
                         update, self._backend, prompt,
@@ -329,6 +361,8 @@ class _BotHandlers:
                     )
                 )
                 self._active_tasks[chat_id] = stream_task
+                if not sentinel.done():
+                    sentinel.set_result(None)
                 try:
                     timeout = cfg.ai_timeout_secs if cfg.ai_timeout_secs > 0 else None
                     response = await asyncio.wait_for(asyncio.shield(stream_task), timeout=timeout)
@@ -358,6 +392,8 @@ class _BotHandlers:
                 )
                 ai_task = asyncio.create_task(self._backend.send(prompt))
                 self._active_tasks[chat_id] = ai_task
+                if not sentinel.done():
+                    sentinel.set_result(None)
                 try:
                     timeout = cfg.ai_timeout_secs if cfg.ai_timeout_secs > 0 else None
                     response = await asyncio.wait_for(asyncio.shield(ai_task), timeout=timeout)
@@ -380,6 +416,7 @@ class _BotHandlers:
                 response = await self._services.shell.summarize_if_long(
                     response, self._backend
                 )
+                response = strip_ansi(response)
                 response = self._redactor.redact(response)
                 elapsed = int(time.monotonic() - t_start)
                 await finalize_thinking(msg.edit_text, elapsed, cfg.thinking_show_elapsed)
@@ -404,6 +441,11 @@ class _BotHandlers:
             )
         finally:
             self._active_ai.pop(key, None)
+            # Safety net: ensure sentinel is resolved and stale entries are cleaned up
+            if not sentinel.done():
+                sentinel.set_result(None)
+            if self._active_tasks.get(chat_id) is sentinel:
+                self._active_tasks.pop(chat_id, None)
 
     # ── Utility commands ──────────────────────────────────────────────────
 
@@ -778,7 +820,7 @@ class _BotHandlers:
 # ── App factory ──────────────────────────────────────────────────────────────
 
 def build_app(settings: Settings, backend: AICLIBackend, storage: ConversationStorage, start_time: float, audit: AuditLog, services=None) -> Application:
-    app = Application.builder().token(settings.telegram.bot_token).build()
+    app = Application.builder().token(settings.telegram.bot_token).concurrent_updates(True).build()
     h = _BotHandlers(settings, backend, storage, start_time, audit, services)
     p = _prefix(settings)
 
