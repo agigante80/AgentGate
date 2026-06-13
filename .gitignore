@@ -20,6 +20,9 @@ test-results.xml
 badges-out/
 htmlcov/
 
+# Claude Code: share agents/commands, keep local settings (permission allowlist) out of git
+.claude/settings.local.json
+
 # Env files
 .env
 *.env
