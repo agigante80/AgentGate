@@ -15,6 +15,9 @@ build/
 .ruff_cache/
 .coverage
 coverage.xml
+coverage.json
+test-results.xml
+badges-out/
 htmlcov/
 
 # Env files

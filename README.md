@@ -2,6 +2,19 @@
 
 **Vibe-code from anywhere. Orchestrate multiple AI agents on your projects.**
 
+<p align="center">
+  <a href="https://github.com/agigante80/AgentGate/releases"><img src="https://img.shields.io/github/v/release/agigante80/AgentGate?sort=semver" alt="Latest release"></a>
+  <a href="https://github.com/agigante80/AgentGate/actions/workflows/ci-cd.yml"><img src="https://github.com/agigante80/AgentGate/actions/workflows/ci-cd.yml/badge.svg?branch=main" alt="CI status"></a>
+  <a href="https://github.com/agigante80/AgentGate/blob/main/docs/TESTING.md"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/agigante80/AgentGate/badges/tests.json" alt="Tests"></a>
+  <a href="https://github.com/agigante80/AgentGate/blob/main/docs/TESTING.md"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/agigante80/AgentGate/badges/coverage.json" alt="Coverage"></a>
+  <a href="https://github.com/agigante80/AgentGate/blob/main/LICENSE"><img src="https://img.shields.io/github/license/agigante80/AgentGate" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/python-%3E%3D3.12-brightgreen?logo=python&logoColor=white" alt="Python >= 3.12">
+  <a href="https://hub.docker.com/r/agigante80/agentgate"><img src="https://img.shields.io/docker/pulls/agigante80/agentgate?logo=docker&logoColor=white" alt="Docker Hub pulls"></a>
+  <a href="https://hub.docker.com/r/agigante80/agentgate/tags"><img src="https://img.shields.io/docker/image-size/agigante80/agentgate/latest?logo=docker&logoColor=white" alt="Docker image size"></a>
+  <a href="https://github.com/agigante80/AgentGate/pkgs/container/agentgate"><img src="https://img.shields.io/badge/ghcr.io-agentgate-2496ED?logo=docker&logoColor=white" alt="Container image on GHCR"></a>
+  <a href="https://github.com/agigante80/AgentGate/stargazers"><img src="https://img.shields.io/github/stars/agigante80/AgentGate?style=social" alt="GitHub stars"></a>
+</p>
+
 Keep developing your project remotely with official AI CLIs (Claude, Copilot, Codex, Gemini) via Telegram or Slack — one Docker container per project, zero context switching. Run multiple specialised agents in the same workspace and let them collaborate automatically through built-in [multi-agent orchestration](docs/guides/multi-agent-slack.md).
 
 > ✅ Works with **Telegram** | ✅ Works with **Slack** | ✅ Tested on **Synology NAS**
@@ -533,6 +546,22 @@ See GitHub issue #24 (`AI Provider Explicit Validation`) for migration context.
 ```
 
 Update your `.env` or `docker-compose.yml` before upgrading to v1.1.0.
+
+---
+
+## 📊 Project Stats
+
+<p align="center">
+  <a href="https://github.com/agigante80/AgentGate/network/members"><img src="https://img.shields.io/github/forks/agigante80/AgentGate" alt="GitHub forks"></a>
+  <a href="https://github.com/agigante80/AgentGate/graphs/contributors"><img src="https://img.shields.io/github/contributors/agigante80/AgentGate" alt="Contributors"></a>
+  <a href="https://github.com/agigante80/AgentGate/issues"><img src="https://img.shields.io/github/issues/agigante80/AgentGate" alt="Open issues"></a>
+  <a href="https://github.com/agigante80/AgentGate/issues?q=is%3Aissue+is%3Aclosed"><img src="https://img.shields.io/github/issues-closed/agigante80/AgentGate" alt="Closed issues"></a>
+  <a href="https://github.com/agigante80/AgentGate/pulls"><img src="https://img.shields.io/github/issues-pr/agigante80/AgentGate" alt="Open pull requests"></a>
+  <a href="https://github.com/agigante80/AgentGate/graphs/commit-activity"><img src="https://img.shields.io/github/commit-activity/m/agigante80/AgentGate" alt="Commit activity"></a>
+  <a href="https://github.com/agigante80/AgentGate/commits/main"><img src="https://img.shields.io/github/last-commit/agigante80/AgentGate" alt="Last commit"></a>
+</p>
+
+> Release, CI, license, Python, Docker, and stars badges are in the badge row at the top of this README.
 
 ---
 
