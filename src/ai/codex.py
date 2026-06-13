@@ -20,8 +20,8 @@ _MAX_ERR_CHARS = 2_000  # truncate runaway error output sent back to the user
 class CodexBackend(SubprocessMixin, AICLIBackend):
     """Stateless-per-invocation backend using OpenAI's Codex CLI.
 
-    Each AgentGate message spawns a fresh `codex exec --full-auto --color never
-    --ephemeral --model <model> <prompt>` subprocess. Codex handles multi-step
+    Each AgentGate message spawns a fresh `codex exec --dangerously-bypass-approvals-and-sandbox
+    --color never --ephemeral --model <model> <prompt>` subprocess. Codex handles multi-step
     agentic execution within that single call (file edits, tool use, shell commands),
     but does NOT retain state across calls. AgentGate injects conversation history
     via build_prompt() (is_stateful = False pattern).

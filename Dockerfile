@@ -27,16 +27,16 @@ RUN ARCH=$(dpkg --print-architecture) && \
 ENV PATH="/usr/local/go/bin:$PATH"
 
 # GitHub Copilot CLI — pinned version (update via Dependabot)
-RUN npm install -g @github/copilot@1.0.5
+RUN npm install -g @github/copilot@1.0.61
 
 # OpenAI Codex CLI — pinned version (update via Dependabot)
-RUN npm install -g @openai/codex@0.114.0
+RUN npm install -g @openai/codex@0.139.0
 
 # Google Gemini CLI — pinned version (update via Dependabot)
-RUN npm install -g @google/gemini-cli@0.33.1
+RUN npm install -g @google/gemini-cli@0.46.0
 
 # Anthropic Claude CLI — pinned version (update via Dependabot)
-RUN npm install -g @anthropic-ai/claude-code@2.1.84
+RUN npm install -g @anthropic-ai/claude-code@2.1.177
 
 # Python dependencies — installed as root so packages are system-wide and
 # accessible regardless of which UID the container runs as at runtime.

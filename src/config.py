@@ -148,7 +148,7 @@ class AIConfig(BaseSettings):
 
     # CLI options passthrough — passed verbatim to the backend CLI subprocess.
     # Empty (default) = each backend applies its own full-auto defaults:
-    #   copilot → --allow-all  |  codex → --approval-mode full-auto
+    #   copilot → --allow-all  |  codex → --dangerously-bypass-approvals-and-sandbox
     # Non-empty = replaces the defaults entirely; must include full-auto flags if needed.
     # Ignored (with a warning) when AI_CLI=api (no subprocess).
     ai_cli_opts: str = ""

@@ -55,7 +55,9 @@ updates:
       - dependencies
       - docker
 
-  # npm globals (@github/copilot, @openai/codex) — manifest in package.json
+  # npm globals (@github/copilot, @openai/codex, @google/gemini-cli,
+  # @anthropic-ai/claude-code) — manifest in package.json, must stay in sync
+  # with the Dockerfile (enforced by tests/unit/test_dockerfile_deps_sync.py)
   - package-ecosystem: npm
     directory: /
     schedule:
@@ -64,6 +66,13 @@ updates:
       time: "06:00"
       timezone: UTC
     open-pull-requests-limit: 5
+    groups:
+      ai-cli:
+        patterns:
+          - "@github/copilot"
+          - "@openai/codex"
+          - "@google/gemini-cli"
+          - "@anthropic-ai/claude-code"
     labels:
       - dependencies
       - npm
