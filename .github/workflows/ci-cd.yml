@@ -283,7 +283,7 @@ jobs:
       contents: write
     steps:
       - name: 📥 Download badge JSON
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: badges-json
           path: badges-out
@@ -301,7 +301,9 @@ jobs:
           cd "$tmp"
           if git ls-remote --exit-code --heads origin badges >/dev/null 2>&1; then
             git fetch --depth 1 origin badges
-            git checkout badges
+            # fetched ref lives at FETCH_HEAD (a shallow clone of main has no
+            # origin/badges tracking ref), so create the local branch from it.
+            git checkout -B badges FETCH_HEAD
           else
             git checkout --orphan badges
             git rm -rf . >/dev/null 2>&1 || true
