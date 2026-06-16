@@ -26,17 +26,13 @@ RUN ARCH=$(dpkg --print-architecture) && \
     curl -fsSL "https://go.dev/dl/go1.22.4.linux-${ARCH}.tar.gz" | tar -C /usr/local -xz
 ENV PATH="/usr/local/go/bin:$PATH"
 
-# GitHub Copilot CLI — pinned version (update via Dependabot)
-RUN npm install -g @github/copilot@1.0.61
-
-# OpenAI Codex CLI — pinned version (update via Dependabot)
-RUN npm install -g @openai/codex@0.139.0
-
-# Google Gemini CLI — pinned version (update via Dependabot)
-RUN npm install -g @google/gemini-cli@0.46.0
-
-# Anthropic Claude CLI — pinned version (update via Dependabot)
-RUN npm install -g @anthropic-ai/claude-code@2.1.177
+# Agent CLIs (Copilot, Codex, Gemini, Claude) — versions are the SINGLE SOURCE
+# OF TRUTH in package.json, which Dependabot updates (the `ai-cli` group). This
+# installs exactly those pins, so there is no Dockerfile↔manifest drift to keep
+# in sync. package.json is copied to /tmp only for the install, then removed.
+COPY package.json /tmp/package.json
+RUN npm install -g $(node -p "Object.entries(require('/tmp/package.json').dependencies).map(([k,v]) => k + '@' + v).join(' ')") \
+    && rm /tmp/package.json
 
 # ── Telemetry default-deny (privacy / data-minimisation) — see issue #83 ──────
 # scrubbed_env() strips AgentGate credentials but does not disable a CLI's own
