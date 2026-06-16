@@ -3,9 +3,9 @@
   "private": true,
   "description": "Dependabot manifest only — not installed in production. Keep versions in sync with Dockerfile.",
   "dependencies": {
-    "@github/copilot": "1.0.61",
-    "@openai/codex": "0.139.0",
+    "@github/copilot": "1.0.63",
+    "@openai/codex": "0.140.0",
     "@google/gemini-cli": "0.46.0",
-    "@anthropic-ai/claude-code": "2.1.177"
+    "@anthropic-ai/claude-code": "2.1.178"
   }
 }
