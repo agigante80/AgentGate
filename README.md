@@ -2,6 +2,19 @@
 
 **Vibe-code from anywhere. Orchestrate multiple AI agents on your projects.**
 
+<p align="center">
+  <a href="https://github.com/agigante80/AgentGate/releases"><img src="https://img.shields.io/github/v/release/agigante80/AgentGate?sort=semver" alt="Latest release"></a>
+  <a href="https://github.com/agigante80/AgentGate/actions/workflows/ci-cd.yml"><img src="https://github.com/agigante80/AgentGate/actions/workflows/ci-cd.yml/badge.svg?branch=main" alt="CI status"></a>
+  <a href="https://github.com/agigante80/AgentGate/blob/main/docs/TESTING.md"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/agigante80/AgentGate/badges/tests.json" alt="Tests"></a>
+  <a href="https://github.com/agigante80/AgentGate/blob/main/docs/TESTING.md"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/agigante80/AgentGate/badges/coverage.json" alt="Coverage"></a>
+  <a href="https://github.com/agigante80/AgentGate/blob/main/LICENSE"><img src="https://img.shields.io/github/license/agigante80/AgentGate" alt="License: MIT"></a>
+  <img src="https://img.shields.io/badge/python-%3E%3D3.12-brightgreen?logo=python&logoColor=white" alt="Python >= 3.12">
+  <a href="https://hub.docker.com/r/agigante80/agentgate"><img src="https://img.shields.io/docker/pulls/agigante80/agentgate?logo=docker&logoColor=white" alt="Docker Hub pulls"></a>
+  <a href="https://hub.docker.com/r/agigante80/agentgate/tags"><img src="https://img.shields.io/docker/image-size/agigante80/agentgate/latest?logo=docker&logoColor=white" alt="Docker image size"></a>
+  <a href="https://github.com/agigante80/AgentGate/pkgs/container/agentgate"><img src="https://img.shields.io/badge/ghcr.io-agentgate-2496ED?logo=docker&logoColor=white" alt="Container image on GHCR"></a>
+  <a href="https://github.com/agigante80/AgentGate/stargazers"><img src="https://img.shields.io/github/stars/agigante80/AgentGate?style=social" alt="GitHub stars"></a>
+</p>
+
 Keep developing your project remotely with official AI CLIs (Claude, Copilot, Codex, Gemini) via Telegram or Slack — one Docker container per project, zero context switching. Run multiple specialised agents in the same workspace and let them collaborate automatically through built-in [multi-agent orchestration](docs/guides/multi-agent-slack.md).
 
 > ✅ Works with **Telegram** | ✅ Works with **Slack** | ✅ Tested on **Synology NAS**
@@ -195,7 +208,7 @@ Copy `.env.example` — it documents every variable with examples.
 | `CODEX_MODEL` | — | Per-backend model for `codex`; falls back to `AI_MODEL` then `o3` |
 | `CLAUDE_MODEL` | — | Per-backend model for `claude`; falls back to `AI_MODEL` when empty |
 | `AI_BASE_URL` | — | Base URL for Ollama or compatible endpoints |
-| `AI_CLI_OPTS` | — | Raw options passed verbatim to the CLI subprocess. **Empty (default) = full-auto per backend** (Copilot: `--allow-all`; Codex: `--approval-mode full-auto`; Gemini: `--non-interactive`). **When set, replaces the defaults entirely** — must include full-auto flags if still needed (e.g. `--allow-all --allow-url github.com`). Ignored (with a warning) when `AI_CLI=api`. |
+| `AI_CLI_OPTS` | — | Raw options passed verbatim to the CLI subprocess. **Empty (default) = full-auto per backend** (Copilot: `--allow-all`; Codex: `--dangerously-bypass-approvals-and-sandbox`; Gemini: `--non-interactive`). **When set, replaces the defaults entirely** — must include full-auto flags if still needed (e.g. `--allow-all --allow-url github.com`). Ignored (with a warning) when `AI_CLI=api`. |
 | `COPILOT_SKILLS_DIRS` | — | Colon-separated paths to extra Copilot skills directories (mount via Docker volume, e.g. `/skills`) |
 | `SYSTEM_PROMPT_FILE` | — | Path to a markdown file loaded as the AI system message (`AI_CLI=api` only). Must not be inside `REPO_DIR`; mount via a separate Docker volume. |
 
@@ -485,6 +498,29 @@ Use this when you have a **Claude Pro or Max subscription** and want to skip the
 - Non-root user inside container
 - Fine-grained GitHub token scoped to one repo
 
+### Telemetry (default-deny)
+
+The image ships with a **default-deny telemetry posture** for the bundled agent CLIs (privacy / data-minimisation). The only CLI that collects usage data on by default is the Gemini CLI (`privacy.usageStatisticsEnabled`, **anonymised usage metrics — not prompt content**); it is disabled image-wide. The baked-in controls are:
+
+| Control (Dockerfile `ENV` / file) | Effect |
+|---|---|
+| `DO_NOT_TRACK=1` | Cross-vendor opt-out signal |
+| `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` | Claude CLI: disables telemetry, error reporting, and in-CLI auto-update checks (the CLI version is pinned in the image) |
+| `GEMINI_CLI_SYSTEM_SETTINGS_PATH=/etc/gemini-cli/settings.json` (+ that file with `{"privacy":{"usageStatisticsEnabled":false}}`) | Gemini CLI: disables usage statistics via the **system** settings tier (highest precedence, can't be silently re-enabled by a user file) |
+
+No OTLP exporter endpoint is configured, so the Codex/Copilot OpenTelemetry instrumentation does not export anywhere.
+
+**To opt back in** (consenting operators), override at `docker run`:
+
+```bash
+# Re-enable Gemini usage stats: point at your own settings file (or bind-mount over the baked one)
+-e GEMINI_CLI_SYSTEM_SETTINGS_PATH=/path/to/your-settings.json
+# Re-enable Claude telemetry
+-e CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC= -e CLAUDE_CODE_ENABLE_TELEMETRY=1
+# Clear the cross-vendor signal
+-e DO_NOT_TRACK=
+```
+
 ---
 
 ## Upgrading from v0.x to v1.0
@@ -510,6 +546,22 @@ See GitHub issue #24 (`AI Provider Explicit Validation`) for migration context.
 ```
 
 Update your `.env` or `docker-compose.yml` before upgrading to v1.1.0.
+
+---
+
+## 📊 Project Stats
+
+<p align="center">
+  <a href="https://github.com/agigante80/AgentGate/network/members"><img src="https://img.shields.io/github/forks/agigante80/AgentGate" alt="GitHub forks"></a>
+  <a href="https://github.com/agigante80/AgentGate/graphs/contributors"><img src="https://img.shields.io/github/contributors/agigante80/AgentGate" alt="Contributors"></a>
+  <a href="https://github.com/agigante80/AgentGate/issues"><img src="https://img.shields.io/github/issues/agigante80/AgentGate" alt="Open issues"></a>
+  <a href="https://github.com/agigante80/AgentGate/issues?q=is%3Aissue+is%3Aclosed"><img src="https://img.shields.io/github/issues-closed/agigante80/AgentGate" alt="Closed issues"></a>
+  <a href="https://github.com/agigante80/AgentGate/pulls"><img src="https://img.shields.io/github/issues-pr/agigante80/AgentGate" alt="Open pull requests"></a>
+  <a href="https://github.com/agigante80/AgentGate/graphs/commit-activity"><img src="https://img.shields.io/github/commit-activity/m/agigante80/AgentGate" alt="Commit activity"></a>
+  <a href="https://github.com/agigante80/AgentGate/commits/main"><img src="https://img.shields.io/github/last-commit/agigante80/AgentGate" alt="Last commit"></a>
+</p>
+
+> Release, CI, license, Python, Docker, and stars badges are in the badge row at the top of this README.
 
 ---
 

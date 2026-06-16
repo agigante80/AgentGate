@@ -154,7 +154,7 @@ jobs:
         run: pip install ruff
 
       - name: 🔍 Run ruff
-        run: ruff check src/
+        run: ruff check src/ scripts/
 
       - name: 📋 Lint summary
         if: always()
@@ -222,6 +222,10 @@ jobs:
     timeout-minutes: 15
     needs: version
     if: ${{ github.event.inputs.skip_tests != 'true' }}
+    # Least privilege: the test job runs PR code and must not be able to push.
+    # The badge publish happens in a separate `badges` job with contents:write.
+    permissions:
+      contents: read
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v6
@@ -237,7 +241,11 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: 🧪 Run tests with coverage
-        run: pytest tests/ -v --tb=short --cov=src --cov-report=xml --cov-fail-under=60
+        run: pytest tests/ -v --tb=short --cov=src --cov-report=xml --cov-report=json --junitxml=test-results.xml --cov-fail-under=60
+
+      - name: 🏷️ Generate badge JSON
+        if: always()  # run even if --cov-fail-under tripped the step above; inputs already written
+        run: python scripts/gen_badges.py ./badges-out test-results.xml coverage.json
 
       - name: 📤 Upload coverage report
         if: always()
@@ -247,12 +255,67 @@ jobs:
           path: coverage.xml
           retention-days: 7
 
+      - name: 📤 Upload badge JSON
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: badges-json
+          path: badges-out/
+          retention-days: 7
+
       - name: 📋 Test summary
         if: always()
         run: |
           echo "### 🧪 Test Results" >> $GITHUB_STEP_SUMMARY
           echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
           echo "- **Version**: \`${{ needs.version.outputs.version }}\`" >> $GITHUB_STEP_SUMMARY
+
+  # --------------------------------------------------------------------------
+  # Job 3b: Publish README badges (main only) — pushes shields endpoint JSON
+  # to the orphan `badges` branch. Not in the workflow trigger list, so no loop.
+  # --------------------------------------------------------------------------
+  badges:
+    name: Publish badges
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main' && needs.test.result == 'success'
+    permissions:
+      contents: write
+    steps:
+      - name: 📥 Download badge JSON
+        uses: actions/download-artifact@v7
+        with:
+          name: badges-json
+          path: badges-out
+
+      - name: 🚀 Publish to badges branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tmp=$(mktemp -d)
+          remote="https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+          # Single clone of the default branch into an empty dir (always succeeds),
+          # then fetch the badges branch if it exists, else create it as an orphan.
+          git clone --depth 1 "$remote" "$tmp"
+          cd "$tmp"
+          if git ls-remote --exit-code --heads origin badges >/dev/null 2>&1; then
+            git fetch --depth 1 origin badges
+            git checkout badges
+          else
+            git checkout --orphan badges
+            git rm -rf . >/dev/null 2>&1 || true
+          fi
+          cp "$GITHUB_WORKSPACE"/badges-out/tests.json "$GITHUB_WORKSPACE"/badges-out/coverage.json .
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add tests.json coverage.json
+          if git diff --cached --quiet; then
+            echo "Badges unchanged — nothing to publish."
+            exit 0
+          fi
+          git commit -m "chore(badges): update tests/coverage [skip ci]"
+          git push origin badges
 
   # --------------------------------------------------------------------------
   # Job 4: Build & Publish Docker Image
@@ -377,7 +440,7 @@ jobs:
           cache-from: type=gha,scope=${{ github.ref_name }}
 
       - name: 🔒 Run Trivy vulnerability scan
-        uses: aquasecurity/trivy-action@0.35.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: agentgate:scan
           format: sarif

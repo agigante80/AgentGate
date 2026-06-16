@@ -9,8 +9,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-# Lint
-ruff check src/
+# Lint (CI lints both src/ and scripts/)
+ruff check src/ scripts/
 
 # Lint docs (checks env var coverage in README, .env.example, docker-compose.yml.example)
 python scripts/lint_docs.py
@@ -38,25 +38,28 @@ AgentGate is an async Python 3.12+ bot (Telegram or Slack) that acts as a gatewa
 
 ### Startup flow (`src/main.py`)
 
-Validate config -> clone GitHub repo -> auto-install deps -> init SQLite history/audit DBs -> build `Services` dataclass -> create AI backend -> start bot -> send Ready message -> write `/tmp/healthy`.
+Validate config -> clone GitHub repo -> configure git auth -> install commit-msg hook -> `_ensure_claude_settings()` (writes `REPO_DIR/.claude/settings.json` with full permissions when `AI_CLI=claude`, to skip the permission-bootstrap prompt) -> auto-install deps -> init SQLite history/audit DBs -> build `Services` dataclass -> create AI backend -> start bot -> send Ready message -> write `/tmp/healthy`.
 
 ### Config (`src/config.py`)
 
-Pydantic `BaseSettings` split into sub-configs: `TelegramConfig`, `SlackConfig`, `GitHubConfig`, `AIConfig`, `BotConfig`, `VoiceConfig`, `StorageConfig`, `LogConfig`. All values from env vars. Every sub-config implements `secret_values() -> list[str]` for dynamic secret redaction (`SecretProvider` protocol -- add this method to any new sub-config). Module-level `REPO_DIR` and `DB_PATH` constants -- always import these instead of hardcoding paths.
+Pydantic `BaseSettings` split into sub-configs: `TelegramConfig`, `SlackConfig`, `GitHubConfig`, `AIConfig`, `BotConfig`, `VoiceConfig`, `StorageConfig`, `AuditConfig`, `LogConfig`. `AIConfig` nests backend-specific configs: `CopilotAIConfig`, `CodexAIConfig`, `ClaudeAIConfig`, `DirectAIConfig`. All values from env vars. Every sub-config implements `secret_values() -> list[str]` for dynamic secret redaction (`SecretProvider` protocol -- add this method to any new sub-config). Module-level `REPO_DIR`, `DB_PATH`, and `AUDIT_DB_PATH` constants -- always import these instead of hardcoding paths.
 
 ### AI backends (`src/ai/`)
 
 - **`adapter.py`**: `AICLIBackend` ABC with `send()`, `stream()`, `clear_history()`, `close()`, and `is_stateful` flag. `SubprocessMixin` for backends that spawn child processes in `REPO_DIR`.
+- **`session.py`**: `CopilotSession` (a `SubprocessMixin`) wraps the non-interactive `copilot -p <prompt> --silent [opts|--allow-all]` subprocess for `CopilotBackend` -- avoids PTY/TUI complexity and the folder-trust dialog. `clear_history()` recreates the session.
 - **Stateless** (history injected via `build_prompt()`): `CopilotBackend`, `CodexBackend`, `GeminiBackend`, `ClaudeBackend`
+  - `GeminiBackend`: spawns `gemini -p <prompt> --yolo -o text`. `--yolo` auto-approves all tool calls; Docker isolation is the containment boundary. Strips `--approval-mode` from `AI_CLI_OPTS` (conflicts with `--yolo`).
+  - `ClaudeBackend`: spawns `claude -p <prompt> --dangerously-skip-permissions --output-format text`. Docker isolation is the containment boundary. `--output-format text` prevents JSON/ANSI decorations.
 - **Stateful** (maintains native message list): `DirectAPIBackend` (OpenAI/Anthropic/Ollama). Reads `SYSTEM_PROMPT` or `SYSTEM_PROMPT_FILE` for system message.
 - **`factory.py`**: Selects backend via `AI_CLI` env var (`copilot` | `codex` | `api` | `gemini` | `claude`). Backends registered with `@backend_registry.register("key")` and lazy-loaded via `_load_backends()`.
-- **Stateful vs stateless**: if `backend.is_stateful` is `True`, raw prompt is sent directly. If `False`, last `HISTORY_TURNS` (default 10) exchanges are prepended via `history.build_context()`.
+- **Stateful vs stateless**: if `backend.is_stateful` is `True`, raw prompt is sent directly. If `False`, last `HISTORY_TURNS` (default 10) exchanges are prepended via `history.build_context()`. `HISTORY_TURNS=0` disables injection but history is still stored.
 
 ### Platform layer (`src/platform/`)
 
-- `common.py`: Shared helpers -- `build_prompt()`, `save_to_history()`, `thinking_ticker()`, `split_text()`, `is_allowed_slack()`
-- `bot.py`: Telegram bot with `@_requires_auth` decorator on all handlers. Streaming edits throttled by `STREAM_THROTTLE_SECS` (default 1.0s).
-- `slack.py`: Slack bot using `slack-bolt[async]` Socket Mode. Supports multi-agent features (`TRUSTED_AGENT_BOT_IDS`), delegation blocks (`[DELEGATE: ...]`), Block Kit thinking placeholders, and thread replies (`SLACK_THREAD_REPLIES`)
+- `common.py`: Shared helpers -- `build_prompt()`, `save_to_history()`, `thinking_ticker()`, `split_text()`, `is_allowed_slack()`, `strip_ansi()` (strips ANSI escape sequences from subprocess output before delivering to users). `thinking_ticker()` swallows `edit_fn` exceptions (logged at DEBUG) so the ticker keeps running if a single update fails.
+- `bot.py`: Telegram bot with `@_requires_auth` decorator on all handlers. Streaming edits throttled by `STREAM_THROTTLE_SECS` (default 1.0s). `_deliver_telegram()` uses a three-level fallback: `edit_text → reply_text → reply_document` file upload (last resort when rate-limited or oversized). Uses `concurrent_updates=True`, so handlers interleave at `await` points -- the in-flight guard uses a sentinel `Future` registered immediately to prevent race conditions.
+- `slack.py`: Slack bot using `slack-bolt[async]` Socket Mode. Supports multi-agent features (`TRUSTED_AGENT_BOT_IDS`), delegation blocks (`[DELEGATE: ...]`), Block Kit thinking placeholders, and thread replies (`SLACK_THREAD_REPLIES`). Multi-block delivery thresholds: ≤3000 chars → single message edit; 3001–20000 chars → Block Kit multi-section; >20000 chars → `files.upload_v2` snippet.
 
 Platform selected by `PLATFORM` env var (default `telegram`).
 
@@ -91,18 +94,21 @@ Markdown files defining specialized agent roles (`dev-agent.md`, `docs-agent.md`
 
 ### Docs (`docs/`)
 
-`docs/guides/` has practical how-to guides (Slack setup, multi-agent, logging, versioning). `lint_docs.py` enforces env var documentation sync between `src/config.py`, `README.md`, `.env.example`, and `docker-compose.yml.example`.
+`docs/guides/` has practical how-to guides (Slack setup, multi-agent, logging, versioning). `lint_docs.py` enforces env var documentation sync between `src/config.py`, `README.md`, `.env.example`, and `docker-compose.yml.example`. `scripts/gen_badges.py` turns the CI pytest/coverage output into shields.io `endpoint` JSON for the README Tests/Coverage badges (published to the orphan `badges` branch — see CI/CD).
 
 ## Key Conventions
 
 - **Secret redaction**: Always pass `SecretRedactor` to `run_shell()` and call `redactor.redact()` on any text going back to users.
+- **Redaction order**: Call `redactor.redact()` BEFORE passing text to `history.save()` or `audit.record()` — the storage/audit layers do not redact.
+- **Subprocess env scrubbing**: Use `scrubbed_env()` from `executor.py` when spawning subprocesses directly -- it strips all AgentGate credential env vars so they don't leak into child processes.
 - **Git ref safety**: Always use `executor.sanitize_git_ref(ref)` before interpolating user input into git commands.
 - **Adding an AI backend**: Subclass `AICLIBackend`, set `is_stateful`, implement `send()`. Override `stream()` for true streaming, `close()` if holding a process. Decorate with `@backend_registry.register("key")`, add to `_load_backends()` in `factory.py`. Use `SubprocessMixin` if spawning child processes.
 - **New config values**: Add to appropriate sub-config in `src/config.py`. Must implement `secret_values()`. Update `.env.example` and `README.md` -- `lint_docs.py` enforces this.
 - **New bot commands**: Implement `cmd_<name>` in both `bot.py` and `slack.py` with `@register_command()`. Symmetry is enforced by CI.
 - **Auth guards**: Telegram handlers use `@_requires_auth`. Slack handlers call `self._is_allowed()` early.
-- **Docker paths**: Always use `REPO_DIR` and `DB_PATH` from `src/config.py`.
+- **Docker paths**: Always use `REPO_DIR`, `DB_PATH`, and `AUDIT_DB_PATH` from `src/config.py`.
 - **System prompt file**: `SYSTEM_PROMPT_FILE` must NOT point inside `REPO_DIR` (enforced in `factory.py`).
+- **Telemetry default-deny**: the `Dockerfile` disables bundled-CLI usage telemetry (`DO_NOT_TRACK=1`, `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, and a `/etc/gemini-cli/settings.json` with `usageStatisticsEnabled:false` via `GEMINI_CLI_SYSTEM_SETTINGS_PATH`). Don't set an `OTEL_EXPORTER_OTLP_ENDPOINT` (its absence keeps codex/copilot OTEL telemetry from exporting). `tests/unit/test_dockerfile_telemetry.py` guards this.
 
 ## Testing
 
@@ -113,7 +119,9 @@ Markdown files defining specialized agent roles (`dev-agent.md`, `docs-agent.md`
 
 ## CI/CD (`.github/workflows/ci-cd.yml`)
 
-Single pipeline: `version` -> `lint` + `test` (parallel) -> `docker-publish` + `security-scan` -> `release` -> `summary`. On `develop`: publishes `:develop` Docker tag. On `main`: version-bump check (VERSION file must be bumped), publishes `:latest`, creates GitHub Release. Multi-platform builds (amd64 + arm64). `workflow_dispatch` supports `skip_tests` and `skip_docker_publish` inputs for emergency deployments.
+Single pipeline: `version` -> `lint` + `test` (parallel) -> `docker-publish` + `security-scan` -> `release` -> `summary`. Images publish to **both GHCR (`ghcr.io/agigante80/agentgate`) and Docker Hub (`agigante80/agentgate`)**. On `develop`: publishes `:develop` Docker tag. On `main`: version-bump check (VERSION file must be bumped vs the latest `v*` tag), publishes `:latest`, creates GitHub Release. Multi-platform builds (amd64 + arm64). `workflow_dispatch` supports `skip_tests` and `skip_docker_publish` inputs for emergency deployments.
+
+The `test` job runs `pytest ... --cov-report=json --junitxml` and generates badge JSON via `scripts/gen_badges.py`; a dedicated **`badges` job** (main only, on test success) publishes `tests.json`/`coverage.json` to the root of an orphan **`badges` branch** for the README shields.io endpoint badges. That branch is intentionally **not** in the workflow trigger list (no CI loop), and the publish job carries a job-level `contents: write` while the `test` job is pinned to `contents: read`.
 
 ## Common Extension Patterns
 
