@@ -4,8 +4,8 @@
   "description": "Single source of truth for the agent-CLI versions. Dependabot (ai-cli group) updates these; the Dockerfile installs exactly these pins via npm install -g.",
   "dependencies": {
     "@github/copilot": "1.0.63",
-    "@openai/codex": "0.140.0",
-    "@google/gemini-cli": "0.46.0",
-    "@anthropic-ai/claude-code": "2.1.178"
+    "@openai/codex": "0.141.0",
+    "@google/gemini-cli": "0.47.0",
+    "@anthropic-ai/claude-code": "2.1.185"
   }
 }
