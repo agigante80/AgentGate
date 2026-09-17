@@ -1,0 +1,12 @@
+# Things this project has decided it may show. Tracked and public on purpose.
+# Keys: root, prefix, email (public scanner); skip (both).
+# NEVER put a private NAME here — the file is public, and a name would be an index.
+root proj
+# README.md:353, docker-compose.yml.example:19: placeholder segment in setup examples
+prefix /home/me
+# docs/guides/multi-agent-slack.md:585: placeholder segment in a setup guide
+prefix /home/you
+# src/ai/codex.py:69: generic tool root
+root .codex
+# tests/unit/test_redact.py:120: redaction-test fixture string that only looks like an email
+email password@github.com
